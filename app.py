@@ -38,9 +38,43 @@ login_manager.init_app(server)
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.LUX, dbc.icons.BOOTSTRAP], suppress_callback_exceptions=True, assets_folder='assets')
 
 # ... (Constants remain unchanged) ...
-SECTORS = { 'Technology': ['NVDA','MSFT','AVGO','TSM','ORCL','PLTR','ASML','AMD','SAP','CSCO','IBM','CRM','MU','SHOP','UBER','ANET','APP','NOW','INTU','AMAT','LRCX','QCOM','ARM','INTC','TXN','ACN','APH','ADBE','PANW','KLAC','CRWD','ADI','DELL','CDNS','MSTR','SNPS','SNOW','MSI','NET','MRVL','CRWV','GLW','INFY','FI','ADSK','FTNT','WDAY','DDOG','NXPI','ZS','GRMN','STX','XYZ','MPWR','WDC','FICO','UI','TEAM','ALAB','MCHP','HPE','CTSH','SMCI','FIG','PSTG','NOK','CLS','WIT','ERIC','KEYS','BR','TDY','STM','TTD','MDB','CYBR','ZM','ASTS','VRSN','LDOS','CRDO','ASX','HPQ','PTC','HUBS','GRAB','AFRM','NTAP','CIEN','TYL','SATS','FLEX','CHKP','TER','IONQ','IOT','JBL','TOST','GWRE'], 'Consumer Cyclical': ['AMZN', 'TSLA', 'HD', 'MCD', 'NKE', 'SBUX', 'LOW', 'BKNG', 'TJX', 'MAR', 'GM', 'F', 'CMG', 'HLT', 'ROST', 'YUM'], 'Financials': ['JPM', 'BRK-B', 'V', 'MA', 'BAC', 'GS', 'MS', 'WFC', 'AXP', 'BLK', 'SPGI', 'CB', 'PNC', 'C', 'USB', 'SCHW'], 'Energy': ['XOM', 'CVX', 'SHEL', 'TTE', 'COP', 'SLB', 'EOG', 'PXD', 'OXY', 'MPC'] }
-INDEX_TICKER_TO_NAME = { 'XLK': 'US Tech Giants (XLK)', 'SOXX': 'Semiconductors (SOXX)', 'SKYY': 'Cloud Computing (SKYY)', 'XLF': 'Financials (XLF)', 'XLV': 'Healthcare (XLV)', 'XRT': 'US Retail (XRT)', 'HERO': 'Gaming (HERO)', 'XLE': 'Energy (XLE)', '^GSPC': 'S&P 500 Index', '^NDX': 'NASDAQ 100 Index' }
-SECTOR_TO_INDEX_MAPPING = { 'Technology': ['XLK', 'SOXX', 'SKYY'], 'Financials': ['XLF'], 'Health Services': ['XLV'], 'Consumer Cyclical': ['XRT', 'HERO'], 'Energy': ['XLE'] }
+SECTORS = {
+    'Technology': ['MSFT', 'NVDA', 'AVGO', 'CRM', 'AMD', 'QCOM', 'ORCL', 'ADBE', 'ACN', 'INTC', 'IBM', 'CSCO', 'AMAT', 'UBER', 'NOW', 'INTU', 'LRCX', 'APH', 'ADI', 'PANW', 'MU', 'SNPS', 'CDNS', 'KLAC', 'ROP', 'DELL', 'ANET', 'MCHP', 'FTNT', 'TEL', 'IT', 'CTSH', 'SNOW', 'MSI', 'PAYX', 'ADSK', 'KEYS', 'CRWD', 'GLW', 'HPE', 'HPQ', 'CDW', 'FICO', 'TER', 'STX', 'ANSS', 'TRMB', 'VRSN', 'ZBRA', 'ENET', 'TDY', 'WDC', 'JBL', 'EXC', 'UI', 'NTAP', 'SMCI', 'GPN', 'PTC', 'FFIV', 'FLT', 'GRMN', 'DXC', 'FIS', 'AKAM', 'KEYS', 'BR', 'MDB', 'DDOG', 'NET', 'TEAM', 'ZS', 'OKTA', 'PLTR', 'SHOP', 'SQ', 'ARM', 'WDAY', 'HUBS', 'ZM', 'EPAM', 'APP', 'AFRM', 'IOT', 'S', 'GEN', 'CHKP', 'DT', 'VEEV', 'FTV', 'TOST', 'DOCN', 'UIPATH', 'PATH', 'AI', 'Z', 'GTLB', 'RBLX', 'MSTR'],
+    'Consumer Cyclical': ['AMZN', 'TSLA', 'HD', 'MCD', 'LOW', 'SBUX', 'BKNG', 'TJX', 'MAR', 'CMG', 'GM', 'F', 'ROST', 'HLT', 'YUM', 'ORLY', 'AZO', 'LVS', 'CPRT', 'NKE', 'CCL', 'RCL', 'DRI', 'GRMN', 'ULTA', 'LEN', 'DHI', 'TGT', 'EBAY', 'EXPE', 'POOL', 'WYN', 'PHM', 'KMX', 'BBY', 'WYNN', 'MGM', 'ETSY', 'LULU', 'TPR', 'CZR', 'NVR', 'DPZ', 'RL', 'VFC', 'WHR', 'HAS', 'MAT', 'MHK', 'APTV', 'GPC', 'LKQ', 'BWA', 'KDP', 'MNST', 'HOG', 'PENN', 'DKS', 'FL', 'BBWI', 'RH', 'WYND', 'CHS', 'AAP', 'LEG', 'GPS', 'JWN', 'M', 'KSS', 'TCOM', 'TRIP', 'SNA', 'SWK', 'PAG', 'AN', 'RUSHA', 'SAH', 'ABG', 'CWH', 'GNTX', 'LEA', 'VC', 'SON', 'TPX', 'WGO', 'THO'],
+    'Financials': ['BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS', 'BLK', 'AXP', 'SPGI', 'SCHW', 'CB', 'PNC', 'C', 'AON', 'MMC', 'USB', 'ICE', 'TROW', 'COF', 'MET', 'PRU', 'AIG', 'TRV', 'ALL', 'CME', 'DFS', 'PGR', 'WRB', 'MCO', 'PYPL', 'FISV', 'SQ', 'ACGL', 'RE', 'AMP', 'AJG', 'BEN', 'IVZ', 'L', 'NTRS', 'STT', 'TFC', 'ZION', 'FITB', 'KEY', 'HBAN', 'RF', 'CFG', 'CMA', 'MTB', 'BAC', 'GS', 'MS', 'JPM', 'C', 'WFC', 'USB', 'PNC', 'TFC', 'COF', 'BK', 'STT', 'NTRS', 'AMP', 'AXP', 'DFS', 'MA', 'V', 'PYPL', 'FISV', 'GPN', 'FLT', 'SQ', 'AFRM', 'HOOD', 'COIN', 'CBOE', 'NDAQ', 'MKTX', 'TRU', 'EFX', 'FDS', 'AFL', 'CINF', 'HIG', 'LNC', 'UNM'],
+    'Energy': ['XOM', 'CVX', 'SHEL', 'COP', 'SLB', 'EOG', 'PXD', 'OXY', 'MPC', 'VLO', 'WMB', 'KMI', 'PSX', 'HAL', 'DVN', 'HES', 'OKE', 'BKR', 'FANG', 'TRGP', 'CTRA', 'MRO', 'APA', 'PBR', 'EQT', 'ENB', 'TRP', 'SU', 'CNQ', 'IMO', 'CVE', 'PBA', 'ET', 'EPD', 'PAA', 'MPLX', 'LNG', 'NOV', 'FTI', 'OII', 'HP', 'RIG', 'VET', 'MUR', 'NFG', 'AR', 'RRC', 'SWN', 'CHK', 'CNX', 'ARCH', 'BTU', 'CEIX', 'METC', 'WFRD', 'DK', 'PBF', 'CVI', 'USAC', 'NGL', 'SUN', 'GEL', 'CQP', 'SHLS', 'ENPH', 'SEDG', 'RUN', 'FSLR', 'SPWR', 'BE', 'PLUG', 'FCEL', 'BLDP'],
+    'Healthcare': ['LLY', 'UNH', 'JNJ', 'MRK', 'ABBV', 'TMO', 'PFE', 'DHR', 'ABT', 'AMGN', 'MDT', 'GILD', 'ISRG', 'SYK', 'CVS', 'REGN', 'VRTX', 'CI', 'BSX', 'BDX', 'HCA', 'ELV', 'MCK', 'ZBH', 'HUM', 'IDXX', 'EW', 'BIIB', 'COR', 'LH', 'ALGN', 'A', 'DXCM', 'RMD', 'WST', 'TECH', 'IQV', 'HOLX', 'DGX', 'CNC', 'BAX', 'CAH', 'MOH', 'UHS', 'XRAY', 'INCY', 'SGEN', 'JAZZ', 'BGNE', 'MRNA', 'BNTX', 'NVAX', 'VEEV', 'TDOC', 'CERT', 'DVA', 'PODD', 'TFX', 'COO', 'STE', 'SRPT'],
+    'Industrials': ['CAT', 'UPS', 'GE', 'UNP', 'BA', 'RTX', 'HON', 'DE', 'LMT', 'ADP', 'ETN', 'WM', 'CSX', 'NSC', 'PCAR', 'ITW', 'GD', 'TDG', 'EMR', 'ROP', 'PAYX', 'CMI', 'PH', 'VRSK', 'FAST', 'OTIS', 'CARR', 'GWW', 'JCI', 'RSG', 'IR', 'AME', 'LDOS', 'XYL', 'WAB', 'EXPD', 'JBHT', 'ODFL', 'CHRW', 'DAL', 'UAL', 'AAL', 'LUV', 'FDX', 'SWK', 'SNA', 'DOV', 'PNR', 'ROK', 'TT', 'GNRC', 'MMM', 'TXT', 'HII', 'NOC', 'LHX', 'HWM', 'SPR', 'MAS', 'FBHS', 'BLD', 'J', 'KBR', 'FLR', 'PWR', 'FIX', 'URI', 'AIT', 'AVY', 'SIRI'],
+    'Consumer Defensive': ['WMT', 'PG', 'COST', 'KO', 'PEP', 'MDLZ', 'MO', 'PM', 'TGT', 'CL', 'EL', 'KMB', 'GIS', 'KR', 'ADM', 'SYY', 'KDP', 'STZ', 'MNST', 'DG', 'DLTR', 'HSY', 'K', 'CPB', 'CAG', 'HRL', 'SJM', 'MKC', 'BF-B', 'CHD', 'TAP', 'TSN', 'CALM', 'LANC', 'SFBS', 'UNFI', 'HFFG', 'THS', 'JJSF', 'BGS', 'FLO', 'PPC', 'LW', 'POST', 'BRBR', 'UTZ', 'PRMW', 'BYND', 'CELH', 'CHGG', 'EDG', 'HELE', 'HRB', 'NWL', 'REV', 'CUTR', 'PRPL', 'TPX', 'SCI', 'CSV', 'MATW'],
+    'Communication Services': ['GOOGL', 'META', 'GOOG', 'DIS', 'NFLX', 'CMCSA', 'TMUS', 'VZ', 'T', 'CHTR', 'ATVI', 'EA', 'WBD', 'IPG', 'OMC', 'LYV', 'TTWO', 'PARA', 'FOXA', 'DISCA', 'ROKU', 'MTCH', 'TME', 'SPOT', 'SNAP', 'PINS', 'TWTR', 'BILI', 'Z', 'ZG', 'IAC', 'NWSA', 'NYT', 'GTN', 'SBGI', 'TGNA', 'VIAC', 'FWONA', 'LSXMA', 'SIRI', 'DISCK', 'DISH', 'LUMN', 'FYBR', 'ATEX', 'IDT', 'MAX', 'MGNI', 'PUBM', 'TTD', 'PERI', 'APPS', 'UPLD'],
+    'Utilities': ['NEE', 'DUK', 'SO', 'D', 'AEP', 'SRE', 'EXC', 'XEL', 'PEG', 'WEC', 'EIX', 'ES', 'AWK', 'ED', 'PCG', 'DTE', 'FE', 'AEE', 'ETR', 'PPL', 'CNP', 'SJI', 'LNT', 'CMS', 'NI', 'EVRG', 'PNW', 'NRG', 'AES', 'ALE', 'BKH', 'CPK', 'IDA', 'MGEE', 'OGE', 'OTTR', 'WTRG'],
+    'Real Estate': ['PLD', 'AMT', 'EQIX', 'CCI', 'O', 'PSA', 'SPG', 'WELL', 'DLR', 'AVB', 'WY', 'EQR', 'SBAC', 'VICI', 'ARE', 'INVH', 'VTR', 'ESS', 'MAA', 'CPT', 'EXR', 'CBRE', 'UDR', 'IRM', 'KIM', 'REG', 'FRT', 'PEAK', 'BXP', 'HST', 'MAC', 'SLG', 'VNO', 'DEA', 'KRC', 'HIW', 'SRC', 'ADC', 'EPRT', 'NNN', 'WPC', 'GLPI', 'LAMR', 'OUT', 'PCH', 'GEO', 'CXW', 'UNIT', 'LSI', 'RITM', 'STWD', 'ARI', 'ACRE', 'BRT', 'GOOD', 'IRT', 'APTS', 'AIRC', 'STAG', 'TRNO', 'FR', 'WSR', 'CIO', 'DEA'],
+    'Basic Materials': ['LIN', 'APD', 'SHW', 'ECL', 'NUE', 'FCX', 'DD', 'DOW', 'NEM', 'SCCO', 'ALB', 'PPG', 'VMC', 'MLM', 'MOS', 'CF', 'IFF', 'LYB', 'CE', 'IP', 'PKG', 'BLL', 'WRK', 'FMC', 'AVY', 'EMN', 'STLD', 'CTVA', 'RPM', 'AXTA', 'OLN', 'WLK', 'CC', 'HUN', 'KWR', 'AA', 'CENX', 'X', 'CLF', 'CRS', 'ATI', 'TMST', 'KALU', 'VEDL', 'CMP', 'SQM', 'LTHM', 'PLL', 'LAC', 'ALB', 'SLI', 'OROC', 'GFI', 'AU', 'AEM', 'GOLD', 'WPM', 'FNV', 'PAAS', 'AG', 'HL', 'MAG', 'SSR']
+}
+INDEX_TICKER_TO_NAME = { 
+    'XLK': 'US Tech Giants (XLK)', 'SOXX': 'Semiconductors (SOXX)', 
+    'SKYY': 'Cloud Computing (SKYY)', 'XLF': 'Financials (XLF)', 
+    'XLV': 'Healthcare (XLV)', 'XRT': 'US Retail (XRT)', 
+    'HERO': 'Gaming (HERO)', 'XLE': 'Energy (XLE)', 
+    'XLI': 'Industrials (XLI)', 'XLP': 'Consumer Staples (XLP)',
+    'XLC': 'Communication Services (XLC)', 'XLU': 'Utilities (XLU)',
+    'XLRE': 'Real Estate (XLRE)', 'XLB': 'Basic Materials (XLB)',
+    '^GSPC': 'S&P 500 Index', '^NDX': 'NASDAQ 100 Index' 
+}
+SECTOR_TO_INDEX_MAPPING = { 
+    'Technology': ['XLK', 'SOXX', 'SKYY'], 
+    'Financials': ['XLF'], 
+    # --- เปลี่ยน 'Health Services' เป็น 'Healthcare' และเพิ่ม Mapping ใหม่ ---
+    'Healthcare': ['XLV'], 
+    'Consumer Cyclical': ['XRT', 'HERO'], 
+    'Energy': ['XLE'],
+    'Industrials': ['XLI'],
+    'Consumer Defensive': ['XLP'],
+    'Communication Services': ['XLC'],
+    'Utilities': ['XLU'],
+    'Real Estate': ['XLRE'],
+    'Basic Materials': ['XLB']
+}
 all_possible_symbols = list(INDEX_TICKER_TO_NAME.keys())
 for sector_tickers in SECTORS.values(): all_possible_symbols.extend(sector_tickers)
 all_possible_symbols = sorted(list(set(all_possible_symbols)))

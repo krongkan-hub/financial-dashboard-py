@@ -40,7 +40,7 @@ app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.LUX, d
 # ... (Constants remain unchanged) ...
 SECTORS = {
     'Technology': ['MSFT', 'NVDA', 'AVGO', 'CRM', 'AMD', 'QCOM', 'ORCL', 'ADBE', 'ACN', 'INTC', 'IBM', 'CSCO', 'AMAT', 'UBER', 'NOW', 'INTU', 'LRCX', 'APH', 'ADI', 'PANW', 'MU', 'SNPS', 'CDNS', 'KLAC', 'ROP', 'DELL', 'ANET', 'MCHP', 'FTNT', 'TEL', 'IT', 'CTSH', 'SNOW', 'MSI', 'PAYX', 'ADSK', 'KEYS', 'CRWD', 'GLW', 'HPE', 'HPQ', 'CDW', 'FICO', 'TER', 'STX', 'ANSS', 'TRMB', 'VRSN', 'ZBRA', 'ENET', 'TDY', 'WDC', 'JBL', 'EXC', 'UI', 'NTAP', 'SMCI', 'GPN', 'PTC', 'FFIV', 'FLT', 'GRMN', 'DXC', 'FIS', 'AKAM', 'KEYS', 'BR', 'MDB', 'DDOG', 'NET', 'TEAM', 'ZS', 'OKTA', 'PLTR', 'SHOP', 'SQ', 'ARM', 'WDAY', 'HUBS', 'ZM', 'EPAM', 'APP', 'AFRM', 'IOT', 'S', 'GEN', 'CHKP', 'DT', 'VEEV', 'FTV', 'TOST', 'DOCN', 'UIPATH', 'PATH', 'AI', 'Z', 'GTLB', 'RBLX', 'MSTR'],
-    'Consumer Cyclical': ['AMZN', 'TSLA', 'HD', 'MCD', 'LOW', 'SBUX', 'BKNG', 'TJX', 'MAR', 'CMG', 'GM', 'F', 'ROST', 'HLT', 'YUM', 'ORLY', 'AZO', 'LVS', 'CPRT', 'NKE', 'CCL', 'RCL', 'DRI', 'GRMN', 'ULTA', 'LEN', 'DHI', 'TGT', 'EBAY', 'EXPE', 'POOL', 'WYN', 'PHM', 'KMX', 'BBY', 'WYNN', 'MGM', 'ETSY', 'LULU', 'TPR', 'CZR', 'NVR', 'DPZ', 'RL', 'VFC', 'WHR', 'HAS', 'MAT', 'MHK', 'APTV', 'GPC', 'LKQ', 'BWA', 'KDP', 'MNST', 'HOG', 'PENN', 'DKS', 'FL', 'BBWI', 'RH', 'WYND', 'CHS', 'AAP', 'LEG', 'GPS', 'JWN', 'M', 'KSS', 'TCOM', 'TRIP', 'SNA', 'SWK', 'PAG', 'AN', 'RUSHA', 'SAH', 'ABG', 'CWH', 'GNTX', 'LEA', 'VC', 'SON', 'TPX', 'WGO', 'THO'],
+    'Consumer Cyclical': ['IREN','AMZN', 'TSLA', 'HD', 'MCD', 'LOW', 'SBUX', 'BKNG', 'TJX', 'MAR', 'CMG', 'GM', 'F', 'ROST', 'HLT', 'YUM', 'ORLY', 'AZO', 'LVS', 'CPRT', 'NKE', 'CCL', 'RCL', 'DRI', 'GRMN', 'ULTA', 'LEN', 'DHI', 'TGT', 'EBAY', 'EXPE', 'POOL', 'WYN', 'PHM', 'KMX', 'BBY', 'WYNN', 'MGM', 'ETSY', 'LULU', 'TPR', 'CZR', 'NVR', 'DPZ', 'RL', 'VFC', 'WHR', 'HAS', 'MAT', 'MHK', 'APTV', 'GPC', 'LKQ', 'BWA', 'KDP', 'MNST', 'HOG', 'PENN', 'DKS', 'FL', 'BBWI', 'RH', 'WYND', 'CHS', 'AAP', 'LEG', 'GPS', 'JWN', 'M', 'KSS', 'TCOM', 'TRIP', 'SNA', 'SWK', 'PAG', 'AN', 'RUSHA', 'SAH', 'ABG', 'CWH', 'GNTX', 'LEA', 'VC', 'SON', 'TPX', 'WGO', 'THO'],
     'Financials': ['BRK-B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS', 'BLK', 'AXP', 'SPGI', 'SCHW', 'CB', 'PNC', 'C', 'AON', 'MMC', 'USB', 'ICE', 'TROW', 'COF', 'MET', 'PRU', 'AIG', 'TRV', 'ALL', 'CME', 'DFS', 'PGR', 'WRB', 'MCO', 'PYPL', 'FISV', 'SQ', 'ACGL', 'RE', 'AMP', 'AJG', 'BEN', 'IVZ', 'L', 'NTRS', 'STT', 'TFC', 'ZION', 'FITB', 'KEY', 'HBAN', 'RF', 'CFG', 'CMA', 'MTB', 'BAC', 'GS', 'MS', 'JPM', 'C', 'WFC', 'USB', 'PNC', 'TFC', 'COF', 'BK', 'STT', 'NTRS', 'AMP', 'AXP', 'DFS', 'MA', 'V', 'PYPL', 'FISV', 'GPN', 'FLT', 'SQ', 'AFRM', 'HOOD', 'COIN', 'CBOE', 'NDAQ', 'MKTX', 'TRU', 'EFX', 'FDS', 'AFL', 'CINF', 'HIG', 'LNC', 'UNM'],
     'Energy': ['XOM', 'CVX', 'SHEL', 'COP', 'SLB', 'EOG', 'PXD', 'OXY', 'MPC', 'VLO', 'WMB', 'KMI', 'PSX', 'HAL', 'DVN', 'HES', 'OKE', 'BKR', 'FANG', 'TRGP', 'CTRA', 'MRO', 'APA', 'PBR', 'EQT', 'ENB', 'TRP', 'SU', 'CNQ', 'IMO', 'CVE', 'PBA', 'ET', 'EPD', 'PAA', 'MPLX', 'LNG', 'NOV', 'FTI', 'OII', 'HP', 'RIG', 'VET', 'MUR', 'NFG', 'AR', 'RRC', 'SWN', 'CHK', 'CNX', 'ARCH', 'BTU', 'CEIX', 'METC', 'WFRD', 'DK', 'PBF', 'CVI', 'USAC', 'NGL', 'SUN', 'GEL', 'CQP', 'SHLS', 'ENPH', 'SEDG', 'RUN', 'FSLR', 'SPWR', 'BE', 'PLUG', 'FCEL', 'BLDP'],
     'Healthcare': ['LLY', 'UNH', 'JNJ', 'MRK', 'ABBV', 'TMO', 'PFE', 'DHR', 'ABT', 'AMGN', 'MDT', 'GILD', 'ISRG', 'SYK', 'CVS', 'REGN', 'VRTX', 'CI', 'BSX', 'BDX', 'HCA', 'ELV', 'MCK', 'ZBH', 'HUM', 'IDXX', 'EW', 'BIIB', 'COR', 'LH', 'ALGN', 'A', 'DXCM', 'RMD', 'WST', 'TECH', 'IQV', 'HOLX', 'DGX', 'CNC', 'BAX', 'CAH', 'MOH', 'UHS', 'XRAY', 'INCY', 'SGEN', 'JAZZ', 'BGNE', 'MRNA', 'BNTX', 'NVAX', 'VEEV', 'TDOC', 'CERT', 'DVA', 'PODD', 'TFX', 'COO', 'STE', 'SRPT'],
@@ -49,7 +49,7 @@ SECTORS = {
     'Communication Services': ['GOOGL', 'META', 'GOOG', 'DIS', 'NFLX', 'CMCSA', 'TMUS', 'VZ', 'T', 'CHTR', 'ATVI', 'EA', 'WBD', 'IPG', 'OMC', 'LYV', 'TTWO', 'PARA', 'FOXA', 'DISCA', 'ROKU', 'MTCH', 'TME', 'SPOT', 'SNAP', 'PINS', 'TWTR', 'BILI', 'Z', 'ZG', 'IAC', 'NWSA', 'NYT', 'GTN', 'SBGI', 'TGNA', 'VIAC', 'FWONA', 'LSXMA', 'SIRI', 'DISCK', 'DISH', 'LUMN', 'FYBR', 'ATEX', 'IDT', 'MAX', 'MGNI', 'PUBM', 'TTD', 'PERI', 'APPS', 'UPLD'],
     'Utilities': ['NEE', 'DUK', 'SO', 'D', 'AEP', 'SRE', 'EXC', 'XEL', 'PEG', 'WEC', 'EIX', 'ES', 'AWK', 'ED', 'PCG', 'DTE', 'FE', 'AEE', 'ETR', 'PPL', 'CNP', 'SJI', 'LNT', 'CMS', 'NI', 'EVRG', 'PNW', 'NRG', 'AES', 'ALE', 'BKH', 'CPK', 'IDA', 'MGEE', 'OGE', 'OTTR', 'WTRG'],
     'Real Estate': ['PLD', 'AMT', 'EQIX', 'CCI', 'O', 'PSA', 'SPG', 'WELL', 'DLR', 'AVB', 'WY', 'EQR', 'SBAC', 'VICI', 'ARE', 'INVH', 'VTR', 'ESS', 'MAA', 'CPT', 'EXR', 'CBRE', 'UDR', 'IRM', 'KIM', 'REG', 'FRT', 'PEAK', 'BXP', 'HST', 'MAC', 'SLG', 'VNO', 'DEA', 'KRC', 'HIW', 'SRC', 'ADC', 'EPRT', 'NNN', 'WPC', 'GLPI', 'LAMR', 'OUT', 'PCH', 'GEO', 'CXW', 'UNIT', 'LSI', 'RITM', 'STWD', 'ARI', 'ACRE', 'BRT', 'GOOD', 'IRT', 'APTS', 'AIRC', 'STAG', 'TRNO', 'FR', 'WSR', 'CIO', 'DEA'],
-    'Basic Materials': ['LIN', 'APD', 'SHW', 'ECL', 'NUE', 'FCX', 'DD', 'DOW', 'NEM', 'SCCO', 'ALB', 'PPG', 'VMC', 'MLM', 'MOS', 'CF', 'IFF', 'LYB', 'CE', 'IP', 'PKG', 'BLL', 'WRK', 'FMC', 'AVY', 'EMN', 'STLD', 'CTVA', 'RPM', 'AXTA', 'OLN', 'WLK', 'CC', 'HUN', 'KWR', 'AA', 'CENX', 'X', 'CLF', 'CRS', 'ATI', 'TMST', 'KALU', 'VEDL', 'CMP', 'SQM', 'LTHM', 'PLL', 'LAC', 'ALB', 'SLI', 'OROC', 'GFI', 'AU', 'AEM', 'GOLD', 'WPM', 'FNV', 'PAAS', 'AG', 'HL', 'MAG', 'SSR']
+    'Basic Materials': ['LIN','RIO','NEM','SHW','AEM','ECL','BHP','APD','B','WPM','VALE','FNV','GFI','AU','DD','KGC','PPG','TECK','IFF','LYB','RPM','AGI','MP','RGLD','CDE','HMY','SQM','ALB','WLK','AVTR','EQX','HL','SBSW','NEU','IAG','OR','BTG','EMN','ESI','AXTA','EGO','NGD','BCPC','SSRM','NG','SXT','CBT','TMC','SSL','ORLA','SAND','HWKN','USAR','PRM','FUL','USAS','AVNT','WDFC','OLN','SA','DRD','MTRN','CGAU','KWR','ASH','SKE','AAUC','NGVT','CC','LAC','IOSP','MTX','IPX','ARMN','VZLA','UAMY','CRML','CNL','NAK','SCL','REX','TMQ','ECVT','GSM','SLI','ODC','NB','CMP','IAUX','LAR','GAU','SGML','NEXA','LWLG','CMCL','IDR','GRPE','KRO','GTI','NFGC']
 }
 INDEX_TICKER_TO_NAME = { 
     'XLK': 'US Tech Giants (XLK)', 'SOXX': 'Semiconductors (SOXX)', 
@@ -110,7 +110,31 @@ def create_navbar():
         login_button = dbc.Button("Logout", href="/logout", color="secondary", external_link=True)
     else:
         login_button = dbc.Button("Login", id="open-login-modal-button", color="primary")
-    return dbc.Navbar(dbc.Container([html.A("FINANCIAL ANALYSIS DASHBOARD", href="/", className="navbar-brand fw-bold"), dbc.Stack(login_button, direction="horizontal", className="ms-auto")], fluid=True), color="dark", dark=True, className="py-2 fixed-top")
+    return dbc.Navbar(
+        dbc.Container(
+            [
+                # --- START: NEW LOGO CODE ---
+                html.A(
+                    dbc.Row(
+                        [
+                            dbc.Col(html.Img(src="/assets/logo.png", height="45px")),
+                            dbc.Col(dbc.NavbarBrand("FINANCIAL ANALYSIS DASHBOARD", className="ms-2 fw-bold")),
+                        ],
+                        align="center",
+                        className="g-0", # g-0 to remove gutters between columns
+                    ),
+                    href="/",
+                    style={"textDecoration": "none"}, # Remove underline from link
+                ),
+                # --- END: NEW LOGO CODE ---
+                dbc.Stack(login_button, direction="horizontal", className="ms-auto")
+            ],
+            fluid=True
+        ),
+        color="dark",
+        dark=True,
+        className="py-2 fixed-top"
+    )
 
 
 def build_layout():
@@ -122,7 +146,12 @@ def build_layout():
             dbc.Row([
                 dbc.Col(dbc.Card(dbc.CardBody([
                     html.Label("Add Stocks to Analysis", className="fw-bold"),
-                    dcc.Dropdown(id='sector-dropdown', options=[{'label': k, 'value': k} for k in SECTORS.keys()], value='Technology', clearable=False),
+                    dcc.Dropdown(
+                        id='sector-dropdown', 
+                        options=[{'label': 'All Sectors', 'value': 'All'}] + [{'label': k, 'value': k} for k in SECTORS.keys()], 
+                        value='All',  # Set 'All' as the default value
+                        clearable=False
+                    ),
                     dcc.Dropdown(id='ticker-select-dropdown', className="mt-2", placeholder="Select a ticker..."),
                     dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock"], id="add-ticker-button", n_clicks=0, className="mt-2 w-100"),
                     html.Hr(),
@@ -264,11 +293,33 @@ def update_index_summary_display(store_data):
     indices = store_data.get('indices', []) if store_data else []
     if not indices: return html.Span("No indices selected.", className="text-muted fst-italic")
     return [html.Label("Selected Indices:", className="text-muted small")] + [dbc.Badge([INDEX_TICKER_TO_NAME.get(i, i), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': i})], color="light", className="m-1 p-2 text-dark border") for i in indices]
-@app.callback(Output('ticker-select-dropdown', 'options'), [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')])
+@app.callback(
+    Output('ticker-select-dropdown', 'options'),
+    [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')]
+)
 def update_ticker_options(selected_sector, store_data):
-    if not selected_sector: return []
+    if not selected_sector:
+        return []
+
     selected_tickers = store_data.get('tickers', []) if store_data else []
-    return [{'label': t, 'value': t} for t in SECTORS.get(selected_sector, []) if t not in selected_tickers]
+    
+    tickers_to_display = []
+    
+    if selected_sector == 'All':
+        # Logic สำหรับ 'All Sectors' (ซึ่งมีการเรียงลำดับอยู่แล้ว)
+        all_tickers_list = []
+        for sector_tickers in SECTORS.values():
+            all_tickers_list.extend(sector_tickers)
+        tickers_to_display = sorted(list(set(all_tickers_list)))
+    else:
+        # --- START: IMPROVEMENT ---
+        # Logic สำหรับ Sector ที่เลือก: เพิ่ม sorted() เพื่อเรียงลำดับหุ้น
+        tickers_to_display = sorted(SECTORS.get(selected_sector, []))
+        # --- END: IMPROVEMENT ---
+
+    # สร้าง options โดยกรองหุ้นที่ถูกเลือกไปแล้วออก
+    options = [{'label': t, 'value': t} for t in tickers_to_display if t not in selected_tickers]
+    return options
 @app.callback(Output('index-select-dropdown', 'options'), Input('user-selections-store', 'data'))
 def update_index_options(store_data):
     if not store_data or not store_data.get('tickers'): return []

@@ -1,18 +1,16 @@
-# data_handler.py (เวอร์ชันแก้ไข เพิ่มฟังก์ชันสำหรับ Deep Dive)
+# data_handler.py (Fully Updated for New Deep Dive Design)
 
 import pandas as pd
 import yfinance as yf
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from functools import lru_cache
 import logging
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# ==================================================================
-# ส่วนที่ 1: CONFIG และ HELPERS (เหมือนเดิม)
-# ==================================================================
+# ... (Helper functions like _pick_row, _cagr, etc. remain unchanged) ...
 CONFIG = {
     "DAILY_RECENT_DAYS": 365, "PNG_DPI": 130, "FIG_SIZE": (7.5, 4.0),
     "TZ": "Asia/Bangkok", "FUND_YEARS": 5, "MONEY_DIV": 1_000_000,
@@ -38,12 +36,6 @@ def _pick_row(df: pd.DataFrame, candidates: List[str]) -> Optional[pd.Series]:
     df.index = original_index
     return None
 
-def _normalize_columns(cols) -> List[pd.Timestamp]:
-    ts = [pd.to_datetime(c, errors='coerce') for c in cols]
-    s = pd.Series(ts).dropna().sort_values(ascending=False)
-    if s.empty: return []
-    return sorted(list(s.iloc[:CONFIG["FUND_YEARS"]]))
-
 def _cagr(series: pd.Series, years: int) -> float:
     series = series.dropna().sort_index().tail(years + 1)
     if len(series) < 2: return np.nan
@@ -68,15 +60,11 @@ def get_revenue_series(ticker: str) -> pd.Series:
             revenue = _pick_row(fin, FIN_KEYS["revenue"])
             if revenue is not None:
                 revenue.index = pd.to_datetime(revenue.index)
-                valid_cols = _normalize_columns(revenue.index)
-                return revenue[valid_cols] if valid_cols else revenue.sort_index()
+                return revenue.sort_index()
     except Exception: pass
     return pd.Series(dtype=float)
 
-# ==================================================================
-# ส่วนที่ 2: ฟังก์ชันสำหรับกราฟและตารางเปรียบเทียบ (เหมือนเดิม)
-# ==================================================================
-
+# ... (calculate_drawdown, get_competitor_data, get_scatter_data remain unchanged) ...
 @lru_cache(maxsize=20)
 def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
     if not tickers: return pd.DataFrame()
@@ -126,7 +114,7 @@ def get_scatter_data(tickers: tuple) -> pd.DataFrame:
 
 
 # ==================================================================
-# ส่วนที่ 3: ฟังก์ชันสำหรับ DEEP DIVE (ส่วนที่เพิ่มใหม่)
+# ส่วนที่ 3: ฟังก์ชันสำหรับ DEEP DIVE (ส่วนที่เพิ่มใหม่และอัปเดต)
 # ==================================================================
 @lru_cache(maxsize=32)
 def get_deep_dive_data(ticker: str) -> dict:
@@ -139,50 +127,66 @@ def get_deep_dive_data(ticker: str) -> dict:
         if not info or info.get('quoteType') != 'EQUITY':
             return {"error": "Invalid ticker or no data available."}
 
-        # 1. Key Statistics
+        # --- Helper functions for formatting ---
         def format_pct(val):
             return f"{val*100:.2f}%" if pd.notna(val) else "N/A"
-        
-        key_stats = {
-            "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A",
-            "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A",
-            "P/S Ratio": f"{info.get('priceToSalesTrailing12Months'):.2f}" if info.get('priceToSalesTrailing12Months') else "N/A",
-            "ROE": format_pct(info.get('returnOnEquity')),
-            "Debt to Equity": f"{info.get('debtToEquity', 0) / 100:.2f}" if info.get('debtToEquity') is not None else "N/A",
-            "Dividend Yield": format_pct(info.get('dividendYield')),
+        def format_large_number(n):
+            if pd.isna(n): return "N/A"
+            if n >= 1e12: return f'${n/1e12:,.2f}T'
+            if n >= 1e9: return f'${n/1e9:,.2f}B'
+            if n >= 1e6: return f'${n/1e6:,.2f}M'
+            return f'${n:,.0f}'
+
+        # --- 1. Marquee and Key Stats Data ---
+        current_price = info.get('currentPrice', info.get('regularMarketPrice'))
+        previous_close = info.get('previousClose')
+        daily_change = current_price - previous_close if current_price and previous_close else 0
+        daily_change_pct = (daily_change / previous_close) * 100 if previous_close else 0
+
+        result = {
+            "company_name": info.get('longName', ticker),
+            "exchange": info.get('exchange', 'N/A'),
+            "logo_url": info.get('logo_url'),
+            "business_summary": info.get('longBusinessSummary'),
+            "current_price": current_price,
+            "daily_change": daily_change,
+            "daily_change_pct": daily_change_pct,
+            "daily_change_str": f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f}",
+            "daily_change_pct_str": f"{'+' if daily_change >= 0 else ''}{daily_change_pct:.2f}%",
+            "market_cap_str": format_large_number(info.get('marketCap')),
+            "key_stats": {
+                "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A",
+                "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A",
+                "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A",
+                "Dividend Yield": format_pct(info.get('dividendYield')),
+            }
         }
 
-        # 2. Financial Trends
-        income_stmt_annual = tkr.financials
+        # --- 2. Financial Trends ---
+        income_stmt_annual = tkr.financials.iloc[:, :4] # Get last 4 years
         revenue = _pick_row(income_stmt_annual, FIN_KEYS['revenue'])
         net_income = _pick_row(income_stmt_annual, FIN_KEYS['net_income'])
         financial_trends = pd.DataFrame({'Revenue': revenue, 'Net Income': net_income})
         financial_trends.index = pd.to_datetime(financial_trends.index).year
-        financial_trends = financial_trends.sort_index().dropna(how='all')
+        result["financial_trends"] = financial_trends.sort_index().dropna(how='all')
 
-        # 3. Financial Statements (Annual)
-        financial_statements = {
-            "income": tkr.financials.dropna(how='all', axis=1),
-            "balance": tkr.balance_sheet.dropna(how='all', axis=1),
-            "cashflow": tkr.cashflow.dropna(how='all', axis=1)
+        # --- 3. Financial Statements (Annual) ---
+        result["financial_statements"] = {
+            "income": tkr.financials.iloc[:, :4].dropna(how='all', axis=1),
+            "balance": tkr.balance_sheet.iloc[:, :4].dropna(how='all', axis=1),
+            "cashflow": tkr.cashflow.iloc[:, :4].dropna(how='all', axis=1)
         }
         
-        # 4. Price History
-        price_history = tkr.history(period="5y")
+        # --- 4. Price History ---
+        result["price_history"] = tkr.history(period="5y")
 
-        return {
-            "info": info,
-            "key_stats": key_stats,
-            "financial_trends": financial_trends,
-            "financial_statements": financial_statements,
-            "price_history": price_history,
-        }
+        return result
 
     except Exception as e:
         logging.error(f"Failed to get deep dive data for {ticker}: {e}")
         return {"error": str(e)}
 
-# --- ฟังก์ชัน DCF (เหมือนเดิม) ---
+# --- DCF Function (unchanged) ---
 @lru_cache(maxsize=32)
 def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> dict:
     PROJECTION_YEARS, ASSUMED_MARKET_RETURN, ASSUMED_PERPETUAL_GROWTH = 5, 0.08, 0.025

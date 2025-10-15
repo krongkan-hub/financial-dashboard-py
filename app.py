@@ -1,4 +1,4 @@
-# app.py (Fully Corrected version with new Table Styling and Restored Login Logic)
+# app.py (Fully Corrected version with working Deep Dive Tabs)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -35,10 +35,9 @@ server.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(server)
 login_manager = LoginManager()
 login_manager.init_app(server)
-# Make sure the assets folder is correctly referenced
 app = dash.Dash(__name__, server=server, external_stylesheets=[dbc.themes.LUX, dbc.icons.BOOTSTRAP], suppress_callback_exceptions=True, assets_folder='assets')
 
-# ... (Constants like SECTORS, INDEX_TICKER_TO_NAME, etc. remain the same) ...
+# ... (Constants remain unchanged) ...
 SECTORS = { 'Technology': ['NVDA','MSFT','AVGO','TSM','ORCL','PLTR','ASML','AMD','SAP','CSCO','IBM','CRM','MU','SHOP','UBER','ANET','APP','NOW','INTU','AMAT','LRCX','QCOM','ARM','INTC','TXN','ACN','APH','ADBE','PANW','KLAC','CRWD','ADI','DELL','CDNS','MSTR','SNPS','SNOW','MSI','NET','MRVL','CRWV','GLW','INFY','FI','ADSK','FTNT','WDAY','DDOG','NXPI','ZS','GRMN','STX','XYZ','MPWR','WDC','FICO','UI','TEAM','ALAB','MCHP','HPE','CTSH','SMCI','FIG','PSTG','NOK','CLS','WIT','ERIC','KEYS','BR','TDY','STM','TTD','MDB','CYBR','ZM','ASTS','VRSN','LDOS','CRDO','ASX','HPQ','PTC','HUBS','GRAB','AFRM','NTAP','CIEN','TYL','SATS','FLEX','CHKP','TER','IONQ','IOT','JBL','TOST','GWRE'], 'Consumer Cyclical': ['AMZN', 'TSLA', 'HD', 'MCD', 'NKE', 'SBUX', 'LOW', 'BKNG', 'TJX', 'MAR', 'GM', 'F', 'CMG', 'HLT', 'ROST', 'YUM'], 'Financials': ['JPM', 'BRK-B', 'V', 'MA', 'BAC', 'GS', 'MS', 'WFC', 'AXP', 'BLK', 'SPGI', 'CB', 'PNC', 'C', 'USB', 'SCHW'], 'Energy': ['XOM', 'CVX', 'SHEL', 'TTE', 'COP', 'SLB', 'EOG', 'PXD', 'OXY', 'MPC'] }
 INDEX_TICKER_TO_NAME = { 'XLK': 'US Tech Giants (XLK)', 'SOXX': 'Semiconductors (SOXX)', 'SKYY': 'Cloud Computing (SKYY)', 'XLF': 'Financials (XLF)', 'XLV': 'Healthcare (XLV)', 'XRT': 'US Retail (XRT)', 'HERO': 'Gaming (HERO)', 'XLE': 'Energy (XLE)', '^GSPC': 'S&P 500 Index', '^NDX': 'NASDAQ 100 Index' }
 SECTOR_TO_INDEX_MAPPING = { 'Technology': ['XLK', 'SOXX', 'SKYY'], 'Financials': ['XLF'], 'Health Services': ['XLV'], 'Consumer Cyclical': ['XRT', 'HERO'], 'Energy': ['XLE'] }
@@ -49,7 +48,7 @@ COLOR_DISCRETE_MAP = { symbol: color for symbol, color in zip(all_possible_symbo
 
 
 # ==================================================================
-# 2. Database Models & User Loader (Same as original)
+# 2. Database Models & User Loader (Unchanged)
 # ==================================================================
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -69,9 +68,10 @@ def logout():
     return redirect('/', code=302)
 
 # ==================================================================
-# 3. Layout Definition (Restored original structure)
+# 3. Layout Definition (Unchanged)
 # ==================================================================
 def create_navbar():
+    # ... (unchanged) ...
     if current_user.is_authenticated:
         login_button = dbc.Button("Logout", href="/logout", color="secondary", external_link=True)
     else:
@@ -80,13 +80,10 @@ def create_navbar():
 
 
 def build_layout():
-    """
-    This function builds the main dashboard layout, restoring the original
-    structure where the navbar is a placeholder and the login modal is included.
-    """
+    # ... (unchanged) ...
     return html.Div([
         dcc.Store(id='user-selections-store', storage_type='session'),
-        html.Div(id="navbar-container"), # <-- Navbar placeholder
+        html.Div(id="navbar-container"),
         dbc.Container([
             dbc.Row([
                 dbc.Col(dbc.Card(dbc.CardBody([
@@ -142,25 +139,22 @@ def build_layout():
                 ], width=12, md=9, className="content-offset"),
             ], className="g-4")
         ], fluid=True, className="p-4 main-content-container"),
-        create_login_modal() # <-- Login modal included here, as per original design
+        create_login_modal()
     ])
 
-# Main app shell layout. The router will populate 'page-content'.
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     html.Div(id='page-content')
 ])
 
 # ==================================================================
-# 4. Callbacks
+# 4. Callbacks (Unchanged Section)
 # ==================================================================
-
 @app.callback(Output('page-content', 'children'),
               Input('url', 'pathname'))
 def display_page(pathname):
     if pathname.startswith('/deepdive/'):
         ticker = pathname.split('/')[-1].upper()
-        # The deep dive page gets its own layout, including a navbar placeholder
         return html.Div([
             html.Div(id="navbar-container"),
             deep_dive.create_deep_dive_layout(ticker)
@@ -168,26 +162,22 @@ def display_page(pathname):
     elif pathname == '/register':
         return create_register_layout()
     else:
-        # Default to the main dashboard layout
         return build_layout()
 
 @app.callback(Output('navbar-container', 'children'),
               Input('url', 'pathname'))
 def update_navbar(pathname):
-    """This callback populates the navbar placeholder on any page that has it."""
     return create_navbar()
 
 @app.callback(Output('user-selections-store', 'data'),
               Input('url', 'pathname'))
 def load_user_selections_to_store(pathname):
-    # Only load data when the main dashboard is visible
     if pathname == '/':
         with server.app_context():
             if current_user.is_authenticated:
                 stocks = UserSelection.query.filter_by(user_id=current_user.id, symbol_type='stock').all()
                 indices = UserSelection.query.filter_by(user_id=current_user.id, symbol_type='index').all()
                 return {'tickers': [s.symbol for s in stocks], 'indices': [i.symbol for i in indices]}
-    # For other pages, start with an empty store to avoid conflicts
     return {'tickers': [], 'indices': []}
 
 
@@ -197,7 +187,7 @@ def save_selections_to_db(user_id, symbols, symbol_type):
         for symbol in symbols: db.session.add(UserSelection(user_id=user_id, symbol_type=symbol_type, symbol=symbol))
         db.session.commit()
 
-# ... (All other user selection callbacks: add/remove, update displays remain unchanged) ...
+# ... (All other user selection callbacks remain unchanged) ...
 @app.callback(Output('user-selections-store', 'data', allow_duplicate=True), Input('add-ticker-button', 'n_clicks'), [State('ticker-select-dropdown', 'value'), State('user-selections-store', 'data')], prevent_initial_call=True)
 def add_ticker_to_store(n_clicks, selected_ticker, store_data):
     store_data = store_data or {'tickers': [], 'indices': []}
@@ -255,7 +245,7 @@ def update_index_options(store_data):
 
 
 # ==================================================================
-# 5. Callbacks for Main Dashboard Graphs & Table
+# 5. Callbacks for Main Dashboard Graphs & Table (Unchanged)
 # ==================================================================
 @app.callback(
     Output('analysis-pane-content', 'children'),
@@ -333,7 +323,7 @@ def render_graph_content(active_tab, store_data):
     [Input('table-tabs', 'active_tab'), Input('user-selections-store', 'data'), Input('sort-by-dropdown', 'value')]
 )
 def render_table_content(active_tab, store_data, sort_by_column):
-    # ... (This function is unchanged, with correct styling logic) ...
+    # ... (This function is unchanged) ...
     if not store_data or not store_data.get('tickers'): return [], [], [], [], {}, [], None
     tickers = tuple(store_data.get('tickers')); df_full = get_competitor_data(tickers)
     if df_full.empty: return [], [], [], [], {}, [], None
@@ -348,33 +338,24 @@ def render_table_content(active_tab, store_data, sort_by_column):
         ascending = not config['higher_is_better'].get(sort_by_column, True)
         df_full.sort_values(by=sort_by_column, ascending=ascending, na_position='last', inplace=True)
     df_display = df_full.copy()
-    
-    # Use HTML inside markdown to create a bold, non-underlined link
     df_display['Ticker'] = df_display['Ticker'].apply(
          lambda t: f'<a href="/deepdive/{t}" style="text-decoration: none; color: inherit;">{t}</a>'
     )
-
     def format_market_cap(n):
         if pd.isna(n): return '-'
         return f'${n/1e9:,.2f}B' if n >= 1e9 else f'${n/1e6:,.2f}M'
     if "Market Cap" in df_display.columns: df_display["Market Cap"] = df_full["Market Cap"].apply(format_market_cap)
-
     displayed_columns = config["columns"]
     other_cols = [c for c in displayed_columns if c != 'Ticker']
     num_other_cols = len(other_cols)
     ticker_width_percent = 15
     style_cell_conditional = []
-    style_cell_conditional.append({'if': {'column_id': 'Ticker'},
-                                   'width': f'{ticker_width_percent}%',
-                                   'minWidth': f'{ticker_width_percent}%',
-                                   'maxWidth': f'{ticker_width_percent}%',
-                                   })
+    style_cell_conditional.append({'if': {'column_id': 'Ticker'},'width': f'{ticker_width_percent}%','minWidth': f'{ticker_width_percent}%','maxWidth': f'{ticker_width_percent}%'})
     if num_other_cols > 0:
         remaining_width = 100 - ticker_width_percent
         other_col_width_percent = remaining_width / num_other_cols
         for col in other_cols:
             style_cell_conditional.append({'if': {'column_id': col}, 'width': f'{other_col_width_percent}%'})
-
     columns = []
     for col in config["columns"]:
         col_def = {"name": col.replace(" (3Y)", ""), "id": col}
@@ -383,25 +364,96 @@ def render_table_content(active_tab, store_data, sort_by_column):
         elif any(kw in col for kw in ['Growth', 'Margin', 'ROE']): col_def.update({"type": "numeric", "format": Format(precision=2, scheme=Scheme.percentage)})
         else: col_def.update({"type": "numeric", "format": Format(precision=2, scheme=Scheme.fixed)})
         columns.append(col_def)
-    
     style_data_conditional=[{'if': {'column_id': 'Ticker'},'textAlign': 'left'}]
     dropdown_options = [{'label': col, 'value': col} for col in config["columns"] if col != 'Ticker']
     data = df_display[config["columns"]].to_dict('records')
     tooltips = {k: v for k, v in TOOLTIP_DEFINITIONS.items() if k in config["columns"]}
     sort_value = sort_by_column if callback_context.triggered_id == 'sort-by-dropdown' else None
-
     return data, columns, style_data_conditional, style_cell_conditional, tooltips, dropdown_options, sort_value
 
 # ==================================================================
-# 6. Callbacks for Deep Dive Page
+# 6. Callbacks for Deep Dive Page  <-- [CRITICAL FIX IS HERE]
 # ==================================================================
+
+@app.callback(
+    Output('deep-dive-tab-content', 'children'),
+    Input('deep-dive-main-tabs', 'active_tab'),
+    State('deep-dive-ticker-store', 'data')
+)
+def render_deep_dive_tab_content(active_tab, store_data):
+    if not store_data or not store_data.get('ticker'):
+        return "" # Return empty if no ticker is available
+    
+    ticker = store_data['ticker']
+    data = get_deep_dive_data(ticker)
+
+    if active_tab == "tab-charts-deep-dive":
+        financial_trends = data.get("financial_trends", pd.DataFrame())
+        price_history = data.get("price_history", pd.DataFrame())
+
+        # Financial Trends Figure
+        fig_trends = go.Figure()
+        if not financial_trends.empty:
+            fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends['Revenue'], name='Revenue', marker_color='royalblue'))
+            fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends['Net Income'], name='Net Income', yaxis='y2', mode='lines+markers', line=dict(color='darkorange')))
+        fig_trends.update_layout(
+            title=f'Annual Financial Trends',
+            yaxis=dict(title='Revenue ($)'),
+            yaxis2=dict(title='Net Income ($)', overlaying='y', side='right', showgrid=False),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=50)
+        )
+
+        # Price History Figure
+        fig_price = go.Figure()
+        if not price_history.empty:
+            fig_price.add_trace(go.Scatter(x=price_history.index, y=price_history['Close'], mode='lines', name='Close Price', line=dict(color='#636EFA')))
+        fig_price.update_layout(title=f'5-Year Stock Price History', xaxis_title='Date', yaxis_title='Price ($)', margin=dict(t=50))
+        
+        return dbc.Row([
+            dbc.Col(dcc.Graph(figure=fig_price), md=6),
+            dbc.Col(dcc.Graph(figure=fig_trends), md=6),
+        ], className="mt-3")
+
+    elif active_tab == "tab-financials-deep-dive":
+        return html.Div([
+            dbc.Tabs(
+                id="financial-statement-tabs",
+                active_tab="tab-income",
+                children=[
+                    dbc.Tab(label="Income Statement", tab_id="tab-income"),
+                    dbc.Tab(label="Balance Sheet", tab_id="tab-balance"),
+                    dbc.Tab(label="Cash Flow", tab_id="tab-cashflow"),
+                ],
+                className="mt-3"
+            ),
+            dcc.Loading(html.Div(id="financial-statement-content", className="mt-3 table-responsive"))
+        ])
+
+    elif active_tab == "tab-valuation-deep-dive":
+        return dbc.Row([
+            dbc.Col([
+                html.H5("DCF Assumptions", className="mt-3"),
+                html.Hr(),
+                dbc.Label("Your Forecast Growth Rate (%):", html_for="dcf-growth-rate-input"),
+                dcc.Input(id='dcf-growth-rate-input', type='number', value=5, step=0.5, className="mb-2 form-control"),
+                html.P("This model uses a standard WACC calculation and a perpetual growth rate of 2.5%.", className="text-muted small")
+            ], md=4),
+            dbc.Col(
+                dcc.Loading(dcc.Graph(id='interactive-dcf-chart')),
+                md=8
+            )
+        ], className="mt-3", align="center")
+        
+    return html.P("Select a tab")
+
+
 @app.callback(
     Output('financial-statement-content', 'children'),
     Input('financial-statement-tabs', 'active_tab'),
     State('deep-dive-ticker-store', 'data')
 )
 def render_financial_statement_table(active_tab, store_data):
-    # ... (unchanged) ...
     if not store_data or not store_data.get('ticker'): return ""
     ticker = store_data['ticker']
     data = get_deep_dive_data(ticker)
@@ -411,42 +463,65 @@ def render_financial_statement_table(active_tab, store_data):
     elif active_tab == 'tab-balance': df = statements.get('balance', pd.DataFrame())
     elif active_tab == 'tab-cashflow': df = statements.get('cashflow', pd.DataFrame())
     if df.empty: return dbc.Alert("Financial data not available.", color="warning")
-    df_formatted = df.applymap(lambda x: f"{x/1e6:,.0f}M" if isinstance(x, (int, float)) and abs(x) > 1e6 else (f"{x/1e3:,.0f}K" if isinstance(x, (int, float)) else x))
+    
+    # Format numbers to be more readable (e.g., in millions)
+    df_formatted = df.applymap(lambda x: f"{x/1_000_000:,.1f}M" if isinstance(x, (int, float)) else x)
     df_reset = df_formatted.reset_index().rename(columns={'index': 'Metric'})
-    return dbc.Table.from_dataframe(df_reset, striped=True, bordered=True, hover=True, responsive=True, class_name="small")
+    
+    return dbc.Table.from_dataframe(df_reset, striped=True, bordered=True, hover=True, class_name="small")
+
 @app.callback(
     Output('interactive-dcf-chart', 'figure'),
     Input('dcf-growth-rate-input', 'value'),
     State('deep-dive-ticker-store', 'data')
 )
 def update_interactive_dcf_chart(growth_rate, store_data):
-    # ... (unchanged) ...
     if not store_data or not store_data.get('ticker') or growth_rate is None:
-        return go.Figure().update_layout(title="Please provide a ticker and growth rate.")
+        return go.Figure().update_layout(title_text="Enter a growth rate to calculate.")
     ticker = store_data['ticker']
     growth_rate_decimal = float(growth_rate) / 100.0
     result = calculate_dcf_intrinsic_value(ticker, growth_rate_decimal)
     if 'error' in result:
-        return go.Figure().update_layout(title=f"Error Calculating DCF for {ticker}", annotations=[dict(text=result['error'], showarrow=False, xref="paper", yref="paper")])
-    iv, price = result['intrinsic_value'], result['current_price']
-    margin_of_safety = ((iv / price) - 1) if price and price > 0 else 0
+        return go.Figure().update_layout(title=f"Error Calculating DCF for {ticker}", annotations=[dict(text=result['error'], showarrow=False)])
+    
+    iv = result.get('intrinsic_value', 0)
+    price = result.get('current_price', 0)
+    
+    margin_of_safety = ((iv / price) - 1) if price > 0 else 0
+    
     fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta", value = price, number = {'prefix': "$"},
-        delta = {'reference': iv, 'relative': False, 'valueformat': '.2f', 'increasing': {'color': "tomato"}, 'decreasing': {'color': "limegreen"}},
+        mode = "gauge+number+delta",
+        value = price,
+        number = {'prefix': "$", 'font': {'size': 40}},
+        delta = {'reference': iv, 'relative': False, 'valueformat': '.2f', 
+                 'increasing': {'color': "#dc3545"}, 'decreasing': {'color': "#198754"}},
         domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': f"<b>Margin of Safety: {margin_of_safety:.2%}</b><br><span style='font-size:0.8em;color:gray'>Intrinsic Value: ${iv:.2f}</span>"},
+        title = {
+            'text': f"<b>Margin of Safety: {margin_of_safety:.2%}</b><br><span style='font-size:0.8em;color:gray'>Intrinsic Value (DCF): ${iv:.2f}</span>",
+            'font': {'size': 20}
+        },
         gauge = {
-            'axis': {'range': [min(price, iv) * 0.8, max(price, iv) * 1.2]},
-            'steps' : [{'range': [0, iv], 'color': "lightgreen"}, {'range': [iv, max(price, iv) * 1.2], 'color': "lightcoral"}],
-            'threshold' : {'line': {'color': "blue", 'width': 4}, 'thickness': 0.75, 'value': price},
-            'bar': {'color': "darkblue"}
-        }))
-    fig.update_layout(title_text=f"Valuation for {ticker} (Growth: {growth_rate:.1f}%)")
+            'axis': {'range': [min(price, iv) * 0.75, max(price, iv) * 1.25], 'tickwidth': 1, 'tickcolor': "darkblue"},
+            'bar': {'color': "rgba(0,0,0,0)"}, # Make the main bar transparent
+            'steps' : [
+                {'range': [0, iv], 'color': "rgba(25, 135, 84, 0.2)"},
+                {'range': [iv, max(price, iv) * 1.25], 'color': "rgba(220, 53, 69, 0.2)"}
+            ],
+            'threshold' : {
+                'line': {'color': "#636EFA", 'width': 5}, 'thickness': 1, 'value': price
+            }
+        }
+    ))
+    fig.update_layout(
+        title_text=f"Valuation with {growth_rate:.1f}% Growth",
+        height=400,
+        margin=dict(t=80, b=40)
+    )
     return fig
 
 
 # ==================================================================
-# 7. Register Auth Callbacks & Run App
+# 7. Register Auth Callbacks & Run App (Unchanged)
 # ==================================================================
 register_auth_callbacks(app, db, User)
 

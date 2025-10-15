@@ -1,119 +1,102 @@
-# pages/deep_dive.py (Corrected version)
+# pages/deep_dive.py (New Design Version)
+
 import dash
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 
-# Import the data fetching function
 from data_handler import get_deep_dive_data
 
-# This is the main layout function for the deep dive page.
-# It is called by app.py when a user navigates to a deep dive URL.
+def create_metric_card(title, value):
+    """Helper function to create a small statistic card."""
+    return dbc.Card(
+        dbc.CardBody(
+            [
+                html.H6(title, className="metric-card-title"),
+                html.P(value, className="metric-card-value"),
+            ]
+        ),
+        className="metric-card h-100" # h-100 to make cards same height
+    )
+
 def create_deep_dive_layout(ticker=None):
     if not ticker:
-        return html.Div(id='deep-dive-content-container') # Return an empty container for the callback to populate
+        return dbc.Container(html.P("Please provide a ticker by navigating from the main page."), className="p-5 text-center")
 
-    # Fetch all data needed for this page in one go
+    # Fetch all data needed for the page at once
     data = get_deep_dive_data(ticker)
 
     if data.get("error"):
         return dbc.Container([
-            html.H1("Error", className="text-danger"),
-            html.P(f"Could not retrieve data for {ticker}. Reason: {data['error']}")
+            html.H2("Data Error", className="text-danger"),
+            html.P(f"Could not retrieve data for {ticker}. Reason: {data['error']}"),
+            dcc.Link("Go back to Dashboard", href="/")
         ], fluid=True, className="mt-5 text-center")
 
-    info = data.get("info", {})
+    # --- Section 1: The Marquee ---
+    marquee = dbc.Row([
+        dbc.Col(
+            html.Img(src=data.get('logo_url', '/assets/placeholder_logo.png'), className="company-logo"),
+            width="auto", align="center"
+        ),
+        dbc.Col([
+            html.H1(data.get('company_name', ticker), className="company-name mb-0"),
+            html.P(f"{data.get('exchange', '')}: {ticker}", className="text-muted small")
+        ], width=True, align="center"),
+        dbc.Col([
+            html.Div([
+                html.H2(f"${data.get('current_price', 0):,.2f}", className="price-display mb-0"),
+                html.P(
+                    f"{data.get('daily_change_str', 'N/A')} ({data.get('daily_change_pct_str', 'N/A')})",
+                    className=f"price-change {'price-positive' if data.get('daily_change', 0) >= 0 else 'price-negative'}"
+                )
+            ], className="text-end")
+        ], width="auto", align="center")
+    ], align="center", className="marquee-header g-3")
+
+    # --- Section 2: At-a-Glance Dashboard ---
     key_stats = data.get("key_stats", {})
-    financial_trends = data.get("financial_trends", pd.DataFrame())
-    price_history = data.get("price_history", pd.DataFrame())
+    at_a_glance = html.Div([
+        dbc.Row([
+            dbc.Col(create_metric_card("Market Cap", data.get('market_cap_str', 'N/A'))),
+            dbc.Col(create_metric_card("P/E Ratio", key_stats.get('P/E Ratio', 'N/A'))),
+            dbc.Col(create_metric_card("Forward P/E", key_stats.get('Forward P/E', 'N/A'))),
+            dbc.Col(create_metric_card("PEG Ratio", key_stats.get('PEG Ratio', 'N/A'))),
+            dbc.Col(create_metric_card("Dividend Yield", key_stats.get('Dividend Yield', 'N/A'))),
+        ], className="g-3 mb-4"),
+        dbc.Card(
+            dbc.CardBody([
+                html.H5("Business Summary", className="card-title"),
+                html.P(data.get('business_summary', 'Business summary not available.'), className="small")
+            ])
+        )
+    ])
 
-    # --- Create Figures ---
-    # Financial Trends Figure
-    fig_trends = go.Figure()
-    fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends['Revenue'], name='Revenue', marker_color='royalblue'))
-    fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends['Net Income'], name='Net Income', yaxis='y2', mode='lines+markers', line=dict(color='darkorange')))
-    fig_trends.update_layout(
-        title=f'Annual Financial Trends for {ticker}',
-        yaxis=dict(title='Revenue ($)'),
-        yaxis2=dict(title='Net Income ($)', overlaying='y', side='right'),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
+    # --- Section 3: Analysis Workspace ---
+    analysis_workspace = html.Div([
+        dbc.Tabs(
+            [
+                dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
+                dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
+                dbc.Tab(label="VALUATION", tab_id="tab-valuation-deep-dive", label_class_name="fw-bold"),
+            ],
+            id="deep-dive-main-tabs",
+            active_tab="tab-charts-deep-dive",
+            className="custom-tabs-container mt-4" # Use the same class as main page
+        ),
+        dbc.Card(
+            dbc.CardBody(
+                dcc.Loading(html.Div(id="deep-dive-tab-content"))
+            ),
+            className="mt-3"
+        )
+    ])
 
-    # Price History Figure
-    fig_price = go.Figure()
-    fig_price.add_trace(go.Scatter(x=price_history.index, y=price_history['Close'], mode='lines', name='Close Price'))
-    fig_price.update_layout(title=f'5-Year Stock Price History for {ticker}', xaxis_title='Date', yaxis_title='Price ($)')
-
-    # --- Build Layout ---
-    layout = dbc.Container([
+    return dbc.Container([
         dcc.Store(id='deep-dive-ticker-store', data={'ticker': ticker}),
-        # Section 1: Company Overview
-        dbc.Row([
-            dbc.Col([
-                html.H2(f"{info.get('longName', ticker)} ({ticker})"),
-                html.P(f"Sector: {info.get('sector', 'N/A')} | Industry: {info.get('industry', 'N/A')}", className="text-muted"),
-                html.P(info.get('longBusinessSummary', 'No business summary available.'), className="mt-3", style={'maxHeight': '200px', 'overflowY': 'auto'})
-            ], width=12, lg=8),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader("Key Statistics"),
-                    dbc.ListGroup([
-                        dbc.ListGroupItem(f"Forward P/E: {key_stats.get('Forward P/E', 'N/A')}"),
-                        dbc.ListGroupItem(f"PEG Ratio: {key_stats.get('PEG Ratio', 'N/A')}"),
-                        dbc.ListGroupItem(f"P/S Ratio: {key_stats.get('P/S Ratio', 'N/A')}"),
-                        dbc.ListGroupItem(f"Return on Equity (ROE): {key_stats.get('ROE', 'N/A')}"),
-                        dbc.ListGroupItem(f"Debt to Equity: {key_stats.get('Debt to Equity', 'N/A')}"),
-                        dbc.ListGroupItem(f"Dividend Yield: {key_stats.get('Dividend Yield', 'N/A')}"),
-                    ], flush=True),
-                ])
-            ], width=12, lg=4)
-        ], className="mb-4"),
-
-        # Section 2: Snapshot Graphs
-        dbc.Row([
-            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_price))), width=12, lg=6, className="mb-3"),
-            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_trends))), width=12, lg=6, className="mb-3"),
-        ], className="mb-4"),
-
-        # Section 3: Detailed Financials (Tables)
-        dbc.Row([
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardHeader(
-                        dbc.Tabs(
-                            [
-                                dbc.Tab(label="Income Statement", tab_id="tab-income"),
-                                dbc.Tab(label="Balance Sheet", tab_id="tab-balance"),
-                                dbc.Tab(label="Cash Flow", tab_id="tab-cashflow"),
-                            ],
-                            id="financial-statement-tabs",
-                            active_tab="tab-income",
-                        )
-                    ),
-                    dbc.CardBody(dcc.Loading(html.Div(id="financial-statement-content")))
-                ]),
-                width=12
-            )
-        ], className="mb-4"),
-
-        # Section 4: Valuation Workspace
-        dbc.Row([
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardHeader("Interactive DCF Model"),
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col(dbc.Label("Your Forecast Growth Rate (%):"), width="auto"),
-                            dbc.Col(dcc.Input(id='dcf-growth-rate-input', type='number', value=5, step=0.5, className="mb-2"), width="auto")
-                        ], align="center"),
-                        dcc.Loading(dcc.Graph(id='interactive-dcf-chart'))
-                    ])
-                ]),
-                width=12
-            )
-        ])
-
-    ], fluid=True, className="mt-4")
-
-    return layout
+        marquee,
+        html.Hr(),
+        at_a_glance,
+        analysis_workspace,
+    ], fluid=True, className="p-4 main-content-container")

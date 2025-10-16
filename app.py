@@ -306,7 +306,7 @@ def render_graph_content(active_tab, store_data):
         except Exception as e: return dbc.Alert(f"An error occurred while rendering 'YTD Performance': {e}", color="danger")
     
     if active_tab == "tab-drawdown":
-        all_symbols = list(set(tickers + indices))
+        all_symbols = tuple(set(tickers + indices))
         if not all_symbols: return dbc.Card(dbc.CardBody(html.P("Please select items to display the chart", className="text-center text-muted")))
         try:
             drawdown_data = calculate_drawdown(all_symbols, period="1y")

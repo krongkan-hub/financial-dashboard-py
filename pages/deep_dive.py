@@ -80,15 +80,18 @@ def create_deep_dive_layout(ticker=None):
 
     # --- Section 3: Analysis Workspace ---
     analysis_workspace = html.Div([
-        dbc.Tabs(
-            [
-                dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
-                dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
-                dbc.Tab(label="VALUATION", tab_id="tab-valuation-deep-dive", label_class_name="fw-bold"),
-                dbc.Tab(label="NEWS", tab_id="tab-news-deep-dive", label_class_name="fw-bold"),
-            ],
-            id="deep-dive-main-tabs", active_tab="tab-charts-deep-dive", className="custom-tabs-container mt-4"
-        ),
+        html.Div(className="custom-tabs-container mt-4", children=[ # 1. เพิ่ม html.Div ครอบ
+            dbc.Tabs(
+                [
+                    dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
+                    dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
+                    dbc.Tab(label="VALUATION", tab_id="tab-valuation-deep-dive", label_class_name="fw-bold"),
+                    dbc.Tab(label="NEWS", tab_id="tab-news-deep-dive", label_class_name="fw-bold"),
+                ],
+                id="deep-dive-main-tabs", active_tab="tab-charts-deep-dive",
+                # 2. ลบ className ออกจากตรงนี้
+            )
+        ]),
         dbc.Card(dbc.CardBody(dcc.Loading(html.Div(id="deep-dive-tab-content"))), className="mt-3")
     ])
     

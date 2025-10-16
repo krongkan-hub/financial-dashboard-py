@@ -1,4 +1,4 @@
-# app.py (Refactored version - Step 4)
+# app.py (UX Improved Version)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -76,7 +76,7 @@ def logout():
     return redirect('/', code=302)
 
 # ==================================================================
-# 3. Layout Definition (Unchanged)
+# 3. Layout Definition (With UX Improvements)
 # ==================================================================
 def create_navbar():
     if current_user.is_authenticated:
@@ -121,12 +121,25 @@ def build_layout():
                         value='All',
                         clearable=False
                     ),
-                    dcc.Dropdown(id='ticker-select-dropdown', className="mt-2", placeholder="Select a ticker..."),
-                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock"], id="add-ticker-button", n_clicks=0, className="mt-2 w-100"),
+                    # --- [UX IMPROVEMENT] ---
+                    dcc.Dropdown(
+                        id='ticker-select-dropdown',
+                        className="mt-2",
+                        placeholder="Select one or more tickers...",
+                        multi=True # Allow multiple selections
+                    ),
+                    # --- [END UX IMPROVEMENT] ---
+                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock(s)"], id="add-ticker-button", n_clicks=0, className="mt-2 w-100"),
                     html.Hr(),
                     html.Label("Add Benchmarks to Compare", className="fw-bold"),
-                    dcc.Dropdown(id='index-select-dropdown', placeholder="Select an index..."),
-                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark"], id="add-index-button", n_clicks=0, className="mt-2 w-100"),
+                    # --- [UX IMPROVEMENT] ---
+                    dcc.Dropdown(
+                        id='index-select-dropdown',
+                        placeholder="Select one or more indices...",
+                        multi=True # Allow multiple selections
+                    ),
+                    # --- [END UX IMPROVEMENT] ---
+                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id="add-index-button", n_clicks=0, className="mt-2 w-100"),
                     html.Hr(className="my-4"),
                     html.Div(id='ticker-summary-display'),
                     html.Div(id='index-summary-display', className="mt-2"),
@@ -180,7 +193,7 @@ app.layout = html.Div([
 ])
 
 # ==================================================================
-# 4. Routing and User Selection Callbacks (Unchanged)
+# 4. Routing and User Selection Callbacks (With UX Improvements)
 # ==================================================================
 @app.callback(Output('page-content', 'children'), Input('url', 'pathname'))
 def display_page(pathname):
@@ -212,15 +225,30 @@ def save_selections_to_db(user_id, symbols, symbol_type):
             db.session.add(UserSelection(user_id=user_id, symbol_type=symbol_type, symbol=symbol))
         db.session.commit()
 
-# ... (Other user selection callbacks are unchanged and omitted for brevity) ...
-@app.callback(Output('user-selections-store', 'data', allow_duplicate=True), Input('add-ticker-button', 'n_clicks'), [State('ticker-select-dropdown', 'value'), State('user-selections-store', 'data')], prevent_initial_call=True)
-def add_ticker_to_store(n_clicks, selected_ticker, store_data):
+# --- [UX IMPROVEMENT] ---
+@app.callback(
+    Output('user-selections-store', 'data', allow_duplicate=True),
+    Input('add-ticker-button', 'n_clicks'),
+    [State('ticker-select-dropdown', 'value'), State('user-selections-store', 'data')],
+    prevent_initial_call=True
+)
+def add_ticker_to_store(n_clicks, selected_tickers, store_data):
     store_data = store_data or {'tickers': [], 'indices': []}
-    if selected_ticker and selected_ticker not in store_data['tickers']:
-        store_data['tickers'].append(selected_ticker)
-        if current_user.is_authenticated: save_selections_to_db(current_user.id, store_data['tickers'], 'stock')
+    if selected_tickers: # selected_tickers is now a list
+        for ticker in selected_tickers:
+            if ticker not in store_data['tickers']:
+                store_data['tickers'].append(ticker)
+        if current_user.is_authenticated:
+            save_selections_to_db(current_user.id, store_data['tickers'], 'stock')
     return store_data
-@app.callback(Output('user-selections-store', 'data', allow_duplicate=True), Input({'type': 'remove-stock', 'index': ALL}, 'n_clicks'), State('user-selections-store', 'data'), prevent_initial_call=True)
+# --- [END UX IMPROVEMENT] ---
+
+@app.callback(
+    Output('user-selections-store', 'data', allow_duplicate=True),
+    Input({'type': 'remove-stock', 'index': ALL}, 'n_clicks'),
+    State('user-selections-store', 'data'),
+    prevent_initial_call=True
+)
 def remove_ticker_from_store(n_clicks, store_data):
     if not any(n_clicks): return dash.no_update
     store_data = store_data or {'tickers': [], 'indices': []}
@@ -229,14 +257,31 @@ def remove_ticker_from_store(n_clicks, store_data):
         store_data['tickers'].remove(triggered_id)
         if current_user.is_authenticated: save_selections_to_db(current_user.id, store_data['tickers'], 'stock')
     return store_data
-@app.callback(Output('user-selections-store', 'data', allow_duplicate=True), Input('add-index-button', 'n_clicks'), [State('index-select-dropdown', 'value'), State('user-selections-store', 'data')], prevent_initial_call=True)
-def add_index_to_store(n_clicks, selected_index, store_data):
+
+# --- [UX IMPROVEMENT] ---
+@app.callback(
+    Output('user-selections-store', 'data', allow_duplicate=True),
+    Input('add-index-button', 'n_clicks'),
+    [State('index-select-dropdown', 'value'), State('user-selections-store', 'data')],
+    prevent_initial_call=True
+)
+def add_index_to_store(n_clicks, selected_indices, store_data):
     store_data = store_data or {'tickers': [], 'indices': []}
-    if selected_index and selected_index not in store_data['indices']:
-        store_data['indices'].append(selected_index)
-        if current_user.is_authenticated: save_selections_to_db(current_user.id, store_data['indices'], 'index')
+    if selected_indices: # selected_indices is now a list
+        for index in selected_indices:
+            if index not in store_data['indices']:
+                store_data['indices'].append(index)
+        if current_user.is_authenticated:
+            save_selections_to_db(current_user.id, store_data['indices'], 'index')
     return store_data
-@app.callback(Output('user-selections-store', 'data', allow_duplicate=True), Input({'type': 'remove-index', 'index': ALL}, 'n_clicks'), State('user-selections-store', 'data'), prevent_initial_call=True)
+# --- [END UX IMPROVEMENT] ---
+
+@app.callback(
+    Output('user-selections-store', 'data', allow_duplicate=True),
+    Input({'type': 'remove-index', 'index': ALL}, 'n_clicks'),
+    State('user-selections-store', 'data'),
+    prevent_initial_call=True
+)
 def remove_index_from_store(n_clicks, store_data):
     if not any(n_clicks): return dash.no_update
     store_data = store_data or {'tickers': [], 'indices': []}
@@ -245,17 +290,36 @@ def remove_index_from_store(n_clicks, store_data):
         store_data['indices'].remove(triggered_id)
         if current_user.is_authenticated: save_selections_to_db(current_user.id, store_data['indices'], 'index')
     return store_data
-@app.callback(Output('ticker-summary-display', 'children'), Input('user-selections-store', 'data'))
+
+# --- [UX IMPROVEMENT] ---
+@app.callback(
+    Output('ticker-summary-display', 'children'),
+    Input('user-selections-store', 'data')
+)
 def update_ticker_summary_display(store_data):
     tickers = store_data.get('tickers', []) if store_data else []
-    if not tickers: return html.Span("No stocks selected.", className="text-muted fst-italic")
+    if not tickers:
+        return html.Div([
+            html.Span("No stocks selected.", className="text-muted fst-italic"),
+            html.Small("Use the dropdowns above to start your analysis.", className="d-block text-muted mt-1")
+        ])
     return [html.Label("Selected Stocks:", className="text-muted small")] + [dbc.Badge([t, html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-stock', 'index': t})], color="light", className="m-1 p-2 text-dark border") for t in tickers]
-@app.callback(Output('index-summary-display', 'children'), Input('user-selections-store', 'data'))
+
+@app.callback(
+    Output('index-summary-display', 'children'),
+    Input('user-selections-store', 'data')
+)
 def update_index_summary_display(store_data):
     indices = store_data.get('indices', []) if store_data else []
-    if not indices: return html.Span("No indices selected.", className="text-muted fst-italic")
+    if not indices:
+        return html.Span("No indices selected.", className="text-muted fst-italic")
     return [html.Label("Selected Indices:", className="text-muted small")] + [dbc.Badge([INDEX_TICKER_TO_NAME.get(i, i), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': i})], color="light", className="m-1 p-2 text-dark border") for i in indices]
-@app.callback(Output('ticker-select-dropdown', 'options'), [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')])
+# --- [END UX IMPROVEMENT] ---
+
+@app.callback(
+    Output('ticker-select-dropdown', 'options'),
+    [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')]
+)
 def update_ticker_options(selected_sector, store_data):
     if not selected_sector: return []
     selected_tickers = store_data.get('tickers', []) if store_data else []
@@ -266,7 +330,11 @@ def update_ticker_options(selected_sector, store_data):
     else:
         tickers_to_display = sorted(SECTORS.get(selected_sector, []))
     return [{'label': t, 'value': t} for t in tickers_to_display if t not in selected_tickers]
-@app.callback(Output('index-select-dropdown', 'options'), Input('user-selections-store', 'data'))
+
+@app.callback(
+    Output('index-select-dropdown', 'options'),
+    Input('user-selections-store', 'data')
+)
 def update_index_options(store_data):
     if not store_data or not store_data.get('tickers'): return []
     selected_tickers, selected_indices = store_data.get('tickers', []), store_data.get('indices', [])

@@ -1,4 +1,4 @@
-# auth.py (Refactored version - Step 2)
+# auth.py (UX Improved Version)
 
 import dash
 from dash import dcc, html
@@ -21,7 +21,7 @@ def create_register_layout():
                     dbc.Label("Username"),
                     dbc.Input(id="reg-username-input", type="text", placeholder="Choose a username"),
                     dbc.Label("Password", className="mt-3"),
-                    dbc.Input(id="reg-password-input", type="password", placeholder="Enter a password (min. 8 characters)"), # <-- Added placeholder text
+                    dbc.Input(id="reg-password-input", type="password", placeholder="Enter a password (min. 8 characters)"),
                     dbc.Label("Confirm Password", className="mt-3"),
                     dbc.Input(id="reg-password-confirm-input", type="password", placeholder="Enter password again"),
                     dbc.Button("Create Account", id="create-account-button", color="primary", className="mt-4 w-100"),
@@ -55,7 +55,7 @@ def create_login_modal():
     )
 
 # ==================================================================
-# ส่วนที่ 2: Register Callbacks
+# ส่วนที่ 2: Register Callbacks (With UX Improvements)
 # ==================================================================
 def register_auth_callbacks(app, db, User):
     """Registers all authentication-related callbacks."""
@@ -108,11 +108,8 @@ def register_auth_callbacks(app, db, User):
     def register_user_page(n_clicks, username, password, password_confirm):
         if n_clicks and username and password and password_confirm:
             with app.server.app_context():
-                # --- [STEP 2 REFACTOR] ---
-                # Add a simple password policy check for minimum length.
                 if len(password) < 8:
                     return "Password must be at least 8 characters long.", True, dash.no_update
-                # --- [END STEP 2 REFACTOR] ---
 
                 if password != password_confirm:
                     return "Passwords do not match.", True, dash.no_update
@@ -124,13 +121,13 @@ def register_auth_callbacks(app, db, User):
                 new_user = User(username=username, password=hashed_password)
                 db.session.add(new_user)
                 db.session.commit()
-            
-            # Use a success alert and redirect the user
-            # This is a better user experience than just changing the URL.
-            # (Note: For a true success message on the login page, more state management would be needed)
-            return "Registration successful! Please log in.", False, "/" # Change alert to success color if desired
-        
-        # This alert is for when fields are missing.
+                
+                # --- [UX IMPROVEMENT] ---
+                # Automatically log the user in after successful registration
+                login_user(new_user, remember=True)
+                return dash.no_update, False, "/" # Redirect to main page, no alert needed
+                # --- [END UX IMPROVEMENT] ---
+
         if n_clicks:
              return "Please fill in all fields.", True, dash.no_update
         

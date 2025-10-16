@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Definitive Corrected Version with Robust Table Formatting)
+# pages/deep_dive.py (Version with News Tab Removed)
 
 import dash
 from dash import dcc, html, dash_table
@@ -67,7 +67,6 @@ def create_deep_dive_layout(ticker=None):
                     dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="VALUATION", tab_id="tab-valuation-deep-dive", label_class_name="fw-bold"),
-                    dbc.Tab(label="NEWS", tab_id="tab-news-deep-dive", label_class_name="fw-bold"),
                 ], id="deep-dive-main-tabs", active_tab="tab-charts-deep-dive")
         ]),
         dbc.Card(dbc.CardBody(dcc.Loading(html.Div(id="deep-dive-tab-content"))), className="mt-3")
@@ -135,14 +134,6 @@ def render_deep_dive_tab_content(active_tab, store_data):
             dbc.Col(dcc.Loading(dcc.Graph(id='interactive-dcf-chart-deep-dive')), md=8)
         ], className="mt-3", align="center")
 
-    if active_tab == "tab-news-deep-dive":
-        news_items = data.get("news", [])
-        if not news_items: return dbc.Alert("No recent news found for this ticker.", color="info", className="mt-3")
-        cards = [dbc.Card(dbc.CardBody([
-            html.H5(html.A(item['title'], href=item['link'], target="_blank", className="stretched-link", style={'textDecoration':'none'})),
-            html.P(f"{item.get('publisher', 'N/A')} - {item['providerPublishTime']}", className="small text-muted mb-0")
-        ]), className="mb-3") for item in news_items]
-        return html.Div(cards, className="mt-3")
     return html.P("Select a tab")
 
 @dash.callback(
@@ -163,18 +154,11 @@ def render_financial_statement_table(selected_statement, store_data):
 
     if df.empty: return dbc.Alert("Financial data not available.", color="warning")
 
-    # [FIX] Convert Timestamp columns to strings for DataTable compatibility.
-    # This prevents the "Callback error" by ensuring column names are strings.
     df.columns = [col.strftime('%Y-%m-%d') if isinstance(col, pd.Timestamp) else col for col in df.columns]
 
-    # Robust formatting: Iterate through each data column
     df_formatted = df.copy()
     for col in df_formatted.columns:
-        # First, safely convert the column to a numeric type.
-        # Any values that can't be converted will become NaN (Not a Number).
         numeric_col = pd.to_numeric(df_formatted[col], errors='coerce')
-
-        # Now, apply the formatting only to the actual numbers.
         df_formatted[col] = numeric_col.apply(
             lambda x: f"{x/1_000_000:,.1f}M" if pd.notna(x) else "-"
         )

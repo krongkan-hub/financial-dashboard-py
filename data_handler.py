@@ -1,4 +1,4 @@
-# data_handler.py (Definitive Corrected Version - 4 Years Quarterly)
+# data_handler.py (Version with News Code Removed)
 
 import pandas as pd
 import yfinance as yf
@@ -151,7 +151,7 @@ def get_deep_dive_data(ticker: str) -> dict:
             "recommendation_key": info.get('recommendationKey', 'N/A').replace('_', ' ').title(),
             "key_stats": { "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A", "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A", "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A", "Dividend Yield": f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A", }
         }
-        # --- [EDIT] Fetch 16 quarters (4 years) instead of 4 ---
+        
         income_stmt_quarterly = tkr.quarterly_financials.iloc[:, :16]
 
         revenue = _pick_row(income_stmt_quarterly, FIN_KEYS['revenue'])
@@ -181,7 +181,6 @@ def get_deep_dive_data(ticker: str) -> dict:
         result["financial_trends"] = financial_trends.sort_index().dropna(how='all')
         result["margin_trends"] = margin_trends.sort_index().dropna(how='all')
 
-        # --- [EDIT] Fetch 16 quarters (4 years) for all statements ---
         result["financial_statements"] = {
             "income": tkr.quarterly_financials.iloc[:, :16].dropna(how='all', axis=1),
             "balance": tkr.quarterly_balance_sheet.iloc[:, :16].dropna(how='all', axis=1),
@@ -189,11 +188,7 @@ def get_deep_dive_data(ticker: str) -> dict:
         }
 
         result["price_history"] = tkr.history(period="5y")
-        news_raw = tkr.news or []
-        processed_news = [item for item in news_raw if 'title' in item and 'link' in item]
-        for item in processed_news:
-            item['providerPublishTime'] = datetime.fromtimestamp(item['providerPublishTime']).strftime('%Y-%m-%d %H:%M') if 'providerPublishTime' in item else 'N/A'
-        result["news"] = processed_news[:8]
+        
         return result
     except Exception as e:
         logging.error(f"Critical failure in get_deep_dive_data for {ticker}: {e}", exc_info=True)

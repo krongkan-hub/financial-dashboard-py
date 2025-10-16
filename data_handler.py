@@ -1,4 +1,4 @@
-# data_handler.py (Refactored version - Step 3)
+# data_handler.py (Final Complete Version with All Fixes)
 
 import pandas as pd
 import yfinance as yf
@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 from functools import lru_cache
 import logging
 import warnings
+from datetime import datetime
+from urllib.parse import urlparse
 
 # Configure logging to provide informative output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,16 +16,21 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Suppress a common warning from yfinance when no data is found
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# --- [UNCHANGED] Helper functions and constants ---
+# --- Constants for financial data keys ---
 FIN_KEYS = {
-    "revenue": ["Total Revenue", "Revenue"],
+    "revenue": ["Total Revenue", "Revenues", "Revenue"],
+    "cost_of_revenue": ["Cost Of Revenue", "Cost of Revenue", "Cost Of Goods Sold"],
     "gross_profit": ["Gross Profit"],
     "op_income": ["Operating Income", "Operating Income or Loss", "Ebit", "Earnings Before Interest and Taxes"],
-    "net_income": ["Net Income", "Net Income Applicable To Common Shares"],
-    "ebitda": ["EBITDA", "Ebitda"]
+    "net_income": ["Net Income", "Net Income From Continuing Ops", "Net Income Applicable To Common Shares"],
 }
-CF_KEYS = {"cfo": ["Total Cash From Operating Activities", "Operating Cash Flow"],"capex": ["Capital Expenditures"]}
 
+CF_KEYS = {
+    "cfo": ["Total Cash From Operating Activities", "Operating Cash Flow"],
+    "capex": ["Capital Expenditures"]
+}
+
+# --- Helper Functions ---
 def _pick_row(df: pd.DataFrame, candidates: List[str]) -> Optional[pd.Series]:
     if df is None or df.empty: return None
     original_index, df.index = df.index, df.index.str.lower()
@@ -39,8 +46,11 @@ def _pick_row(df: pd.DataFrame, candidates: List[str]) -> Optional[pd.Series]:
 def _cagr(series: pd.Series, years: int) -> float:
     series = series.dropna().sort_index().tail(years + 1)
     if len(series) < 2: return np.nan
+    if pd.api.types.is_datetime64_any_dtype(series.index):
+        num_years = (series.index[-1].year - series.index[0].year)
+    else:
+        num_years = len(series) - 1
     start_val, end_val = series.iloc[0], series.iloc[-1]
-    num_years = (series.index[-1].year - series.index[0].year)
     if pd.notna(start_val) and pd.notna(end_val) and start_val > 0 and num_years > 0:
         return (end_val / start_val)**(1.0 / num_years) - 1.0
     return np.nan
@@ -53,14 +63,23 @@ def get_financial_data(statement_series, possible_keys):
             return abs(value) if pd.notna(value) else None
     return None
 
-# --- [REFACTORED] Functions with improved error handling ---
+def _get_logo_url(info: dict) -> Optional[str]:
+    """Attempts to get a logo URL from yfinance info, with a fallback to Clearbit."""
+    logo_url = info.get('logo_url')
+    if not logo_url:
+        website = info.get('website')
+        if website:
+            try:
+                domain = urlparse(website).netloc.replace('www.', '')
+                if domain:
+                    logo_url = f"https://logo.clearbit.com/{domain}"
+            except Exception:
+                logo_url = None
+    return logo_url
 
+# --- Main Data Fetching Functions ---
 @lru_cache(maxsize=32)
 def get_revenue_series(ticker: str) -> pd.Series:
-    """
-    Safely fetches the revenue series for a given ticker.
-    Logs errors and returns an empty Series on failure.
-    """
     try:
         tkr = yf.Ticker(ticker)
         fin = tkr.financials
@@ -69,33 +88,23 @@ def get_revenue_series(ticker: str) -> pd.Series:
             if revenue is not None:
                 revenue.index = pd.to_datetime(revenue.index)
                 return revenue.sort_index()
-    # --- [STEP 3 REFACTOR] ---
-    # Catch specific errors instead of a generic, silent 'except'.
-    # This makes debugging much easier.
-    except (IndexError, KeyError) as e:
-        logging.warning(f"Data structure error for {ticker} financials: {e}")
     except Exception as e:
-        # Catch any other unexpected errors (e.g., network issues)
         logging.error(f"Failed to fetch revenue for {ticker}: {e}")
-    # Always return a predictable type (empty Series) on failure.
     return pd.Series(dtype=float)
-    # --- [END STEP 3 REFACTOR] ---
 
 @lru_cache(maxsize=20)
 def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
     if not tickers: return pd.DataFrame()
     try:
-        prices = yf.download(list(tickers), period=period, auto_adjust=True, progress=False)['Close']
-        if prices.empty:
-            logging.warning(f"No price data returned for drawdown calculation: {tickers}")
-            return pd.DataFrame()
+        data = yf.download(list(tickers), period=period, auto_adjust=True, progress=False)
+        if data.empty: return pd.DataFrame()
+        prices = data['Close']
         if isinstance(prices, pd.Series): prices = prices.to_frame(name=tickers[0])
         rolling_max = prices.cummax()
         return (prices / rolling_max) - 1
     except Exception as e:
         logging.error(f"Error in calculate_drawdown for {tickers}: {e}")
         return pd.DataFrame()
-
 
 @lru_cache(maxsize=10)
 def get_competitor_data(tickers: tuple) -> pd.DataFrame:
@@ -105,14 +114,11 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
         try:
             tkr = yf.Ticker(ticker)
             info = tkr.info
-
-            # --- [STEP 3 REFACTOR] ---
-            # Use .get() with a default value of None to prevent KeyErrors
-            # if a specific piece of information is missing for a ticker.
             if not info or info.get('quoteType') != 'EQUITY':
-                logging.warning(f"Skipping {ticker}: Invalid ticker or no data available in yfinance info.")
+                logging.warning(f"Skipping {ticker}: Invalid ticker or no data in info.")
                 continue
 
+            logo_url = _get_logo_url(info)
             revenue_series = get_revenue_series(ticker)
             cagr_3y = _cagr(revenue_series, 3) if not revenue_series.empty else np.nan
             cfo_series = _pick_row(tkr.cashflow, CF_KEYS['cfo'])
@@ -127,22 +133,19 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
 
             all_data.append({
                 "Ticker": ticker,
+                "logo_url": logo_url,
                 "Price": info.get('currentPrice') or info.get('previousClose'),
                 "Market Cap": info.get("marketCap"),
-                "P/E": info.get('trailingPE'),
-                "P/B": info.get('priceToBook'),
+                "P/E": info.get('trailingPE'), "P/B": info.get('priceToBook'),
                 "EV/EBITDA": info.get('enterpriseToEbitda'),
-                "Revenue Growth (YoY)": info.get('revenueGrowth'),
-                "Revenue CAGR (3Y)": cagr_3y,
+                "Revenue Growth (YoY)": info.get('revenueGrowth'), "Revenue CAGR (3Y)": cagr_3y,
                 "Net Income Growth (YoY)": info.get('earningsGrowth'),
                 "ROE": info.get('returnOnEquity'),
                 "D/E Ratio": info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') is not None else np.nan,
                 "Operating Margin": info.get('operatingMargins'),
                 "Cash Conversion": cash_conversion
             })
-            # --- [END STEP 3 REFACTOR] ---
         except Exception as e:
-            # If one ticker fails, log it and continue with the others.
             logging.error(f"An error occurred processing summary for {ticker}: {e}")
 
     return pd.DataFrame(all_data) if all_data else pd.DataFrame()
@@ -154,84 +157,87 @@ def get_scatter_data(tickers: tuple) -> pd.DataFrame:
     for ticker in tickers:
         try:
             info = yf.Ticker(ticker).info
-            # --- [STEP 3 REFACTOR] ---
-            # Use .get() to safely access potentially missing data.
             scatter_data.append({
                 'Ticker': ticker,
                 'EV/EBITDA': info.get('enterpriseToEbitda'),
                 'EBITDA Margin': info.get('ebitdaMargins')
             })
-            # --- [END STEP 3 REFACTOR] ---
         except Exception as e:
             logging.warning(f"Could not fetch scatter data for {ticker}: {e}")
-    # .dropna() ensures that only complete data points are plotted.
     return pd.DataFrame(scatter_data).dropna()
-
 
 @lru_cache(maxsize=32)
 def get_deep_dive_data(ticker: str) -> dict:
-    """
-    Fetches all necessary data for the Deep Dive page in a single, robust call.
-    Returns a dictionary with an 'error' key upon failure.
-    """
     try:
         tkr = yf.Ticker(ticker)
         info = tkr.info
         if not info or info.get('quoteType') != 'EQUITY':
-            logging.warning(f"get_deep_dive_data failed for {ticker}: Invalid ticker or no data.")
             return {"error": "Invalid ticker or no data available."}
 
-        # --- Helper functions for safe formatting ---
-        def format_pct(val):
-            return f"{val*100:.2f}%" if pd.notna(val) else "N/A"
+        logo_url = _get_logo_url(info)
+        
         def format_large_number(n):
-            if pd.isna(n): return "N/A"
-            if n >= 1e12: return f'${n/1e12:,.2f}T'
-            if n >= 1e9: return f'${n/1e9:,.2f}B'
-            if n >= 1e6: return f'${n/1e6:,.2f}M'
+            if pd.isna(n) or n is None: return "N/A"
+            if abs(n) >= 1e12: return f'${n/1e12:,.2f}T'
+            if abs(n) >= 1e9: return f'${n/1e9:,.2f}B'
+            if abs(n) >= 1e6: return f'${n/1e6:,.2f}M'
             return f'${n:,.0f}'
 
-        # --- [STEP 3 REFACTOR] ---
-        # Use .get() extensively for safe data extraction from the info dict.
         current_price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
-        previous_close = info.get('previousClose', 0)
+        previous_close = info.get('previousClose', 1)
         daily_change = current_price - previous_close
-        daily_change_pct = (daily_change / previous_close) * 100 if previous_close else 0
+        daily_change_pct = (daily_change / previous_close) * 100
 
         result = {
-            "company_name": info.get('longName', ticker),
-            "exchange": info.get('exchange', 'N/A'),
-            "logo_url": info.get('logo_url'),
-            "business_summary": info.get('longBusinessSummary', 'Business summary not available.'),
+            "company_name": info.get('longName', ticker), "exchange": info.get('exchange', 'N/A'),
+            "logo_url": logo_url, "business_summary": info.get('longBusinessSummary', 'Business summary not available.'),
             "current_price": current_price,
-            "daily_change": daily_change,
-            "daily_change_pct": daily_change_pct,
             "daily_change_str": f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f}",
-            "daily_change_pct_str": f"{'+' if daily_change >= 0 else ''}{daily_change_pct:.2f}%",
+            "daily_change_pct_str": f"{'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%",
             "market_cap_str": format_large_number(info.get('marketCap')),
+            "target_mean_price": info.get('targetMeanPrice'),
+            "recommendation_key": info.get('recommendationKey', 'N/A').replace('_', ' ').title(),
             "key_stats": {
                 "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A",
                 "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A",
                 "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A",
-                "Dividend Yield": format_pct(info.get('dividendYield')),
+                "Dividend Yield": f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A",
             }
         }
-        # --- [END STEP 3 REFACTOR] ---
 
         income_stmt_annual = tkr.financials.iloc[:, :4]
         revenue = _pick_row(income_stmt_annual, FIN_KEYS['revenue'])
+        gross_profit = _pick_row(income_stmt_annual, FIN_KEYS['gross_profit'])
+        op_income = _pick_row(income_stmt_annual, FIN_KEYS['op_income'])
         net_income = _pick_row(income_stmt_annual, FIN_KEYS['net_income'])
+
+        if gross_profit is None and revenue is not None:
+            cost_of_revenue = _pick_row(income_stmt_annual, FIN_KEYS['cost_of_revenue'])
+            if cost_of_revenue is not None:
+                gross_profit = revenue - cost_of_revenue
+
         financial_trends = pd.DataFrame({'Revenue': revenue, 'Net Income': net_income})
         financial_trends.index = pd.to_datetime(financial_trends.index).year
         result["financial_trends"] = financial_trends.sort_index().dropna(how='all')
 
-        result["financial_statements"] = {
-            "income": tkr.financials.iloc[:, :4].dropna(how='all', axis=1),
-            "balance": tkr.balance_sheet.iloc[:, :4].dropna(how='all', axis=1),
-            "cashflow": tkr.cashflow.iloc[:, :4].dropna(how='all', axis=1)
-        }
-        
+        margin_trends = pd.DataFrame(index=financial_trends.index)
+        if revenue is not None and not revenue.empty:
+            revenue_safe = revenue.replace(0, np.nan)
+            if gross_profit is not None: margin_trends['Gross Margin'] = gross_profit / revenue_safe
+            if op_income is not None: margin_trends['Operating Margin'] = op_income / revenue_safe
+            if net_income is not None: margin_trends['Net Margin'] = net_income / revenue_safe
+        result["margin_trends"] = margin_trends.sort_index().dropna(how='all')
+
+        result["financial_statements"] = {"income": tkr.financials.iloc[:, :4].dropna(how='all', axis=1), "balance": tkr.balance_sheet.iloc[:, :4].dropna(how='all', axis=1), "cashflow": tkr.cashflow.iloc[:, :4].dropna(how='all', axis=1)}
         result["price_history"] = tkr.history(period="5y")
+
+        news_raw = tkr.news or []
+        processed_news = []
+        for item in news_raw:
+            if 'title' in item and 'link' in item:
+                item['providerPublishTime'] = datetime.fromtimestamp(item['providerPublishTime']).strftime('%Y-%m-%d %H:%M') if 'providerPublishTime' in item else 'N/A'
+                processed_news.append(item)
+        result["news"] = processed_news[:8]
 
         return result
 
@@ -245,9 +251,6 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> d
     try:
         ticker_obj = yf.Ticker(ticker)
         info = ticker_obj.info
-        
-        # --- [STEP 3 REFACTOR] ---
-        # Early exit if essential info is missing
         if not info or not info.get('sharesOutstanding'):
              return {'Ticker': ticker, 'error': 'Missing shares outstanding or basic info.'}
 
@@ -257,7 +260,6 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> d
 
         last_year_income, last_year_balance, last_year_cashflow = income_stmt.iloc[:, 0], balance_sheet.iloc[:, 0], cashflow.iloc[:, 0]
         
-        # Safely get all required financial data points
         ebit = get_financial_data(last_year_income, ['EBIT', 'Ebit'])
         tax_provision = get_financial_data(last_year_income, ['Tax Provision', 'Income Tax Expense'])
         pretax_income = get_financial_data(last_year_income, ['Pretax Income', 'Income Before Tax'])
@@ -273,13 +275,10 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> d
 
         required_components = [ebit, tax_provision, pretax_income, d_and_a, capex, market_cap, total_debt, interest_expense, beta, cash_and_equivalents, shares_outstanding, current_price]
         if any(v is None for v in required_components):
-            logging.warning(f"DCF failed for {ticker} due to missing data. Components: {required_components}")
             return {'Ticker': ticker, 'error': 'Missing essential data for DCF.'}
 
-        # Perform calculations with checks for division by zero
         tax_rate = (tax_provision / pretax_income) if pretax_income != 0 else 0.21
         base_fcff = (ebit * (1 - tax_rate)) + d_and_a - capex
-
         cost_of_debt_rd = (interest_expense / total_debt) if total_debt != 0 else 0.05
         
         tnx_history = yf.Ticker('^TNX').history(period='1d')
@@ -292,7 +291,7 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> d
         equity_weight, debt_weight = market_cap / total_capital, total_debt / total_capital
         
         wacc = (equity_weight * cost_of_equity_re) + (debt_weight * cost_of_debt_rd * (1 - tax_rate))
-        if wacc is None or (wacc - ASSUMED_PERPETUAL_GROWTH) <= 0:
+        if wacc is None or wacc <= ASSUMED_PERPETUAL_GROWTH:
             return {'Ticker': ticker, 'error': 'WACC is invalid or less than perpetual growth rate.'}
 
         future_fcffs = [base_fcff * ((1 + forecast_growth_rate) ** year) for year in range(1, PROJECTION_YEARS + 1)]
@@ -311,4 +310,3 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> d
     except Exception as e:
         logging.error(f"Critical failure in DCF calculation for {ticker}: {e}", exc_info=True)
         return {'Ticker': ticker, 'error': 'An unexpected error occurred during calculation.'}
-    # --- [END STEP 3 REFACTOR] ---

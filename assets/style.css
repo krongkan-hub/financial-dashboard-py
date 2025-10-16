@@ -116,7 +116,7 @@ positioning to work correctly.
 .dash-spreadsheet-container a {
     text-decoration: none !important;
     color: inherit !important;
-    font-weight: 600; /* Make ticker bold */
+    font-weight: 600 !important; /* <--- เพิ่ม !important ตรงนี้ */
 }
 
 .dash-spreadsheet-container a:hover {

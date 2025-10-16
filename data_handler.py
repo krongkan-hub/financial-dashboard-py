@@ -159,19 +159,29 @@ def get_deep_dive_data(ticker: str) -> dict:
         if gross_profit is None and revenue is not None:
             cost_of_revenue = _pick_row(income_stmt_annual, FIN_KEYS['cost_of_revenue'])
             if cost_of_revenue is not None: gross_profit = revenue - cost_of_revenue
+        
+        # --- START FIX ---
         financial_trends = pd.DataFrame({'Revenue': revenue, 'Net Income': net_income})
         financial_trends['Revenue'] = pd.to_numeric(financial_trends['Revenue'], errors='coerce')
         financial_trends['Net Income'] = pd.to_numeric(financial_trends['Net Income'], errors='coerce')
-        if not financial_trends.empty and pd.api.types.is_datetime64_any_dtype(financial_trends.index):
-            financial_trends.index = financial_trends.index.year
-        result["financial_trends"] = financial_trends.sort_index().dropna(how='all')
+        
         margin_trends = pd.DataFrame(index=financial_trends.index)
         if revenue is not None and not revenue.empty:
             revenue_safe = revenue.replace(0, np.nan)
             if gross_profit is not None: margin_trends['Gross Margin'] = gross_profit / revenue_safe
             if op_income is not None: margin_trends['Operating Margin'] = op_income / revenue_safe
             if net_income is not None: margin_trends['Net Margin'] = net_income / revenue_safe
+        
+        # Convert index to year for BOTH dataframes AFTER calculations are complete
+        if not financial_trends.empty and pd.api.types.is_datetime64_any_dtype(financial_trends.index):
+            financial_trends.index = financial_trends.index.year
+        if not margin_trends.empty and pd.api.types.is_datetime64_any_dtype(margin_trends.index):
+            margin_trends.index = margin_trends.index.year
+
+        result["financial_trends"] = financial_trends.sort_index().dropna(how='all')
         result["margin_trends"] = margin_trends.sort_index().dropna(how='all')
+        # --- END FIX ---
+        
         result["financial_statements"] = {"income": tkr.financials.iloc[:, :4].dropna(how='all', axis=1), "balance": tkr.balance_sheet.iloc[:, :4].dropna(how='all', axis=1), "cashflow": tkr.cashflow.iloc[:, :4].dropna(how='all', axis=1)}
         result["price_history"] = tkr.history(period="5y")
         news_raw = tkr.news or []

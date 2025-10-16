@@ -1,6 +1,32 @@
-# Python
-__pycache__/
-*.pyc
+Python bytecode
 
-# Instance Folder
+pycache/
+*.pyc
+*.pyo
+*.pyd
+
+Instance Folder - Contains database and other instance-specific files
+
 /instance/
+
+--- [STEP 2 REFACTOR] ---
+
+Environment variables file - Contains sensitive data
+
+MUST NOT be committed to version control.
+
+.env
+
+--- [END STEP 2 REFACTOR] ---
+
+Virtual environment
+
+venv/
+.venv/
+env/
+.env/
+
+IDE specific files
+
+.vscode/
+.idea/

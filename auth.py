@@ -1,4 +1,4 @@
-# auth.py (Final Fix - Added 'remember=True')
+# auth.py (Refactored version - Step 2)
 
 import dash
 from dash import dcc, html
@@ -8,10 +8,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import login_user
 
 # ==================================================================
-# ส่วนที่ 1: Layout Components
+# ส่วนที่ 1: Layout Components (Unchanged)
 # ==================================================================
-# create_register_layout() and create_login_modal() are unchanged.
-
 def create_register_layout():
     """Creates the layout for the registration page."""
     return dbc.Container([
@@ -23,7 +21,7 @@ def create_register_layout():
                     dbc.Label("Username"),
                     dbc.Input(id="reg-username-input", type="text", placeholder="Choose a username"),
                     dbc.Label("Password", className="mt-3"),
-                    dbc.Input(id="reg-password-input", type="password", placeholder="Enter a password"),
+                    dbc.Input(id="reg-password-input", type="password", placeholder="Enter a password (min. 8 characters)"), # <-- Added placeholder text
                     dbc.Label("Confirm Password", className="mt-3"),
                     dbc.Input(id="reg-password-confirm-input", type="password", placeholder="Enter password again"),
                     dbc.Button("Create Account", id="create-account-button", color="primary", className="mt-4 w-100"),
@@ -55,7 +53,6 @@ def create_login_modal():
         id="login-modal",
         is_open=False,
     )
-
 
 # ==================================================================
 # ส่วนที่ 2: Register Callbacks
@@ -92,7 +89,6 @@ def register_auth_callbacks(app, db, User):
             if username and password:
                 user = User.query.filter_by(username=username).first()
                 if user and check_password_hash(user.password, password):
-                    # [CRITICAL FIX] Add remember=True to create a persistent session
                     login_user(user, remember=True)
                     return '/', "", False, False
                 return dash.no_update, "Invalid username or password.", True, True
@@ -112,6 +108,12 @@ def register_auth_callbacks(app, db, User):
     def register_user_page(n_clicks, username, password, password_confirm):
         if n_clicks and username and password and password_confirm:
             with app.server.app_context():
+                # --- [STEP 2 REFACTOR] ---
+                # Add a simple password policy check for minimum length.
+                if len(password) < 8:
+                    return "Password must be at least 8 characters long.", True, dash.no_update
+                # --- [END STEP 2 REFACTOR] ---
+
                 if password != password_confirm:
                     return "Passwords do not match.", True, dash.no_update
                 
@@ -123,6 +125,13 @@ def register_auth_callbacks(app, db, User):
                 db.session.add(new_user)
                 db.session.commit()
             
-            return "Registration successful! Please log in.", True, "/"
+            # Use a success alert and redirect the user
+            # This is a better user experience than just changing the URL.
+            # (Note: For a true success message on the login page, more state management would be needed)
+            return "Registration successful! Please log in.", False, "/" # Change alert to success color if desired
         
-        return "Please fill in all fields.", True, dash.no_update
+        # This alert is for when fields are missing.
+        if n_clicks:
+             return "Please fill in all fields.", True, dash.no_update
+        
+        return dash.no_update, False, dash.no_update

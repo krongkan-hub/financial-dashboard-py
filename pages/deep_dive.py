@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with News Tab Removed)
+# pages/deep_dive.py (Version with Trend Line Plotting Removed)
 
 import dash
 from dash import dcc, html, dash_table
@@ -9,8 +9,9 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import plotly.express as px
 import json
+import numpy as np
 
-from data_handler import get_deep_dive_data, calculate_dcf_intrinsic_value
+from data_handler import get_deep_dive_data, calculate_dcf_intrinsic_value, get_technical_analysis_data
 
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
@@ -65,6 +66,7 @@ def create_deep_dive_layout(ticker=None):
         html.Div(className="custom-tabs-container mt-4", children=[
             dbc.Tabs([
                     dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
+                    dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="VALUATION", tab_id="tab-valuation-deep-dive", label_class_name="fw-bold"),
                 ], id="deep-dive-main-tabs", active_tab="tab-charts-deep-dive")
@@ -90,18 +92,73 @@ def render_deep_dive_tab_content(active_tab, store_data):
         if not financial_trends.empty:
             fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends.get('Revenue'), name='Revenue', marker_color='royalblue'), secondary_y=False)
             fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends.get('Net Income'), name='Net Income', mode='lines+markers', line=dict(color='darkorange')), secondary_y=True)
-        fig_trends.update_layout(title_text='Quarterly Financial Trends', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(t=50))
+        
+        fig_trends.update_layout(
+            title_text='Quarterly Financial Trends', 
+            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), 
+            margin=dict(t=50, b=50)
+        )
         fig_trends.update_yaxes(title_text="Revenue ($)", secondary_y=False, rangemode='tozero')
         fig_trends.update_yaxes(title_text="Net Income ($)", secondary_y=True, rangemode='tozero', showgrid=False)
 
         if not margin_trends.empty:
             fig_margins = px.line(margin_trends, markers=True, title="Quarterly Profitability Margins")
-            fig_margins.update_layout(yaxis_tickformat=".2%", legend_title_text='Margin', yaxis_title='Percentage', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(t=50))
+            fig_margins.update_layout(
+                yaxis_tickformat=".2%", 
+                legend_title_text=None, 
+                yaxis_title='Percentage', 
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+                margin=dict(t=50, b=50)
+            )
             margin_graph = dcc.Graph(figure=fig_margins)
         else:
             margin_graph = dbc.Alert("Margin data not available.", color="info", className="h-100 d-flex align-items-center justify-content-center")
 
         return dbc.Row([dbc.Col(dcc.Graph(figure=fig_trends), md=6), dbc.Col(margin_graph, md=6)], className="mt-3")
+
+    if active_tab == "tab-technicals-deep-dive":
+        price_history = data.get("price_history")
+        if price_history is None or price_history.empty:
+            return dbc.Alert("Price history is not available for technical analysis.", color="warning")
+
+        tech_data = get_technical_analysis_data(price_history)
+        if "error" in tech_data:
+            return dbc.Alert(tech_data["error"], color="danger")
+        
+        df = tech_data['data'].iloc[-365*2:]
+
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+                            row_heights=[0.6, 0.2, 0.2])
+
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], mode='lines', name='EMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], mode='lines', name='SMA 50', line=dict(color='blue', width=1.5)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], mode='lines', name='SMA 200', line=dict(color='purple', width=2)), row=1, col=1)
+        
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', name='BB Upper', line=dict(color='gray', width=1, dash='dash')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
+
+        # --- Trend Line Plotting Removed ---
+
+        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI'), row=2, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=2, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=1, row=2, col=1)
+        
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')), row=3, col=1)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='red')), row=3, col=1)
+        fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', marker_color=np.where(df['MACD_Hist'] > 0, 'green', 'red')), row=3, col=1)
+
+        fig.update_layout(
+            title_text=f'{ticker} - Technical Analysis',
+            height=800,
+            xaxis_rangeslider_visible=False,
+            legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
+        )
+        fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+        fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
+        fig.update_yaxes(title_text="MACD", row=3, col=1)
+
+        return dcc.Graph(figure=fig)
 
     if active_tab == "tab-financials-deep-dive":
         return html.Div([

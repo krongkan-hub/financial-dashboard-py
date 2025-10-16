@@ -1,4 +1,4 @@
-# data_handler.py (Version with News Code Removed)
+# data_handler.py (Version with Trend Line Logic Removed)
 
 import pandas as pd
 import yfinance as yf
@@ -235,3 +235,32 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> d
     except Exception as e:
         logging.error(f"Critical failure in DCF calculation for {ticker}: {e}", exc_info=True)
         return {'Ticker': ticker, 'error': 'An unexpected error occurred during calculation.'}
+
+def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
+    if not isinstance(price_history_df, pd.DataFrame) or price_history_df.empty:
+        return {"error": "Price history data is missing or invalid."}
+    
+    df = price_history_df.copy()
+    
+    # Technical Indicators
+    df['SMA50'] = df['Close'].rolling(window=50).mean()
+    df['SMA200'] = df['Close'].rolling(window=200).mean()
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['BB_Mid'] = df['Close'].rolling(window=20).mean()
+    df['BB_Std'] = df['Close'].rolling(window=20).std()
+    df['BB_Upper'] = df['BB_Mid'] + (df['BB_Std'] * 2)
+    df['BB_Lower'] = df['BB_Mid'] - (df['BB_Std'] * 2)
+    delta = df['Close'].diff(1)
+    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    ema12 = df['Close'].ewm(span=12, adjust=False).mean()
+    ema26 = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = ema12 - ema26
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+    
+    # --- Trend Line Logic Removed ---
+            
+    return {"data": df}

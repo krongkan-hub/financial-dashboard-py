@@ -1,7 +1,7 @@
-# pages/deep_dive.py (Definitive Corrected Version)
+# pages/deep_dive.py (Definitive Corrected Version with Robust Table Formatting)
 
 import dash
-from dash import dcc, html
+from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
@@ -72,7 +72,7 @@ def create_deep_dive_layout(ticker=None):
         ]),
         dbc.Card(dbc.CardBody(dcc.Loading(html.Div(id="deep-dive-tab-content"))), className="mt-3")
     ])
-    
+
     return dbc.Container([
         dcc.Store(id='deep-dive-ticker-store', data={'ticker': ticker}),
         marquee, html.Hr(), at_a_glance, analysis_workspace,
@@ -91,12 +91,12 @@ def render_deep_dive_tab_content(active_tab, store_data):
         if not financial_trends.empty:
             fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends.get('Revenue'), name='Revenue', marker_color='royalblue'), secondary_y=False)
             fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends.get('Net Income'), name='Net Income', mode='lines+markers', line=dict(color='darkorange')), secondary_y=True)
-        fig_trends.update_layout(title_text='Annual Financial Trends', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(t=50))
+        fig_trends.update_layout(title_text='Quarterly Financial Trends', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(t=50))
         fig_trends.update_yaxes(title_text="Revenue ($)", secondary_y=False, rangemode='tozero')
         fig_trends.update_yaxes(title_text="Net Income ($)", secondary_y=True, rangemode='tozero', showgrid=False)
-        
+
         if not margin_trends.empty:
-            fig_margins = px.line(margin_trends, markers=True, title="Annual Profitability Margins")
+            fig_margins = px.line(margin_trends, markers=True, title="Quarterly Profitability Margins")
             fig_margins.update_layout(yaxis_tickformat=".2%", legend_title_text='Margin', yaxis_title='Percentage', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(t=50))
             margin_graph = dcc.Graph(figure=fig_margins)
         else:
@@ -106,8 +106,22 @@ def render_deep_dive_tab_content(active_tab, store_data):
 
     if active_tab == "tab-financials-deep-dive":
         return html.Div([
-            dbc.Tabs([dbc.Tab(label="Income Statement", tab_id="tab-income"), dbc.Tab(label="Balance Sheet", tab_id="tab-balance"), dbc.Tab(label="Cash Flow", tab_id="tab-cashflow")], id="financial-statement-tabs", active_tab="tab-income", className="mt-3"),
-            dcc.Loading(html.Div(id="financial-statement-content", className="mt-3 table-responsive"))
+            dbc.Row([
+                dbc.Col(
+                    dcc.Dropdown(
+                        id='financial-statement-dropdown',
+                        options=[
+                            {'label': 'Income Statement', 'value': 'income'},
+                            {'label': 'Balance Sheet', 'value': 'balance'},
+                            {'label': 'Cash Flow', 'value': 'cashflow'},
+                        ],
+                        value='income',
+                        clearable=False,
+                    ),
+                    width=12, md=4, lg=3
+                )
+            ], className="mb-4 mt-2"),
+            dcc.Loading(html.Div(id="financial-statement-content"))
         ])
 
     if active_tab == "tab-valuation-deep-dive":
@@ -131,20 +145,69 @@ def render_deep_dive_tab_content(active_tab, store_data):
         return html.Div(cards, className="mt-3")
     return html.P("Select a tab")
 
-@dash.callback(Output('financial-statement-content', 'children'), Input('financial-statement-tabs', 'active_tab'), State('deep-dive-ticker-store', 'data'))
-def render_financial_statement_table(active_tab, store_data):
+@dash.callback(
+    Output('financial-statement-content', 'children'),
+    Input('financial-statement-dropdown', 'value'),
+    State('deep-dive-ticker-store', 'data')
+)
+def render_financial_statement_table(selected_statement, store_data):
     if not store_data or not store_data.get('ticker'): return ""
     ticker = store_data['ticker']
     data = get_deep_dive_data(ticker)
     statements = data.get("financial_statements", {})
     df = pd.DataFrame()
-    if active_tab == 'tab-income': df = statements.get('income', pd.DataFrame())
-    elif active_tab == 'tab-balance': df = statements.get('balance', pd.DataFrame())
-    elif active_tab == 'tab-cashflow': df = statements.get('cashflow', pd.DataFrame())
+
+    if selected_statement == 'income': df = statements.get('income', pd.DataFrame())
+    elif selected_statement == 'balance': df = statements.get('balance', pd.DataFrame())
+    elif selected_statement == 'cashflow': df = statements.get('cashflow', pd.DataFrame())
+
     if df.empty: return dbc.Alert("Financial data not available.", color="warning")
-    df_formatted = df.map(lambda x: f"{x/1_000_000:,.1f}M" if isinstance(x, (int, float)) else x)
+
+    # Robust formatting: Iterate through each data column
+    df_formatted = df.copy()
+    for col in df_formatted.columns:
+        # First, safely convert the column to a numeric type.
+        # Any values that can't be converted will become NaN (Not a Number).
+        numeric_col = pd.to_numeric(df_formatted[col], errors='coerce')
+
+        # Now, apply the formatting only to the actual numbers.
+        df_formatted[col] = numeric_col.apply(
+            lambda x: f"{x/1_000_000:,.1f}M" if pd.notna(x) else "-"
+        )
+
     df_reset = df_formatted.reset_index().rename(columns={'index': 'Metric'})
-    return dbc.Table.from_dataframe(df_reset, striped=True, bordered=True, hover=True, class_name="small")
+
+    columns = [{"name": col, "id": col} for col in df_reset.columns]
+    data = df_reset.to_dict('records')
+
+    return dash_table.DataTable(
+        data=data,
+        columns=columns,
+        style_header={
+            'backgroundColor': 'transparent',
+            'border': '0px',
+            'borderBottom': '2px solid #dee2e6',
+            'textTransform': 'uppercase',
+            'fontWeight': '600',
+        },
+        style_cell={
+            'textAlign': 'right',
+            'padding': '14px',
+            'border': '0px',
+            'borderBottom': '1px solid #f0f0f0',
+            'fontFamily': 'inherit',
+            'fontSize': '0.9rem',
+        },
+        style_cell_conditional=[
+            {
+                'if': {'column_id': 'Metric'},
+                'textAlign': 'left',
+                'fontWeight': '600',
+                'width': '35%'
+            }
+        ]
+    )
+
 
 @dash.callback(Output('interactive-dcf-chart-deep-dive', 'figure'), Input('dcf-growth-rate-input-deep-dive', 'value'), State('deep-dive-ticker-store', 'data'))
 def update_interactive_dcf_chart(growth_rate, store_data):

@@ -163,6 +163,10 @@ def render_financial_statement_table(selected_statement, store_data):
 
     if df.empty: return dbc.Alert("Financial data not available.", color="warning")
 
+    # [FIX] Convert Timestamp columns to strings for DataTable compatibility.
+    # This prevents the "Callback error" by ensuring column names are strings.
+    df.columns = [col.strftime('%Y-%m-%d') if isinstance(col, pd.Timestamp) else col for col in df.columns]
+
     # Robust formatting: Iterate through each data column
     df_formatted = df.copy()
     for col in df_formatted.columns:

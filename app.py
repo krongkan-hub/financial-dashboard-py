@@ -1,4 +1,4 @@
-# app.py (Final Complete Version with All Fixes)
+# app.py (Final Version with UI/UX Adjustments v2)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -149,6 +149,7 @@ def build_layout():
                                     dbc.Tab(label="VALUATION", tab_id="tab-valuation"),
                                     dbc.Tab(label="GROWTH", tab_id="tab-growth"),
                                     dbc.Tab(label="FUNDAMENTALS", tab_id="tab-fundamentals"),
+                                    dbc.Tab(label="SCORING", tab_id="tab-scoring"),
                                 ])
                             ]), width="auto"
                         ),
@@ -180,8 +181,8 @@ def display_page(pathname):
 
 @app.callback(Output('navbar-container', 'children'), Input('url', 'pathname'))
 def update_navbar(pathname):
-    if pathname == '/':
-        return create_navbar()
+    if pathname != '/register' and not pathname.startswith('/deepdive/'):
+         return create_navbar()
     return None
 
 @app.callback(Output('user-selections-store', 'data'), Input('url', 'pathname'))
@@ -285,8 +286,6 @@ def update_index_options(store_data):
 # ==================================================================
 @app.callback(Output('analysis-pane-content', 'children'), [Input('analysis-tabs', 'active_tab'), Input('user-selections-store', 'data')])
 def render_graph_content(active_tab, store_data):
-    # This callback remains largely unchanged as it was already robust.
-    # ... (code from previous versions) ...
     store_data = store_data or {'tickers': [], 'indices': []}
     tickers = tuple(store_data.get('tickers', []))
     indices = tuple(store_data.get('indices', []))
@@ -361,13 +360,53 @@ def render_graph_content(active_tab, store_data):
     
     return html.P("This is an empty tab!")
 
-# --- Table Helper Functions ---
+# ==================================================================
+# 6. SCORING SYSTEM AND TABLE HELPERS
+# ==================================================================
+def apply_custom_scoring(df):
+    """Applies custom scoring logic to the dataframe."""
+    if df.empty:
+        return df
+    
+    # 1. Company Size Model (based on Market Cap)
+    bins = [0, 2e9, 10e9, 200e9, float('inf')]
+    labels = ["Small Cap", "Mid Cap", "Large Cap", "Mega Cap"]
+    df['Company Size'] = pd.cut(df['Market Cap'], bins=bins, labels=labels, right=False)
+
+    # 2. Volatility Level Model (based on Beta)
+    conditions_volatility = [df['Beta'].isnull(), df['Beta'] < 0.5, df['Beta'] <= 2, df['Beta'] > 2]
+    choices_volatility = ["N/A", "Core", "Growth", "Hyper Growth"]
+    df['Volatility Level'] = np.select(conditions_volatility, choices_volatility, default='N/A')
+
+    # 3. Valuation Model (based on EV/EBITDA)
+    conditions_valuation = [df['EV/EBITDA'].isnull(), df['EV/EBITDA'] < 10, df['EV/EBITDA'] <= 25, df['EV/EBITDA'] > 25]
+    choices_valuation = ["N/A", "Cheap", "Fair Value", "Expensive"]
+    df['Valuation Model'] = np.select(conditions_valuation, choices_valuation, default='N/A')
+
+    # 4. Stock Profile (Categorization)
+    def categorize_stock(row):
+        vol = row['Volatility Level']
+        val = row['Valuation Model']
+        if vol == 'Hyper Growth' and val == 'Fair Value': return "Promising Growth"
+        if vol == 'Core' and val == 'Cheap': return "Hidden Value Gem"
+        if vol == 'Hyper Growth' and val == 'Expensive': return "High-Flyer"
+        if vol == 'Core' and val == 'Fair Value': return "Stable Compounder"
+        if vol == 'Growth' and val == 'Fair Value': return "Core Holding"
+        if vol == 'Growth' and val == 'Cheap': return "Value Opportunity"
+        return "Needs Review"
+        
+    df['Stock Profile'] = df.apply(categorize_stock, axis=1)
+    
+    return df
+
+# --- Table Configuration and Styling ---
 TABS_CONFIG = {
-    "tab-valuation": { "columns": ["Ticker", "Market Cap", "Price", "P/E", "P/B", "EV/EBITDA"], "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False} },
+    "tab-valuation": { "columns": ["Ticker", "Market Cap", "Company Size", "Price", "P/E", "P/B", "EV/EBITDA"], "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False} },
     "tab-growth": { "columns": ["Ticker", "Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"], "higher_is_better": {k: True for k in ["Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"]} },
-    "tab-fundamentals": { "columns": ["Ticker", "Operating Margin", "ROE", "D/E Ratio", "Cash Conversion"], "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True} }
+    "tab-fundamentals": { "columns": ["Ticker", "Operating Margin", "ROE", "D/E Ratio", "Cash Conversion"], "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True} },
+    "tab-scoring": { "columns": ["Ticker", "Volatility Level", "Valuation Model", "Stock Profile"], "higher_is_better": {}}
 }
-TOOLTIP_DEFINITIONS = { "Ticker": "Click for Deep Dive Analysis", "Market Cap": "Total market value", "Price": "Current price", "P/E": "Price-to-Earnings", "P/B": "Price-to-Book", "EV/EBITDA": "Enterprise Value to EBITDA", "Revenue Growth (YoY)": "Year-over-Year Revenue Growth", "Revenue CAGR (3Y)": "3-Year Compound Annual Growth Rate of Revenue", "Net Income Growth (YoY)": "Year-over-Year Earnings Growth", "Operating Margin": "Operating Income / Revenue", "ROE": "Return on Equity", "D/E Ratio": "Total Debt / Equity", "Cash Conversion": "Operating Cash Flow / Net Income" }
+TOOLTIP_DEFINITIONS = { "Ticker": "Click for Deep Dive Analysis", "Market Cap": "Total market value", "Company Size": "Company size based on Market Cap", "Price": "Current price", "P/E": "Price-to-Earnings", "P/B": "Price-to-Book", "EV/EBITDA": "Enterprise Value to EBITDA", "Revenue Growth (YoY)": "Year-over-Year Revenue Growth", "Revenue CAGR (3Y)": "3-Year Compound Annual Growth Rate of Revenue", "Net Income Growth (YoY)": "Year-over-Year Earnings Growth", "Operating Margin": "Operating Income / Revenue", "ROE": "Return on Equity", "D/E Ratio": "Total Debt / Equity", "Cash Conversion": "Operating Cash Flow / Net Income", "Volatility Level": "Stock price volatility vs. market (Beta)", "Valuation Model": "Valuation based on EV/EBITDA", "Stock Profile": "Overall stock category based on scoring" }
 
 def _format_market_cap(n):
     if pd.isna(n): return '-'
@@ -376,19 +415,23 @@ def _format_market_cap(n):
 def _prepare_display_dataframe(df_raw):
     df_display = df_raw.copy()
     def create_ticker_cell(row):
-        logo_url = row.get('logo_url')
-        ticker = row['Ticker']
-        # สร้าง HTML สำหรับโลโก้
+        logo_url, ticker = row.get('logo_url'), row['Ticker']
         logo_html = f'<img src="{logo_url}" style="height: 22px; width: 22px; margin-right: 8px; border-radius: 4px;" onerror="this.style.display=\'none\'">' if logo_url else ''
-        # ครอบทั้งโลโก้และชื่อหุ้นด้วยลิงก์เดียว โดยใช้ flexbox เพื่อจัดตำแหน่ง
-        link_html = f'''<a href="/deepdive/{ticker}" style="text-decoration: none; color: inherit; font-weight: 600; display: flex; align-items: center;">
-                             {logo_html}
-                             <span>{ticker}</span>
-                         </a>'''
-        return link_html
+        return f'''<a href="/deepdive/{ticker}" style="text-decoration: none; color: inherit; font-weight: 600; display: flex; align-items: center;">{logo_html}<span>{ticker}</span></a>'''
+    
     df_display['Ticker'] = df_display.apply(create_ticker_cell, axis=1)
+    
     if "Market Cap" in df_display.columns:
         df_display["Market Cap"] = df_raw["Market Cap"].apply(_format_market_cap)
+
+    # Convert scoring columns to plain text
+    scoring_cols = ['Company Size', 'Volatility Level', 'Valuation Model', 'Stock Profile']
+    for col in scoring_cols:
+        if col in df_display.columns:
+            df_display[col] = df_raw[col].apply(
+                lambda x: x if pd.notna(x) else ""
+            )
+            
     return df_display
 
 def _generate_datatable_columns(tab_config):
@@ -397,8 +440,8 @@ def _generate_datatable_columns(tab_config):
         col_def = {"name": col.replace(" (3Y)", ""), "id": col}
         if col == 'Ticker':
             col_def.update({"type": "text", "presentation": "markdown"})
-        elif col == "Market Cap":
-            col_def.update({"type": "text"})
+        elif col in ['Company Size', 'Volatility Level', 'Valuation Model', 'Stock Profile', 'Market Cap']:
+             col_def.update({"type": "text"})
         elif any(kw in col for kw in ['Growth', 'Margin', 'ROE', 'Conversion']):
             col_def.update({"type": "numeric", "format": Format(precision=2, scheme=Scheme.percentage)})
         else:
@@ -407,16 +450,22 @@ def _generate_datatable_columns(tab_config):
     return columns
 
 def _generate_datatable_style_conditionals(tab_config):
-    style_data_conditional = [{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}]
+    style_data_conditional = [] 
     style_cell_conditional = []
+
     displayed_columns = tab_config["columns"]
     other_cols = [c for c in displayed_columns if c != 'Ticker']
-    ticker_width_percent = 25 # Increase width for logo
+    ticker_width_percent = 15 # Reduced width
     style_cell_conditional.append({'if': {'column_id': 'Ticker'}, 'width': f'{ticker_width_percent}%'})
+
     if other_cols:
         other_col_width_percent = (100 - ticker_width_percent) / len(other_cols)
         for col in other_cols:
             style_cell_conditional.append({'if': {'column_id': col}, 'width': f'{other_col_width_percent}%'})
+
+    # Add alignment exception for Ticker column cells
+    style_cell_conditional.append({'if': {'column_id': 'Ticker'}, 'textAlign': 'left'})
+            
     return style_data_conditional, style_cell_conditional
 
 @app.callback(
@@ -439,7 +488,8 @@ def render_table_content(active_tab, store_data, sort_by_column):
         if df_full.empty:
             alert = dbc.Alert(f"Could not fetch complete data for the selected tickers: {', '.join(tickers)}", color="warning", className="mt-3 text-center")
             return alert, [], None
-
+        
+        df_full = apply_custom_scoring(df_full)
         config = TABS_CONFIG[active_tab]
         
         if sort_by_column and sort_by_column in df_full.columns:
@@ -450,21 +500,36 @@ def render_table_content(active_tab, store_data, sort_by_column):
         columns = _generate_datatable_columns(config)
         style_data_conditional, style_cell_conditional = _generate_datatable_style_conditionals(config)
         
-        dropdown_options = [{'label': col, 'value': col} for col in config["columns"] if col != 'Ticker']
+        dropdown_options = [{'label': col, 'value': col} for col in config["columns"] if col not in ['Ticker', 'Company Size', 'Volatility Level', 'Valuation Model', 'Stock Profile']]
         data = df_display[config["columns"]].to_dict('records')
         tooltips = {k: v for k, v in TOOLTIP_DEFINITIONS.items() if k in config["columns"]}
         sort_value = sort_by_column if callback_context.triggered_id == 'sort-by-dropdown' else None
 
         datatable = dash_table.DataTable(
-            id='interactive-datatable', data=data, columns=columns,
+            id='interactive-datatable',
+            data=data,
+            columns=columns,
             style_data_conditional=style_data_conditional,
             style_cell_conditional=style_cell_conditional,
             tooltip_header=tooltips,
-            row_selectable=False, cell_selectable=False,
-            style_header={'border': '0px', 'backgroundColor': 'transparent'},
+            row_selectable=False,
+            cell_selectable=False,
+            style_header={
+                'border': '0px',
+                'backgroundColor': 'transparent',
+                'fontWeight': '600',
+                'textTransform': 'uppercase',
+                'textAlign': 'right'
+            },
             style_data={'border': '0px', 'backgroundColor': 'transparent'},
-            style_cell={'textAlign': 'right', 'padding': '10px'},
-            style_header_conditional=[{'if': {'column_id': 'Ticker'},'textAlign': 'left'}],
+            style_cell={
+                'textAlign': 'right',
+                'padding': '14px',
+                'verticalAlign': 'middle'
+            },
+            style_header_conditional=[
+                {'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}
+            ],
             markdown_options={"html": True}
         )
         return datatable, dropdown_options, sort_value
@@ -475,7 +540,7 @@ def render_table_content(active_tab, store_data, sort_by_column):
         return alert, [], None
 
 # ==================================================================
-# 6. Register Auth Callbacks & Run App
+# 7. Register Auth Callbacks & Run App
 # ==================================================================
 register_auth_callbacks(app, db, User)
 

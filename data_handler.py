@@ -1,4 +1,4 @@
-# data_handler.py (Version with Trend Line Logic Removed)
+# data_handler.py (Version with Beta added for Scoring)
 
 import pandas as pd
 import yfinance as yf
@@ -108,7 +108,8 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
                 if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0: cash_conversion = latest_cfo / latest_ni
             all_data.append({
                 "Ticker": ticker, "logo_url": logo_url, "Price": info.get('currentPrice') or info.get('previousClose'),
-                "Market Cap": info.get("marketCap"), "P/E": info.get('trailingPE'), "P/B": info.get('priceToBook'),
+                "Market Cap": info.get("marketCap"), "Beta": info.get("beta"), # <-- ADDED BETA HERE
+                "P/E": info.get('trailingPE'), "P/B": info.get('priceToBook'),
                 "EV/EBITDA": info.get('enterpriseToEbitda'), "Revenue Growth (YoY)": info.get('revenueGrowth'), "Revenue CAGR (3Y)": cagr_3y,
                 "Net Income Growth (YoY)": info.get('earningsGrowth'), "ROE": info.get('returnOnEquity'),
                 "D/E Ratio": info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') is not None else np.nan,

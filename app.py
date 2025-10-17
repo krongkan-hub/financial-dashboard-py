@@ -1,4 +1,4 @@
-# app.py (Final Version with Settings Modal)
+# app.py (Final Version with Layout Fix and Renamed Tab)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -75,10 +75,29 @@ def load_user(user_id):
 def logout():
     logout_user()
     return redirect('/', code=302)
-
+    
 # ==================================================================
 # 3. Layout Definition
 # ==================================================================
+
+# --- Dictionary for Metric Definitions ---
+METRIC_DEFINITIONS = {
+    "P/E": dcc.Markdown("""**P/E (Price-to-Earnings) Ratio:** Compares the company's stock price to its earnings per share (EPS). It shows how much investors are willing to pay for $1 of the company's earnings. *Formula: Market Price per Share / EPS*"""),
+    "P/B": dcc.Markdown("""**P/B (Price-to-Book) Ratio:** Compares the company's market price to its book value per share. It indicates the value investors place on the company's net assets. *Formula: Market Price per Share / Book Value per Share*"""),
+    "EV/EBITDA": dcc.Markdown("""**EV/EBITDA Ratio:** Compares a company's Enterprise Value (Market Cap + Debt - Cash) to its Earnings Before Interest, Taxes, Depreciation, and Amortization. A comprehensive valuation metric. *Formula: Enterprise Value / EBITDA*"""),
+    "Revenue Growth (YoY)": dcc.Markdown("**Revenue Growth (YoY):** The percentage increase in a company's revenue over the past 12 months compared to the prior 12-month period."),
+    "Revenue CAGR (3Y)": dcc.Markdown("**Revenue CAGR (3Y):** The 3-Year Compound Annual Growth Rate of Revenue, showing the smoothed annualized growth rate over three years."),
+    "Net Income Growth (YoY)": dcc.Markdown("**Net Income Growth (YoY):** The percentage increase in a company's net profit over the past 12 months."),
+    "Operating Margin": dcc.Markdown("**Operating Margin:** Operating Income / Revenue. Shows how efficiently a company generates profit through its core operations."),
+    "ROE": dcc.Markdown("**ROE (Return on Equity):** Net Income / Shareholder's Equity. Measures the profitability in relation to stockholders’ equity."),
+    "D/E Ratio": dcc.Markdown("**D/E (Debt-to-Equity) Ratio:** Total Debt / Shareholder's Equity. Measures a company's financial leverage."),
+    "Cash Conversion": dcc.Markdown("**Cash Conversion:** Operating Cash Flow / Net Income. Measures how well a company converts profit into cash."),
+    "Target Price": dcc.Markdown("**Target Price:** Projected future price based on the provided assumptions in the forecast settings."),
+    "Target Upside": dcc.Markdown("**Target Upside:** The potential percentage return from the current price to the projected target price."),
+    "IRR %": dcc.Markdown("**IRR %:** The projected Internal Rate of Return (compounded annual growth rate) of the investment based on the forecast."),
+}
+
+
 def create_navbar():
     if current_user.is_authenticated:
         login_button = dbc.Button("Logout", href="/logout", color="secondary", external_link=True)
@@ -129,6 +148,22 @@ def create_forecast_modal():
         is_open=False,
     )
 
+def create_definitions_modal():
+    """Creates the pop-up modal for context-aware metric definitions."""
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(id="definitions-modal-title"),
+            dbc.ModalBody(id="definitions-modal-body"),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-definitions-modal-btn", className="ms-auto")
+            ),
+        ],
+        id="definitions-modal",
+        is_open=False,
+        size="lg",
+        scrollable=True
+    )
+
 def build_layout():
     return html.Div([
         dcc.Store(id='user-selections-store', storage_type='session'),
@@ -165,7 +200,7 @@ def build_layout():
                     ]),
                     dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
                     html.Hr(className="my-5"),
-
+                    
                     dbc.Row([
                         dbc.Col(
                             html.Div(className="custom-tabs-container", children=[
@@ -173,23 +208,31 @@ def build_layout():
                                     dbc.Tab(label="VALUATION", tab_id="tab-valuation"),
                                     dbc.Tab(label="GROWTH", tab_id="tab-growth"),
                                     dbc.Tab(label="FUNDAMENTALS", tab_id="tab-fundamentals"),
-                                    dbc.Tab(label="TARGET & RETURN", tab_id="tab-forecast"),
+                                    dbc.Tab(label="TARGET", tab_id="tab-forecast"), # <-- RENAMED
                                 ])
-                            ]), width="auto"
+                            ]),
                         ),
                         dbc.Col(
-                            dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
-                            width="auto",
-                            className="ms-2"
-                        ),
-                        dbc.Col(dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by"), width=12, md=2, className="ms-auto align-self-center")
-                    ], align="center", className="mt-3 g-2"),
+                            dbc.Stack(
+                                [
+                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn", color="secondary", outline=True),
+                                    dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
+                                    dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by", style={'width': '180px'})
+                                ],
+                                direction="horizontal",
+                                gap=2
+                            ),
+                            width="auto"
+                        )
+                    ], justify="between", align="center", className="mt-3 g-2"),
+
                     dcc.Loading(html.Div(id="table-pane-content", className="mt-2"))
                 ], width=12, md=9, className="content-offset"),
             ], className="g-4")
         ], fluid=True, className="p-4 main-content-container"),
         create_login_modal(),
-        create_forecast_modal()
+        create_forecast_modal(),
+        create_definitions_modal()
     ])
 
 app.layout = html.Div([
@@ -320,7 +363,7 @@ def update_index_options(store_data):
     State('forecast-assumptions-modal', 'is_open'),
     prevent_initial_call=True
 )
-def toggle_modal(n_clicks, is_open):
+def toggle_forecast_modal(n_clicks, is_open):
     if n_clicks:
         return not is_open
     return is_open
@@ -338,6 +381,44 @@ def save_forecast_assumptions(n_clicks, years, growth, pe):
     if n_clicks:
         return {'years': years, 'growth': growth, 'pe': pe}, False
     return dash.no_update, dash.no_update
+
+@app.callback(
+    Output("definitions-modal", "is_open"),
+    Output("definitions-modal-title", "children"),
+    Output("definitions-modal-body", "children"),
+    [Input("open-definitions-modal-btn", "n_clicks"), Input("close-definitions-modal-btn", "n_clicks")],
+    [State("definitions-modal", "is_open"), State("table-tabs", "active_tab")],
+    prevent_initial_call=True
+)
+def toggle_definitions_modal(open_clicks, close_clicks, is_open, active_tab):
+    ctx = callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update, dash.no_update
+
+    triggered_id = ctx.triggered_id
+    if triggered_id == "open-definitions-modal-btn":
+        tab_name = TABS_CONFIG[active_tab].get('tab_name', active_tab.replace('tab-', '').title())
+        title = f"{tab_name} Metric Definitions"
+        
+        columns_in_tab = TABS_CONFIG[active_tab]['columns']
+        
+        body_content = []
+        for col in columns_in_tab:
+            if col in METRIC_DEFINITIONS:
+                body_content.append(METRIC_DEFINITIONS[col])
+                body_content.append(html.Hr())
+
+        if not body_content:
+            body_content = [html.P("No specific definitions for this tab.")]
+        else:
+             body_content.pop() # Remove last Hr
+
+        return True, title, body_content
+
+    if triggered_id == "close-definitions-modal-btn":
+        return False, dash.no_update, dash.no_update
+
+    return is_open, dash.no_update, dash.no_update
 
 # ==================================================================
 # 5. Callbacks for Main Dashboard Panes
@@ -459,26 +540,14 @@ def apply_custom_scoring(df):
 
 # --- Table Configuration and Styling ---
 TABS_CONFIG = {
-    "tab-valuation": { "columns": ["Ticker", "Market Cap", "Company Size", "Price", "P/E", "P/B", "EV/EBITDA"], "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False} },
-    "tab-growth": { "columns": ["Ticker", "Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"], "higher_is_better": {k: True for k in ["Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"]} },
-    "tab-fundamentals": { "columns": ["Ticker", "Operating Margin", "ROE", "D/E Ratio", "Cash Conversion"], "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True} },
+    "tab-valuation": { "columns": ["Ticker", "Market Cap", "Company Size", "Price", "P/E", "P/B", "EV/EBITDA"], "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False}, "tab_name": "Valuation" },
+    "tab-growth": { "columns": ["Ticker", "Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"], "higher_is_better": {k: True for k in ["Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"]}, "tab_name": "Growth" },
+    "tab-fundamentals": { "columns": ["Ticker", "Operating Margin", "ROE", "D/E Ratio", "Cash Conversion"], "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True}, "tab_name": "Fundamentals" },
     "tab-forecast": {
         "columns": ["Ticker", "Target Price", "Target Upside", "IRR %", "Volatility Level", "Valuation Model", "Stock Profile"],
-        "higher_is_better": {"Target Upside": True, "IRR %": True}
+        "higher_is_better": {"Target Upside": True, "IRR %": True},
+        "tab_name": "Target" # <-- RENAMED
     }
-}
-TOOLTIP_DEFINITIONS = {
-    "Ticker": "Click for Deep Dive Analysis", "Market Cap": "Total market value", "Company Size": "Company size based on Market Cap",
-    "Price": "Current price", "P/E": "Price-to-Earnings", "P/B": "Price-to-Book", "EV/EBITDA": "Enterprise Value to EBITDA",
-    "Revenue Growth (YoY)": "Year-over-Year Revenue Growth", "Revenue CAGR (3Y)": "3-Year Compound Annual Growth Rate of Revenue",
-    "Net Income Growth (YoY)": "Year-over-Year Earnings Growth", "Operating Margin": "Operating Income / Revenue",
-    "ROE": "Return on Equity", "D/E Ratio": "Total Debt / Equity", "Cash Conversion": "Operating Cash Flow / Net Income",
-    "Target Price": "Projected future price based on the provided assumptions.",
-    "Target Upside": "Total percentage return from the current price to the target price.",
-    "IRR %": "The projected compounded annual growth rate (CAGR) of the investment.",
-    "Volatility Level": "Stock price volatility vs. market (Beta)",
-    "Valuation Model": "Valuation based on EV/EBITDA",
-    "Stock Profile": "Overall stock category based on scoring"
 }
 
 def _format_market_cap(n):
@@ -497,7 +566,6 @@ def _prepare_display_dataframe(df_raw):
     if "Market Cap" in df_display.columns:
         df_display["Market Cap"] = df_raw["Market Cap"].apply(_format_market_cap)
 
-    # Convert scoring columns to plain text
     scoring_cols = ['Company Size', 'Volatility Level', 'Valuation Model', 'Stock Profile']
     for col in scoring_cols:
         if col in df_display.columns:
@@ -532,7 +600,7 @@ def _generate_datatable_style_conditionals(tab_config):
 
     displayed_columns = tab_config["columns"]
     other_cols = [c for c in displayed_columns if c != 'Ticker']
-    ticker_width_percent = 15 # Reduced width
+    ticker_width_percent = 15
     style_cell_conditional.append({'if': {'column_id': 'Ticker'}, 'width': f'{ticker_width_percent}%'})
 
     if other_cols:
@@ -540,9 +608,7 @@ def _generate_datatable_style_conditionals(tab_config):
         for col in other_cols:
             style_cell_conditional.append({'if': {'column_id': col}, 'width': f'{other_col_width_percent}%'})
 
-    # Add alignment exception for Ticker column cells
     style_cell_conditional.append({'if': {'column_id': 'Ticker'}, 'textAlign': 'left'})
-
     return style_data_conditional, style_cell_conditional
 
 @app.callback(
@@ -598,7 +664,6 @@ def render_table_content(active_tab, store_data, sort_by_column, forecast_data):
 
         dropdown_options = [{'label': col, 'value': col} for col in config["columns"] if col not in ['Ticker', 'Company Size', 'Volatility Level', 'Valuation Model', 'Stock Profile']]
         data = df_display[config["columns"]].to_dict('records')
-        tooltips = {k: v for k, v in TOOLTIP_DEFINITIONS.items() if k in config["columns"]}
         sort_value = sort_by_column if callback_context.triggered_id == 'sort-by-dropdown' else None
 
         datatable = dash_table.DataTable(
@@ -607,7 +672,6 @@ def render_table_content(active_tab, store_data, sort_by_column, forecast_data):
             columns=columns,
             style_data_conditional=style_data_conditional,
             style_cell_conditional=style_cell_conditional,
-            tooltip_header=tooltips,
             row_selectable=False,
             cell_selectable=False,
             style_header={

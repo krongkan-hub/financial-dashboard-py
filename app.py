@@ -369,7 +369,7 @@ def apply_custom_scoring(df):
         return df
     
     # 1. Company Size Model (based on Market Cap)
-    bins = [0, 2e9, 10e9, 200e9, float('inf')]
+    bins = [0, 1e9, 10e10, 100e10, float('inf')]
     labels = ["Small Cap", "Mid Cap", "Large Cap", "Mega Cap"]
     df['Company Size'] = pd.cut(df['Market Cap'], bins=bins, labels=labels, right=False)
 

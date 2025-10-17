@@ -69,7 +69,13 @@ def create_deep_dive_layout(ticker=None):
                     dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="VALUATION", tab_id="tab-valuation-deep-dive", label_class_name="fw-bold"),
-                ], id="deep-dive-main-tabs", active_tab="tab-charts-deep-dive")
+                ],
+                id="deep-dive-main-tabs",
+                active_tab="tab-charts-deep-dive",
+                # --- [FIX] เพิ่ม 2 บรรทัดนี้เข้ามา ---
+                persistence=True,
+                persistence_type='session'
+            )
         ]),
         dbc.Card(dbc.CardBody(dcc.Loading(html.Div(id="deep-dive-tab-content"))), className="mt-3")
     ])

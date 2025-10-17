@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Trend Line Plotting Removed)
+# pages/deep_dive.py (Version with Recommendation Source Added)
 
 import dash
 from dash import dcc, html, dash_table
@@ -15,8 +15,16 @@ from data_handler import get_deep_dive_data, calculate_dcf_intrinsic_value, get_
 
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
+    
+    # --- [MODIFICATION] ---
+    # Add a source label specifically for the Recommendation card
+    card_title_content = [title]
+    if title == "Recommendation":
+        card_title_content.append(html.Span(" (Yahoo)", style={'fontSize': '0.7em', 'color': '#6c757d', 'marginLeft': '4px'}))
+    # --- [END MODIFICATION] ---
+
     return dbc.Card(dbc.CardBody([
-        html.H6(title, className="metric-card-title"),
+        html.H6(card_title_content, className="metric-card-title"),
         html.P(value, className="metric-card-value"),
     ]), className=f"metric-card h-100 {className}")
 
@@ -72,7 +80,6 @@ def create_deep_dive_layout(ticker=None):
                 ],
                 id="deep-dive-main-tabs",
                 active_tab="tab-charts-deep-dive",
-                # --- [FIX] เพิ่ม 2 บรรทัดนี้เข้ามา ---
                 persistence=True,
                 persistence_type='session'
             )
@@ -143,8 +150,6 @@ def render_deep_dive_tab_content(active_tab, store_data):
         
         fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', name='BB Upper', line=dict(color='gray', width=1, dash='dash')), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
-
-        # --- Trend Line Plotting Removed ---
 
         fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI'), row=2, col=1)
         fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=2, col=1)

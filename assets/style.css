@@ -103,8 +103,11 @@ positioning to work correctly.
 /* --- Table Data Row Styling --- */
 .dash-spreadsheet-container .dash-cell {
     background-color: transparent !important;
-    border-bottom: 1px solid #f0f0f0 !important; /* Lighter border */
+    border-bottom: 1px solid #f0f0f0 !important;
     padding: 14px 0px;
+    /* --- [MODIFICATION] --- */
+    vertical-align: middle !important; /* Force vertical alignment */
+    /* --- [END MODIFICATION] --- */
 }
 
 /* --- Hover effect for data rows --- */
@@ -183,6 +186,7 @@ positioning to work correctly.
     background-color: transparent !important;
     border-bottom: 1px solid #f0f0f0 !important;
     padding: 14px 0px;
+    vertical-align: middle !important;
 }
 .dash-spreadsheet-container .dash-row:hover .dash-cell {
     background-color: #f8f9fa !important;
@@ -244,6 +248,14 @@ positioning to work correctly.
     color: #6c757d; /* Bootstrap secondary text color */
     text-transform: uppercase;
     margin-bottom: 0.5rem;
+    
+    /* --- [MODIFICATION] --- */
+    /* Vertically align all values by giving titles a consistent minimum height */
+    min-height: 2.5em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* --- [END MODIFICATION] --- */
 }
 .metric-card-value {
     font-size: 1.5rem;

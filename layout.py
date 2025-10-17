@@ -11,9 +11,10 @@ METRIC_DEFINITIONS = {
     "P/E": dcc.Markdown("""
     **P/E (Price-to-Earnings) Ratio**
     * **Definition:** A valuation ratio that compares a company's current share price to its per-share earnings.
-    * **Formula:** $$
-        P/E\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Earnings per Share (EPS)}}
-        $$
+    * **Formula:**
+    $$
+    P/E\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Earnings per Share (EPS)}}
+    $$
     * **Formula Components:**
         * `Market Price per Share`: The current market price of a single share.
         * `Earnings per Share (EPS)`: The company's total profit allocated to each outstanding share of common stock.
@@ -24,9 +25,10 @@ METRIC_DEFINITIONS = {
     "P/B": dcc.Markdown("""
     **P/B (Price-to-Book) Ratio**
     * **Definition:** Compares a company's market capitalization to its book value. It indicates the value investors place on the company's net assets.
-    * **Formula:** $$
-        P/B\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Book Value per Share}}
-        $$
+    * **Formula:**
+    $$
+    P/B\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Book Value per Share}}
+    $$
     * **Formula Components:**
         * `Market Price per Share`: The current market price of a single share.
         * `Book Value per Share`: The net asset value of a company divided by the number of shares outstanding, calculated as (Total Assets - Intangible Assets - Liabilities).
@@ -37,9 +39,10 @@ METRIC_DEFINITIONS = {
     "EV/EBITDA": dcc.Markdown("""
     **EV/EBITDA (Enterprise Value-to-EBITDA) Ratio**
     * **Definition:** A ratio used to compare the total value of a company to its cash earnings less non-cash expenses. It's often considered more comprehensive than P/E as it accounts for debt.
-    * **Formula:** $$
-        EV/EBITDA = \\frac{\\text{Enterprise Value}}{\\text{EBITDA}}
-        $$
+    * **Formula:**
+    $$
+    EV/EBITDA = \\frac{\\text{Enterprise Value}}{\\text{EBITDA}}
+    $$
     * **Formula Components:**
         * `Enterprise Value (EV)`: Market Capitalization + Total Debt - Cash and Cash Equivalents.
         * `EBITDA`: Earnings Before Interest, Taxes, Depreciation, and Amortization.
@@ -52,9 +55,10 @@ METRIC_DEFINITIONS = {
     "Revenue Growth (YoY)": dcc.Markdown("""
     **Revenue Growth (Year-over-Year)**
     * **Definition:** Measures the percentage increase in a company's revenue over the most recent twelve-month period compared to the prior twelve-month period.
-    * **Formula:** $$
-        YoY\\ Growth = \\left( \\frac{\\text{Current Period Revenue}}{\\text{Prior Period Revenue}} - 1 \\right) x 100
-        $$
+    * **Formula:**
+    $$
+    YoY\\ Growth = \\Big( \\frac{\\text{Current Period Revenue}}{\\text{Prior Period Revenue}} - 1 \\Big) \\times 100
+    $$
     * **Formula Components:**
         * `Current Period Revenue`: Revenue from the most recent 12-month period.
         * `Prior Period Revenue`: Revenue from the 12-month period before the current one.
@@ -63,9 +67,10 @@ METRIC_DEFINITIONS = {
     "Revenue CAGR (3Y)": dcc.Markdown("""
     **Revenue CAGR (3-Year)**
     * **Definition:** The Compound Annual Growth Rate of revenue over a three-year period. It provides a smoothed, annualized growth rate that irons out volatility.
-    * **Formula:** $$
-        CAGR = \\left( \\left( \\frac{\\text{Ending Value}}{\\text{Beginning Value}} \\right)^{\\frac{1}{\\text{No. of Years}}} - 1 \\right) x 100
-        $$
+    * **Formula:**
+    $$
+    CAGR = \\bigg( \\Big( \\frac{\\text{Ending Value}}{\\text{Beginning Value}} \\Big)^{\\frac{1}{\\text{No. of Years}}} - 1 \\bigg) \\times 100
+    $$
     * **Formula Components:**
         * `Ending Value`: Revenue from the final year in the period.
         * `Beginning Value`: Revenue from the starting year in the period.
@@ -75,9 +80,10 @@ METRIC_DEFINITIONS = {
     "Net Income Growth (YoY)": dcc.Markdown("""
     **Net Income Growth (Year-over-Year)**
     * **Definition:** Measures the percentage increase in a company's net profit (after all expenses and taxes) over the past year.
-    * **Formula:** $$
-        YoY\\ Growth = \\left( \\frac{\\text{Current Period Net Income}}{\\text{Prior Period Net Income}} - 1 \\right) x 100
-        $$
+    * **Formula:**
+    $$
+    YoY\\ Growth = \\Big( \\frac{\\text{Current Period Net Income}}{\\text{Prior Period Net Income}} - 1 \\Big) \\times 100
+    $$
     * **Formula Components:**
         * `Current Period Net Income`: Net Income from the most recent 12-month period.
         * `Prior Period Net Income`: Net Income from the 12-month period before the current one.
@@ -88,9 +94,10 @@ METRIC_DEFINITIONS = {
     "Operating Margin": dcc.Markdown("""
     **Operating Margin**
     * **Definition:** Measures how much profit a company makes on a dollar of sales, after paying for variable costs of production but before paying interest or tax.
-    * **Formula:** $$
-        Operating\\ Margin = \\frac{\\text{Operating Income}}{\\text{Revenue}} x 100
-        $$
+    * **Formula:**
+    $$
+    Operating\\ Margin = \\frac{\\text{Operating Income}}{\\text{Revenue}} \\times 100
+    $$
     * **Formula Components:**
         * `Operating Income`: The profit realized from a business's own, core operations.
         * `Revenue`: The total amount of income generated by the sale of goods or services.
@@ -99,9 +106,10 @@ METRIC_DEFINITIONS = {
     "ROE": dcc.Markdown("""
     **ROE (Return on Equity)**
     * **Definition:** A measure of financial performance calculated by dividing net income by shareholders' equity.
-    * **Formula:** $$
-        ROE = \\frac{\\text{Net Income}}{\\text{Average Shareholder's Equity}} x 100
-        $$
+    * **Formula:**
+    $$
+    ROE = \\frac{\\text{Net Income}}{\\text{Average Shareholder's Equity}} \\times 100
+    $$
     * **Formula Components:**
         * `Net Income`: The company's profit after all expenses, including taxes and interest, have been deducted.
         * `Average Shareholder's Equity`: The average value of shareholder's equity over a period (usually the beginning and ending equity divided by 2).
@@ -110,9 +118,10 @@ METRIC_DEFINITIONS = {
     "D/E Ratio": dcc.Markdown("""
     **D/E (Debt-to-Equity) Ratio**
     * **Definition:** A ratio used to evaluate a company's financial leverage. It is a measure of the degree to which a company is financing its operations through debt versus wholly-owned funds.
-    * **Formula:** $$
-        D/E\\ Ratio = \\frac{\\text{Total Debt}}{\\text{Total Shareholder's Equity}}
-        $$
+    * **Formula:**
+    $$
+    D/E\\ Ratio = \\frac{\\text{Total Debt}}{\\text{Total Shareholder's Equity}}
+    $$
     * **Formula Components:**
         * `Total Debt`: The sum of all short-term and long-term liabilities.
         * `Total Shareholder's Equity`: The corporation's owners' residual claim on assets after debts have been paid.
@@ -123,9 +132,10 @@ METRIC_DEFINITIONS = {
     "Cash Conversion": dcc.Markdown("""
     **Cash Conversion**
     * **Definition:** Measures how efficiently a company converts its net income into operating cash flow.
-    * **Formula:** $$
-        Cash\\ Conversion = \\frac{\\text{Operating Cash Flow}}{\\text{Net Income}}
-        $$
+    * **Formula:**
+    $$
+    Cash\\ Conversion = \\frac{\\text{Operating Cash Flow}}{\\text{Net Income}}
+    $$
     * **Formula Components:**
         * `Operating Cash Flow (CFO)`: The cash generated from normal business operations.
         * `Net Income`: The company's profit after all expenses.
@@ -138,9 +148,10 @@ METRIC_DEFINITIONS = {
     "Target Price": dcc.Markdown("""
     **Target Price**
     * **Definition:** The projected future price of a stock based on the assumptions entered in the 'Forecast Assumptions' modal.
-    * **Formula:** $$
-        Target\\ Price = (\\text{Current EPS} x (1 + \\text{EPS Growth})^{\\text{Years}}) x \\text{Terminal P/E}
-        $$
+    * **Formula:**
+    $$
+    Target\\ Price = \\text{Current EPS} \\times (1 + \\text{EPS Growth})^{\\text{Years}} \\times \\text{Terminal P/E}
+    $$
     * **Formula Components:**
         * `Current EPS`: The company's earnings per share for the last twelve months.
         * `EPS Growth`: Your assumed annual growth rate for EPS.
@@ -151,9 +162,10 @@ METRIC_DEFINITIONS = {
     "Target Upside": dcc.Markdown("""
     **Target Upside**
     * **Definition:** The potential percentage return an investor could achieve if the stock reaches its calculated Target Price from its current price.
-    * **Formula:** $$
-        Target\\ Upside = \\left( \\frac{\\text{Target Price}}{\\text{Current Price}} - 1 \\right) x 100
-        $$
+    * **Formula:**
+    $$
+    Target\\ Upside = \\Big( \\frac{\\text{Target Price}}{\\text{Current Price}} - 1 \\Big) \\times 100
+    $$
     * **Formula Components:**
         * `Target Price`: The estimated future stock price from your forecast.
         * `Current Price`: The current market stock price.
@@ -162,9 +174,10 @@ METRIC_DEFINITIONS = {
     "IRR %": dcc.Markdown("""
     **IRR (Internal Rate of Return) %**
     * **Definition:** The projected compound annual growth rate (CAGR) of an investment if it moves from the current price to the target price over the forecast period.
-    * **Formula:** $$
-        IRR = \\left( \\left( \\frac{\\text{Target Price}}{\\text{Current Price}} \\right)^{\\frac{1}{\\text{Forecast Years}}} - 1 \\right) x 100
-        $$
+    * **Formula:**
+    $$
+    IRR = \\bigg( \\Big( \\frac{\\text{Target Price}}{\\text{Current Price}} \\Big)^{\\frac{1}{\\text{Forecast Years}}} - 1 \\bigg) \\times 100
+    $$
     * **Formula Components:**
         * `Target Price`: The estimated future stock price from your forecast.
         * `Current Price`: The current market stock price.

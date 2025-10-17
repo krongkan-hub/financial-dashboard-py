@@ -378,9 +378,14 @@ def _prepare_display_dataframe(df_raw):
     def create_ticker_cell(row):
         logo_url = row.get('logo_url')
         ticker = row['Ticker']
-        logo_html = f'<img src="{logo_url}" style="height: 22px; width: 22px; margin-right: 8px; vertical-align: middle; border-radius: 4px;" onerror="this.style.display=\'none\'">' if logo_url else ''
-        link_html = f'<a href="/deepdive/{ticker}" style="text-decoration: none; color: inherit; font-weight: 600; vertical-align: middle;">{ticker}</a>'
-        return f'{logo_html}{link_html}'
+        # สร้าง HTML สำหรับโลโก้
+        logo_html = f'<img src="{logo_url}" style="height: 22px; width: 22px; margin-right: 8px; border-radius: 4px;" onerror="this.style.display=\'none\'">' if logo_url else ''
+        # ครอบทั้งโลโก้และชื่อหุ้นด้วยลิงก์เดียว โดยใช้ flexbox เพื่อจัดตำแหน่ง
+        link_html = f'''<a href="/deepdive/{ticker}" style="text-decoration: none; color: inherit; font-weight: 600; display: flex; align-items: center;">
+                             {logo_html}
+                             <span>{ticker}</span>
+                         </a>'''
+        return link_html
     df_display['Ticker'] = df_display.apply(create_ticker_cell, axis=1)
     if "Market Cap" in df_display.columns:
         df_display["Market Cap"] = df_raw["Market Cap"].apply(_format_market_cap)

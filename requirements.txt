@@ -1,25 +1,11 @@
-Core application libraries
-
 dash==3.2.0
 dash-bootstrap-components==2.0.4
 pandas==2.2.3
 plotly==6.3.0
-
-Data source
-
 yfinance==0.2.65
-
-Backend server and database
-
 Flask==3.1.2
 Flask-Login==0.6.3
 Flask-SQLAlchemy==3.1.1
-Werkzeug==3.1.1 # For password hashing and server utilities
-
-Environment variable management
-
+Werkzeug==3.1.1
 python-dotenv==1.1.1
-
-Production web server (good practice to include)
-
 gunicorn==23.0.0

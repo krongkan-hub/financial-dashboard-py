@@ -265,3 +265,45 @@ def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
     # --- Trend Line Logic Removed ---
             
     return {"data": df}
+
+@lru_cache(maxsize=32)
+def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_growth_rate: float, terminal_pe: float) -> dict:
+    """
+    Calculates future valuation metrics based on an exit multiple approach.
+    Returns a dictionary with the results for a single ticker.
+    """
+    try:
+        # Convert percentage to decimal
+        eps_growth_rate_decimal = eps_growth_rate / 100.0
+
+        tkr = yf.Ticker(ticker)
+        info = tkr.info
+        
+        current_price = info.get('currentPrice') or info.get('previousClose')
+        trailing_eps = info.get('trailingEps')
+
+        # Check for necessary data
+        if not all([current_price, trailing_eps, trailing_eps > 0]):
+            return {'error': 'Missing data'}
+            
+        # 1. Project future EPS
+        future_eps = trailing_eps * ((1 + eps_growth_rate_decimal) ** forecast_years)
+        
+        # 2. Calculate Target Price
+        target_price = future_eps * terminal_pe
+        
+        # 3. Calculate Target Upside
+        target_upside = (target_price / current_price) - 1 if current_price > 0 else 0
+        
+        # 4. Calculate IRR
+        irr = ((target_price / current_price) ** (1 / forecast_years)) - 1 if current_price > 0 and forecast_years > 0 else 0
+        
+        return {
+            'Target Price': target_price,
+            'Target Upside': target_upside,
+            'IRR %': irr
+        }
+
+    except Exception:
+        # Handle cases where ticker info fails or other errors occur
+        return {'error': 'Calculation failed'}

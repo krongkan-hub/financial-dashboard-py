@@ -1,4 +1,4 @@
-# app.py (Final Version with UI/UX Adjustments v2)
+# app.py (Final Version with Settings Modal)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -22,7 +22,8 @@ from flask_login import LoginManager, UserMixin, logout_user, current_user
 from auth import create_login_modal, create_register_layout, register_auth_callbacks
 from data_handler import (
     calculate_drawdown, get_competitor_data, get_scatter_data,
-    calculate_dcf_intrinsic_value
+    calculate_dcf_intrinsic_value,
+    calculate_exit_multiple_valuation
 )
 from pages import deep_dive
 from constants import (
@@ -107,9 +108,31 @@ def create_navbar():
         className="py-2 fixed-top"
     )
 
+def create_forecast_modal():
+    """Creates the pop-up modal for forecast assumptions."""
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("Forecast Assumptions")),
+            dbc.ModalBody([
+                dbc.Label("Forecast Period (Years):"),
+                dbc.Input(id="modal-forecast-years-input", type="number", value=5, min=1, max=10, step=1, className="mb-3"),
+                dbc.Label("Annual EPS Growth (%):"),
+                dbc.Input(id="modal-forecast-eps-growth-input", type="number", value=10, step=1, className="mb-3"),
+                dbc.Label("Terminal P/E Ratio:"),
+                dbc.Input(id="modal-forecast-terminal-pe-input", type="number", value=20, min=1, step=1),
+            ]),
+            dbc.ModalFooter(
+                dbc.Button("Apply Changes", id="apply-forecast-changes-btn", color="primary")
+            ),
+        ],
+        id="forecast-assumptions-modal",
+        is_open=False,
+    )
+
 def build_layout():
     return html.Div([
         dcc.Store(id='user-selections-store', storage_type='session'),
+        dcc.Store(id='forecast-assumptions-store', storage_type='session', data={'years': 5, 'growth': 10, 'pe': 20}),
         html.Div(id="navbar-container"),
         dbc.Container([
             dbc.Row([
@@ -142,6 +165,7 @@ def build_layout():
                     ]),
                     dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
                     html.Hr(className="my-5"),
+
                     dbc.Row([
                         dbc.Col(
                             html.Div(className="custom-tabs-container", children=[
@@ -149,17 +173,23 @@ def build_layout():
                                     dbc.Tab(label="VALUATION", tab_id="tab-valuation"),
                                     dbc.Tab(label="GROWTH", tab_id="tab-growth"),
                                     dbc.Tab(label="FUNDAMENTALS", tab_id="tab-fundamentals"),
-                                    dbc.Tab(label="SCORING", tab_id="tab-scoring"),
+                                    dbc.Tab(label="TARGET & RETURN", tab_id="tab-forecast"),
                                 ])
                             ]), width="auto"
                         ),
-                        dbc.Col(dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by (best value)..."), width=12, md=4, className="ms-auto align-self-center")
-                    ], align="center", className="mt-3"),
+                        dbc.Col(
+                            dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
+                            width="auto",
+                            className="ms-2"
+                        ),
+                        dbc.Col(dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by"), width=12, md=2, className="ms-auto align-self-center")
+                    ], align="center", className="mt-3 g-2"),
                     dcc.Loading(html.Div(id="table-pane-content", className="mt-2"))
                 ], width=12, md=9, className="content-offset"),
             ], className="g-4")
         ], fluid=True, className="p-4 main-content-container"),
-        create_login_modal()
+        create_login_modal(),
+        create_forecast_modal()
     ])
 
 app.layout = html.Div([
@@ -282,6 +312,34 @@ def update_index_options(store_data):
     return [{'label': INDEX_TICKER_TO_NAME.get(i, i), 'value': i} for i in sorted(list(relevant_indices)) if i not in selected_indices]
 
 # ==================================================================
+# 4.5. Modal Management Callbacks
+# ==================================================================
+@app.callback(
+    Output('forecast-assumptions-modal', 'is_open'),
+    Input('open-forecast-modal-btn', 'n_clicks'),
+    State('forecast-assumptions-modal', 'is_open'),
+    prevent_initial_call=True
+)
+def toggle_modal(n_clicks, is_open):
+    if n_clicks:
+        return not is_open
+    return is_open
+
+@app.callback(
+    Output('forecast-assumptions-store', 'data'),
+    Output('forecast-assumptions-modal', 'is_open', allow_duplicate=True),
+    Input('apply-forecast-changes-btn', 'n_clicks'),
+    [State('modal-forecast-years-input', 'value'),
+     State('modal-forecast-eps-growth-input', 'value'),
+     State('modal-forecast-terminal-pe-input', 'value')],
+    prevent_initial_call=True
+)
+def save_forecast_assumptions(n_clicks, years, growth, pe):
+    if n_clicks:
+        return {'years': years, 'growth': growth, 'pe': pe}, False
+    return dash.no_update, dash.no_update
+
+# ==================================================================
 # 5. Callbacks for Main Dashboard Panes
 # ==================================================================
 @app.callback(Output('analysis-pane-content', 'children'), [Input('analysis-tabs', 'active_tab'), Input('user-selections-store', 'data')])
@@ -303,7 +361,7 @@ def render_graph_content(active_tab, store_data):
             fig = px.line(ytd_perf, title='YTD Performance Comparison', color_discrete_map=COLOR_DISCRETE_MAP)
             fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol'); return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
         except Exception as e: return dbc.Alert(f"An error occurred while rendering 'YTD Performance': {e}", color="danger")
-    
+
     if active_tab == "tab-drawdown":
         all_symbols = tuple(set(tickers + indices))
         if not all_symbols: return dbc.Card(dbc.CardBody(html.P("Please select items to display the chart", className="text-center text-muted")))
@@ -314,7 +372,7 @@ def render_graph_content(active_tab, store_data):
             fig = px.line(drawdown_data, title='1-Year Drawdown Comparison', color_discrete_map=COLOR_DISCRETE_MAP)
             fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol'); return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
         except Exception as e: return dbc.Alert(f"An error occurred while rendering 'Drawdown': {e}", color="danger")
-    
+
     if active_tab == "tab-scatter":
         if not tickers: return dbc.Card(dbc.CardBody(html.P("Please select stocks to display the chart.", className="text-center text-muted")))
         try:
@@ -328,7 +386,7 @@ def render_graph_content(active_tab, store_data):
             fig.add_hline(y=y_avg, line_width=1, line_dash="dash", line_color="grey")
             return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
         except Exception as e: return dbc.Alert(f"An error occurred while rendering Scatter Plot: {e}", color="danger")
-    
+
     if active_tab == "tab-dcf":
         if not tickers: return dbc.Card(dbc.CardBody(html.P("Please select stocks to display the chart.", className="text-center text-muted")))
         try:
@@ -336,12 +394,12 @@ def render_graph_content(active_tab, store_data):
             dcf_results = [calculate_dcf_intrinsic_value(t, growth_rate) for t in tickers]
             successful_results = [res for res in dcf_results if 'error' not in res]
             failed_results = [res for res in dcf_results if 'error' in res]
-            
+
             output_components = []
             if failed_results:
                 failed_tickers = ', '.join([res['Ticker'] for res in failed_results])
                 output_components.append(dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), f"Could not calculate DCF for: {failed_tickers} (Missing data)"], color="warning", className="mb-3",dismissable=True))
-            
+
             if successful_results:
                 df_dcf = pd.DataFrame(successful_results)
                 fig = go.Figure()
@@ -351,13 +409,13 @@ def render_graph_content(active_tab, store_data):
                 fig.add_trace(go.Scatter(x=df_dcf['intrinsic_value'], y=df_dcf['Ticker'], mode='markers', marker=dict(color='darkorange', size=10, symbol='diamond'), name='Intrinsic Value (DCF)'))
                 fig.update_layout(title=f'Margin of Safety (DCF) with {growth_rate:.0%} Growth Forecast', xaxis_title='Share Price ($)', yaxis_title='Ticker', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 output_components.append(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig))))
-            
+
             if not output_components:
                 return dbc.Alert("Could not process DCF for any selected stocks.", color="danger")
 
             return output_components
         except Exception as e: return dbc.Alert(f"An error occurred while rendering DCF chart: {e}", color="danger")
-    
+
     return html.P("This is an empty tab!")
 
 # ==================================================================
@@ -367,7 +425,7 @@ def apply_custom_scoring(df):
     """Applies custom scoring logic to the dataframe."""
     if df.empty:
         return df
-    
+
     # 1. Company Size Model (based on Market Cap)
     bins = [0, 1e9, 10e10, 100e10, float('inf')]
     labels = ["Small Cap", "Mid Cap", "Large Cap", "Mega Cap"]
@@ -394,9 +452,9 @@ def apply_custom_scoring(df):
         if vol == 'Growth' and val == 'Fair Value': return "Core Holding"
         if vol == 'Growth' and val == 'Cheap': return "Value Opportunity"
         return "Needs Review"
-        
+
     df['Stock Profile'] = df.apply(categorize_stock, axis=1)
-    
+
     return df
 
 # --- Table Configuration and Styling ---
@@ -404,9 +462,24 @@ TABS_CONFIG = {
     "tab-valuation": { "columns": ["Ticker", "Market Cap", "Company Size", "Price", "P/E", "P/B", "EV/EBITDA"], "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False} },
     "tab-growth": { "columns": ["Ticker", "Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"], "higher_is_better": {k: True for k in ["Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"]} },
     "tab-fundamentals": { "columns": ["Ticker", "Operating Margin", "ROE", "D/E Ratio", "Cash Conversion"], "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True} },
-    "tab-scoring": { "columns": ["Ticker", "Volatility Level", "Valuation Model", "Stock Profile"], "higher_is_better": {}}
+    "tab-forecast": {
+        "columns": ["Ticker", "Target Price", "Target Upside", "IRR %", "Volatility Level", "Valuation Model", "Stock Profile"],
+        "higher_is_better": {"Target Upside": True, "IRR %": True}
+    }
 }
-TOOLTIP_DEFINITIONS = { "Ticker": "Click for Deep Dive Analysis", "Market Cap": "Total market value", "Company Size": "Company size based on Market Cap", "Price": "Current price", "P/E": "Price-to-Earnings", "P/B": "Price-to-Book", "EV/EBITDA": "Enterprise Value to EBITDA", "Revenue Growth (YoY)": "Year-over-Year Revenue Growth", "Revenue CAGR (3Y)": "3-Year Compound Annual Growth Rate of Revenue", "Net Income Growth (YoY)": "Year-over-Year Earnings Growth", "Operating Margin": "Operating Income / Revenue", "ROE": "Return on Equity", "D/E Ratio": "Total Debt / Equity", "Cash Conversion": "Operating Cash Flow / Net Income", "Volatility Level": "Stock price volatility vs. market (Beta)", "Valuation Model": "Valuation based on EV/EBITDA", "Stock Profile": "Overall stock category based on scoring" }
+TOOLTIP_DEFINITIONS = {
+    "Ticker": "Click for Deep Dive Analysis", "Market Cap": "Total market value", "Company Size": "Company size based on Market Cap",
+    "Price": "Current price", "P/E": "Price-to-Earnings", "P/B": "Price-to-Book", "EV/EBITDA": "Enterprise Value to EBITDA",
+    "Revenue Growth (YoY)": "Year-over-Year Revenue Growth", "Revenue CAGR (3Y)": "3-Year Compound Annual Growth Rate of Revenue",
+    "Net Income Growth (YoY)": "Year-over-Year Earnings Growth", "Operating Margin": "Operating Income / Revenue",
+    "ROE": "Return on Equity", "D/E Ratio": "Total Debt / Equity", "Cash Conversion": "Operating Cash Flow / Net Income",
+    "Target Price": "Projected future price based on the provided assumptions.",
+    "Target Upside": "Total percentage return from the current price to the target price.",
+    "IRR %": "The projected compounded annual growth rate (CAGR) of the investment.",
+    "Volatility Level": "Stock price volatility vs. market (Beta)",
+    "Valuation Model": "Valuation based on EV/EBITDA",
+    "Stock Profile": "Overall stock category based on scoring"
+}
 
 def _format_market_cap(n):
     if pd.isna(n): return '-'
@@ -418,9 +491,9 @@ def _prepare_display_dataframe(df_raw):
         logo_url, ticker = row.get('logo_url'), row['Ticker']
         logo_html = f'<img src="{logo_url}" style="height: 22px; width: 22px; margin-right: 8px; border-radius: 4px;" onerror="this.style.display=\'none\'">' if logo_url else ''
         return f'''<a href="/deepdive/{ticker}" style="text-decoration: none; color: inherit; font-weight: 600; display: flex; align-items: center;">{logo_html}<span>{ticker}</span></a>'''
-    
+
     df_display['Ticker'] = df_display.apply(create_ticker_cell, axis=1)
-    
+
     if "Market Cap" in df_display.columns:
         df_display["Market Cap"] = df_raw["Market Cap"].apply(_format_market_cap)
 
@@ -431,7 +504,7 @@ def _prepare_display_dataframe(df_raw):
             df_display[col] = df_raw[col].apply(
                 lambda x: x if pd.notna(x) else ""
             )
-            
+
     return df_display
 
 def _generate_datatable_columns(tab_config):
@@ -442,6 +515,10 @@ def _generate_datatable_columns(tab_config):
             col_def.update({"type": "text", "presentation": "markdown"})
         elif col in ['Company Size', 'Volatility Level', 'Valuation Model', 'Stock Profile', 'Market Cap']:
              col_def.update({"type": "text"})
+        elif col in ['Target Upside', 'IRR %']:
+            col_def.update({"type": "numeric", "format": Format(precision=2, scheme=Scheme.percentage)})
+        elif col == 'Target Price':
+            col_def.update({"type": "numeric", "format": Format(precision=2, scheme=Scheme.fixed)})
         elif any(kw in col for kw in ['Growth', 'Margin', 'ROE', 'Conversion']):
             col_def.update({"type": "numeric", "format": Format(precision=2, scheme=Scheme.percentage)})
         else:
@@ -450,7 +527,7 @@ def _generate_datatable_columns(tab_config):
     return columns
 
 def _generate_datatable_style_conditionals(tab_config):
-    style_data_conditional = [] 
+    style_data_conditional = []
     style_cell_conditional = []
 
     displayed_columns = tab_config["columns"]
@@ -465,7 +542,7 @@ def _generate_datatable_style_conditionals(tab_config):
 
     # Add alignment exception for Ticker column cells
     style_cell_conditional.append({'if': {'column_id': 'Ticker'}, 'textAlign': 'left'})
-            
+
     return style_data_conditional, style_cell_conditional
 
 @app.callback(
@@ -474,32 +551,51 @@ def _generate_datatable_style_conditionals(tab_config):
     Output('sort-by-dropdown', 'value'),
     [Input('table-tabs', 'active_tab'),
      Input('user-selections-store', 'data'),
-     Input('sort-by-dropdown', 'value')]
+     Input('sort-by-dropdown', 'value'),
+     Input('forecast-assumptions-store', 'data')]
 )
-def render_table_content(active_tab, store_data, sort_by_column):
+def render_table_content(active_tab, store_data, sort_by_column, forecast_data):
     try:
         if not store_data or not store_data.get('tickers'):
             alert = dbc.Alert("Please select stocks to view the comparison table.", color="info", className="mt-3 text-center")
             return alert, [], None
-        
+
         tickers = tuple(store_data.get('tickers'))
         df_full = get_competitor_data(tickers)
-        
+
         if df_full.empty:
             alert = dbc.Alert(f"Could not fetch complete data for the selected tickers: {', '.join(tickers)}", color="warning", className="mt-3 text-center")
             return alert, [], None
-        
+
+        if active_tab == 'tab-forecast':
+            forecast_years = forecast_data.get('years')
+            eps_growth = forecast_data.get('growth')
+            terminal_pe = forecast_data.get('pe')
+
+            if all([forecast_years, eps_growth, terminal_pe]):
+                forecast_results = []
+                for ticker in df_full['Ticker']:
+                    result = calculate_exit_multiple_valuation(ticker, forecast_years, eps_growth, terminal_pe)
+                    result['Ticker'] = ticker
+                    forecast_results.append(result)
+                df_forecast = pd.DataFrame(forecast_results)
+                df_full = pd.merge(df_full, df_forecast, on='Ticker', how='left')
+
         df_full = apply_custom_scoring(df_full)
         config = TABS_CONFIG[active_tab]
-        
+
         if sort_by_column and sort_by_column in df_full.columns:
             ascending = not config['higher_is_better'].get(sort_by_column, True)
             df_full.sort_values(by=sort_by_column, ascending=ascending, na_position='last', inplace=True)
-        
+
+        missing_cols = [col for col in config["columns"] if col not in df_full.columns]
+        if active_tab == 'tab-forecast' and missing_cols:
+             return dbc.Alert(f"Could not calculate {', '.join(missing_cols)}. Please check assumptions using the gear icon.", color="info"), [], None
+
         df_display = _prepare_display_dataframe(df_full)
         columns = _generate_datatable_columns(config)
         style_data_conditional, style_cell_conditional = _generate_datatable_style_conditionals(config)
-        
+
         dropdown_options = [{'label': col, 'value': col} for col in config["columns"] if col not in ['Ticker', 'Company Size', 'Volatility Level', 'Valuation Model', 'Stock Profile']]
         data = df_display[config["columns"]].to_dict('records')
         tooltips = {k: v for k, v in TOOLTIP_DEFINITIONS.items() if k in config["columns"]}

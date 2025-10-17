@@ -1,4 +1,4 @@
-# app.py (Final Version with Layout Fix and Renamed Tab)
+# app.py (Final Version with Scrollbar and Formula Fixes)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -82,19 +82,170 @@ def logout():
 
 # --- Dictionary for Metric Definitions ---
 METRIC_DEFINITIONS = {
-    "P/E": dcc.Markdown("""**P/E (Price-to-Earnings) Ratio:** Compares the company's stock price to its earnings per share (EPS). It shows how much investors are willing to pay for $1 of the company's earnings. *Formula: Market Price per Share / EPS*"""),
-    "P/B": dcc.Markdown("""**P/B (Price-to-Book) Ratio:** Compares the company's market price to its book value per share. It indicates the value investors place on the company's net assets. *Formula: Market Price per Share / Book Value per Share*"""),
-    "EV/EBITDA": dcc.Markdown("""**EV/EBITDA Ratio:** Compares a company's Enterprise Value (Market Cap + Debt - Cash) to its Earnings Before Interest, Taxes, Depreciation, and Amortization. A comprehensive valuation metric. *Formula: Enterprise Value / EBITDA*"""),
-    "Revenue Growth (YoY)": dcc.Markdown("**Revenue Growth (YoY):** The percentage increase in a company's revenue over the past 12 months compared to the prior 12-month period."),
-    "Revenue CAGR (3Y)": dcc.Markdown("**Revenue CAGR (3Y):** The 3-Year Compound Annual Growth Rate of Revenue, showing the smoothed annualized growth rate over three years."),
-    "Net Income Growth (YoY)": dcc.Markdown("**Net Income Growth (YoY):** The percentage increase in a company's net profit over the past 12 months."),
-    "Operating Margin": dcc.Markdown("**Operating Margin:** Operating Income / Revenue. Shows how efficiently a company generates profit through its core operations."),
-    "ROE": dcc.Markdown("**ROE (Return on Equity):** Net Income / Shareholder's Equity. Measures the profitability in relation to stockholders’ equity."),
-    "D/E Ratio": dcc.Markdown("**D/E (Debt-to-Equity) Ratio:** Total Debt / Shareholder's Equity. Measures a company's financial leverage."),
-    "Cash Conversion": dcc.Markdown("**Cash Conversion:** Operating Cash Flow / Net Income. Measures how well a company converts profit into cash."),
-    "Target Price": dcc.Markdown("**Target Price:** Projected future price based on the provided assumptions in the forecast settings."),
-    "Target Upside": dcc.Markdown("**Target Upside:** The potential percentage return from the current price to the projected target price."),
-    "IRR %": dcc.Markdown("**IRR %:** The projected Internal Rate of Return (compounded annual growth rate) of the investment based on the forecast."),
+    # Valuation Metrics
+    "P/E": dcc.Markdown("""
+    **P/E (Price-to-Earnings) Ratio**
+    * **Definition:** A valuation ratio that compares a company's current share price to its per-share earnings.
+    * **Formula:** $$
+        P/E\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Earnings per Share (EPS)}}
+        $$
+    * **Formula Components:**
+        * `Market Price per Share`: The current market price of a single share.
+        * `Earnings per Share (EPS)`: The company's total profit allocated to each outstanding share of common stock.
+    * **Interpretation:**
+        * A **high P/E** can suggest that a stock's price is high relative to earnings and is possibly overvalued. It may also indicate that investors are expecting high future growth.
+        * A **low P/E** might indicate that a stock is undervalued or that the company is performing well compared to its past trends.
+    """, mathjax=True),
+    "P/B": dcc.Markdown("""
+    **P/B (Price-to-Book) Ratio**
+    * **Definition:** Compares a company's market capitalization to its book value. It indicates the value investors place on the company's net assets.
+    * **Formula:** $$
+        P/B\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Book Value per Share}}
+        $$
+    * **Formula Components:**
+        * `Market Price per Share`: The current market price of a single share.
+        * `Book Value per Share`: The net asset value of a company divided by the number of shares outstanding, calculated as (Total Assets - Intangible Assets - Liabilities).
+    * **Interpretation:**
+        * A **P/B ratio under 1.0** is often considered a potential sign of an undervalued stock.
+        * It is particularly useful for valuing companies with significant tangible assets (e.g., banks, industrials) and less useful for service-based companies.
+    """, mathjax=True),
+    "EV/EBITDA": dcc.Markdown("""
+    **EV/EBITDA (Enterprise Value-to-EBITDA) Ratio**
+    * **Definition:** A ratio used to compare the total value of a company to its cash earnings less non-cash expenses. It's often considered more comprehensive than P/E as it accounts for debt.
+    * **Formula:** $$
+        EV/EBITDA = \\frac{\\text{Enterprise Value}}{\\text{EBITDA}}
+        $$
+    * **Formula Components:**
+        * `Enterprise Value (EV)`: Market Capitalization + Total Debt - Cash and Cash Equivalents.
+        * `EBITDA`: Earnings Before Interest, Taxes, Depreciation, and Amortization.
+    * **Interpretation:**
+        * A **low EV/EBITDA ratio** suggests that a company might be undervalued.
+        * This metric is useful for comparing companies across different industries, especially those with differences in capital structure and tax rates.
+    """, mathjax=True),
+
+    # Growth Metrics
+    "Revenue Growth (YoY)": dcc.Markdown("""
+    **Revenue Growth (Year-over-Year)**
+    * **Definition:** Measures the percentage increase in a company's revenue over the most recent twelve-month period compared to the prior twelve-month period.
+    * **Formula:** $$
+        YoY\\ Growth = \\left( \\frac{\\text{Current Period Revenue}}{\\text{Prior Period Revenue}} - 1 \\right) x 100
+        $$
+    * **Formula Components:**
+        * `Current Period Revenue`: Revenue from the most recent 12-month period.
+        * `Prior Period Revenue`: Revenue from the 12-month period before the current one.
+    * **Interpretation:** Indicates the pace at which a company's sales are growing. Consistently high growth is a positive sign, but it's important to understand the drivers behind it.
+    """, mathjax=True),
+    "Revenue CAGR (3Y)": dcc.Markdown("""
+    **Revenue CAGR (3-Year)**
+    * **Definition:** The Compound Annual Growth Rate of revenue over a three-year period. It provides a smoothed, annualized growth rate that irons out volatility.
+    * **Formula:** $$
+        CAGR = \\left( \\left( \\frac{\\text{Ending Value}}{\\text{Beginning Value}} \\right)^{\\frac{1}{\\text{No. of Years}}} - 1 \\right) x 100
+        $$
+    * **Formula Components:**
+        * `Ending Value`: Revenue from the final year in the period.
+        * `Beginning Value`: Revenue from the starting year in the period.
+        * `No. of Years`: The total number of years in the period (e.g., 3).
+    * **Interpretation:** A more stable indicator of long-term growth trends compared to a single-year growth rate.
+    """, mathjax=True),
+    "Net Income Growth (YoY)": dcc.Markdown("""
+    **Net Income Growth (Year-over-Year)**
+    * **Definition:** Measures the percentage increase in a company's net profit (after all expenses and taxes) over the past year.
+    * **Formula:** $$
+        YoY\\ Growth = \\left( \\frac{\\text{Current Period Net Income}}{\\text{Prior Period Net Income}} - 1 \\right) x 100
+        $$
+    * **Formula Components:**
+        * `Current Period Net Income`: Net Income from the most recent 12-month period.
+        * `Prior Period Net Income`: Net Income from the 12-month period before the current one.
+    * **Interpretation:** Shows how effectively a company is translating revenue growth into actual profit for shareholders. It's a critical measure of profitability improvement.
+    """, mathjax=True),
+
+    # Fundamentals Metrics
+    "Operating Margin": dcc.Markdown("""
+    **Operating Margin**
+    * **Definition:** Measures how much profit a company makes on a dollar of sales, after paying for variable costs of production but before paying interest or tax.
+    * **Formula:** $$
+        Operating\\ Margin = \\frac{\\text{Operating Income}}{\\text{Revenue}} x 100
+        $$
+    * **Formula Components:**
+        * `Operating Income`: The profit realized from a business's own, core operations.
+        * `Revenue`: The total amount of income generated by the sale of goods or services.
+    * **Interpretation:** A higher operating margin indicates greater efficiency in the company's core business operations. It reflects the profitability of the business before the effects of financing and taxes.
+    """, mathjax=True),
+    "ROE": dcc.Markdown("""
+    **ROE (Return on Equity)**
+    * **Definition:** A measure of financial performance calculated by dividing net income by shareholders' equity.
+    * **Formula:** $$
+        ROE = \\frac{\\text{Net Income}}{\\text{Average Shareholder's Equity}} x 100
+        $$
+    * **Formula Components:**
+        * `Net Income`: The company's profit after all expenses, including taxes and interest, have been deducted.
+        * `Average Shareholder's Equity`: The average value of shareholder's equity over a period (usually the beginning and ending equity divided by 2).
+    * **Interpretation:** ROE is considered a gauge of a corporation's profitability and how efficiently it generates profits. A consistently high ROE can be a sign of a strong competitive advantage (a "moat").
+    """, mathjax=True),
+    "D/E Ratio": dcc.Markdown("""
+    **D/E (Debt-to-Equity) Ratio**
+    * **Definition:** A ratio used to evaluate a company's financial leverage. It is a measure of the degree to which a company is financing its operations through debt versus wholly-owned funds.
+    * **Formula:** $$
+        D/E\\ Ratio = \\frac{\\text{Total Debt}}{\\text{Total Shareholder's Equity}}
+        $$
+    * **Formula Components:**
+        * `Total Debt`: The sum of all short-term and long-term liabilities.
+        * `Total Shareholder's Equity`: The corporation's owners' residual claim on assets after debts have been paid.
+    * **Interpretation:**
+        * A **high D/E ratio** generally means that a company has been aggressive in financing its growth with debt. This can result in volatile earnings because of the additional interest expense.
+        * A **low D/E ratio** may indicate a more financially stable, conservative company. What is considered "high" or "low" varies by industry.
+    """, mathjax=True),
+    "Cash Conversion": dcc.Markdown("""
+    **Cash Conversion**
+    * **Definition:** Measures how efficiently a company converts its net income into operating cash flow.
+    * **Formula:** $$
+        Cash\\ Conversion = \\frac{\\text{Operating Cash Flow}}{\\text{Net Income}}
+        $$
+    * **Formula Components:**
+        * `Operating Cash Flow (CFO)`: The cash generated from normal business operations.
+        * `Net Income`: The company's profit after all expenses.
+    * **Interpretation:**
+        * A ratio **greater than 1.0** is generally considered strong, as it indicates the company is generating more cash than it reports in accounting profit.
+        * A ratio **consistently below 1.0** could be a red flag, suggesting that reported earnings are not being backed by actual cash.
+    """, mathjax=True),
+
+    # Target/Forecast Metrics
+    "Target Price": dcc.Markdown("""
+    **Target Price**
+    * **Definition:** The projected future price of a stock based on the assumptions entered in the 'Forecast Assumptions' modal.
+    * **Formula:** $$
+        Target\\ Price = (\\text{Current EPS} x (1 + \\text{EPS Growth})^{\\text{Years}}) x \\text{Terminal P/E}
+        $$
+    * **Formula Components:**
+        * `Current EPS`: The company's earnings per share for the last twelve months.
+        * `EPS Growth`: Your assumed annual growth rate for EPS.
+        * `Years`: The number of years in your forecast period.
+        * `Terminal P/E`: Your assumed P/E ratio for the company at the end of the forecast period.
+    * **Interpretation:** This is an estimated future value, not a guarantee. Its accuracy is entirely dependent on the validity of the growth and valuation multiple assumptions.
+    """, mathjax=True),
+    "Target Upside": dcc.Markdown("""
+    **Target Upside**
+    * **Definition:** The potential percentage return an investor could achieve if the stock reaches its calculated Target Price from its current price.
+    * **Formula:** $$
+        Target\\ Upside = \\left( \\frac{\\text{Target Price}}{\\text{Current Price}} - 1 \\right) x 100
+        $$
+    * **Formula Components:**
+        * `Target Price`: The estimated future stock price from your forecast.
+        * `Current Price`: The current market stock price.
+    * **Interpretation:** It quantifies the potential reward based on your forecast. A higher upside suggests a more attractive investment, assuming the forecast is accurate.
+    """, mathjax=True),
+    "IRR %": dcc.Markdown("""
+    **IRR (Internal Rate of Return) %**
+    * **Definition:** The projected compound annual growth rate (CAGR) of an investment if it moves from the current price to the target price over the forecast period.
+    * **Formula:** $$
+        IRR = \\left( \\left( \\frac{\\text{Target Price}}{\\text{Current Price}} \\right)^{\\frac{1}{\\text{Forecast Years}}} - 1 \\right) x 100
+        $$
+    * **Formula Components:**
+        * `Target Price`: The estimated future stock price from your forecast.
+        * `Current Price`: The current market stock price.
+        * `Forecast Years`: The number of years in your forecast period.
+    * **Interpretation:** IRR represents the annualized rate of return for this specific investment scenario. It's useful for comparing the potential returns of different investment opportunities over different time horizons.
+    """, mathjax=True),
 }
 
 
@@ -131,7 +282,7 @@ def create_forecast_modal():
     """Creates the pop-up modal for forecast assumptions."""
     return dbc.Modal(
         [
-            dbc.ModalHeader(dbc.ModalTitle("Forecast Assumptions")),
+            dbc.ModalHeader(dbc.ModalTitle("FORECAST ASSUMPTIONS")),
             dbc.ModalBody([
                 dbc.Label("Forecast Period (Years):"),
                 dbc.Input(id="modal-forecast-years-input", type="number", value=5, min=1, max=10, step=1, className="mb-3"),
@@ -161,7 +312,7 @@ def create_definitions_modal():
         id="definitions-modal",
         is_open=False,
         size="lg",
-        scrollable=True
+        scrollable=False,
     )
 
 def build_layout():
@@ -398,7 +549,7 @@ def toggle_definitions_modal(open_clicks, close_clicks, is_open, active_tab):
     triggered_id = ctx.triggered_id
     if triggered_id == "open-definitions-modal-btn":
         tab_name = TABS_CONFIG[active_tab].get('tab_name', active_tab.replace('tab-', '').title())
-        title = f"{tab_name} Metric Definitions"
+        title = f"{tab_name.upper()} METRIC DEFINITIONS"
         
         columns_in_tab = TABS_CONFIG[active_tab]['columns']
         

@@ -76,7 +76,6 @@ def create_deep_dive_layout(ticker=None):
                     dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
-                    dbc.Tab(label="VALUATION", tab_id="tab-valuation-deep-dive", label_class_name="fw-bold"),
                 ],
                 id="deep-dive-main-tabs",
                 active_tab="tab-charts-deep-dive",
@@ -191,17 +190,6 @@ def render_deep_dive_tab_content(active_tab, store_data):
             dcc.Loading(html.Div(id="financial-statement-content"))
         ])
 
-    if active_tab == "tab-valuation-deep-dive":
-        return dbc.Row([
-            dbc.Col([
-                html.H5("DCF Assumptions", className="mt-3"), html.Hr(),
-                dbc.Label("Your Forecast Growth Rate (%):", html_for="dcf-growth-rate-input-deep-dive"),
-                dcc.Input(id='dcf-growth-rate-input-deep-dive', type='number', value=5, step=0.5, className="mb-2 form-control"),
-                html.P("This model uses a standard WACC calculation and a perpetual growth rate of 2.5%.", className="text-muted small")
-            ], md=4),
-            dbc.Col(dcc.Loading(dcc.Graph(id='interactive-dcf-chart-deep-dive')), md=8)
-        ], className="mt-3", align="center")
-
     return html.P("Select a tab")
 
 @dash.callback(
@@ -263,30 +251,3 @@ def render_financial_statement_table(selected_statement, store_data):
             }
         ]
     )
-
-
-@dash.callback(Output('interactive-dcf-chart-deep-dive', 'figure'), Input('dcf-growth-rate-input-deep-dive', 'value'), State('deep-dive-ticker-store', 'data'))
-def update_interactive_dcf_chart(growth_rate, store_data):
-    if not store_data or not store_data.get('ticker') or growth_rate is None:
-        return go.Figure().update_layout(title_text="Enter a growth rate to calculate.")
-    ticker = store_data['ticker']
-    growth_rate_decimal = float(growth_rate) / 100.0
-    result = calculate_dcf_intrinsic_value(ticker, growth_rate_decimal)
-    if 'error' in result:
-        return go.Figure().update_layout(title=f"Error Calculating DCF for {ticker}", annotations=[dict(text=result['error'], showarrow=False)])
-    iv, price = result.get('intrinsic_value', 0), result.get('current_price', 0)
-    margin_of_safety = ((iv / price) - 1) if price > 0 else 0
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta", value = price,
-        number = {'prefix': "$", 'font': {'size': 40}},
-        delta = {'reference': iv, 'relative': False, 'valueformat': '.2f', 'increasing': {'color': "#dc3545"}, 'decreasing': {'color': "#198754"}},
-        domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': f"<b>Margin of Safety: {margin_of_safety:.2%}</b><br><span style='font-size:0.8em;color:gray'>Intrinsic Value (DCF): ${iv:.2f}</span>", 'font': {'size': 20}},
-        gauge = {'axis': {'range': [min(price, iv) * 0.75, max(price, iv) * 1.25], 'tickwidth': 1, 'tickcolor': "darkblue"},
-            'bar': {'color': "rgba(0,0,0,0)"},
-            'steps' : [{'range': [0, iv], 'color': "rgba(25, 135, 84, 0.2)"}, {'range': [iv, max(price, iv) * 1.25], 'color': "rgba(220, 53, 69, 0.2)"}],
-            'threshold' : {'line': {'color': "#636EFA", 'width': 5}, 'thickness': 1, 'value': price}
-        }
-    ))
-    fig.update_layout(title_text=f"Valuation with {growth_rate:.1f}% Growth", height=400, margin=dict(t=80, b=40))
-    return fig

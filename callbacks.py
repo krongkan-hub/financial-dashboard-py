@@ -36,6 +36,12 @@ from auth import create_register_layout
 # Table Helpers & Config
 # ==================================================================
 TABS_CONFIG = {
+    # Graph Tabs (for definitions modal)
+    "tab-performance": { "tab_name": "Performance" },
+    "tab-drawdown": { "tab_name": "Drawdown" },
+    "tab-scatter": { "tab_name": "Valuation vs. Quality" },
+    "tab-dcf": { "tab_name": "Margin of Safety (DCF)" },
+    # Table Tabs
     "tab-valuation": { "columns": ["Ticker", "Market Cap", "Company Size", "Price", "P/E", "P/B", "EV/EBITDA"], "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False}, "tab_name": "Valuation" },
     "tab-growth": { "columns": ["Ticker", "Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"], "higher_is_better": {k: True for k in ["Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"]}, "tab_name": "Growth" },
     "tab-fundamentals": { "columns": ["Ticker", "Operating Margin", "ROE", "D/E Ratio", "Cash Conversion"], "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True}, "tab_name": "Fundamentals" },
@@ -282,19 +288,31 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         Output("definitions-modal", "is_open"),
         Output("definitions-modal-title", "children"),
         Output("definitions-modal-body", "children"),
-        [Input("open-definitions-modal-btn", "n_clicks"), Input("close-definitions-modal-btn", "n_clicks")],
-        [State("definitions-modal", "is_open"), State("table-tabs", "active_tab")],
+        [Input("open-definitions-modal-btn-graphs", "n_clicks"),
+         Input("open-definitions-modal-btn-tables", "n_clicks"),
+         Input("close-definitions-modal-btn", "n_clicks")],
+        [State("definitions-modal", "is_open"),
+         State("analysis-tabs", "active_tab"),
+         State("table-tabs", "active_tab")],
         prevent_initial_call=True
     )
-    def toggle_definitions_modal(open_clicks, close_clicks, is_open, active_tab):
+    def toggle_definitions_modal(graphs_clicks, tables_clicks, close_clicks, is_open, analysis_tab, table_tab):
         ctx = callback_context
-        if not ctx.triggered:
-            return dash.no_update, dash.no_update, dash.no_update
+        if not ctx.triggered or ctx.triggered_id == "close-definitions-modal-btn":
+            return False, dash.no_update, dash.no_update
+
         triggered_id = ctx.triggered_id
-        if triggered_id == "open-definitions-modal-btn":
-            tab_name = TABS_CONFIG[active_tab].get('tab_name', active_tab.replace('tab-', '').title())
+        
+        if triggered_id == "open-definitions-modal-btn-graphs":
+            tab_name = TABS_CONFIG[analysis_tab].get('tab_name', 'Chart')
+            title = f"{tab_name.upper()} DEFINITION"
+            body_content = METRIC_DEFINITIONS.get(analysis_tab, html.P("No definition available for this chart."))
+            return True, title, body_content
+
+        if triggered_id == "open-definitions-modal-btn-tables":
+            tab_name = TABS_CONFIG[table_tab].get('tab_name', 'Table')
             title = f"{tab_name.upper()} METRIC DEFINITIONS"
-            columns_in_tab = TABS_CONFIG[active_tab]['columns']
+            columns_in_tab = TABS_CONFIG[table_tab].get('columns', [])
             body_content = []
             for col in columns_in_tab:
                 if col in METRIC_DEFINITIONS:
@@ -305,8 +323,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             else:
                  body_content.pop()
             return True, title, body_content
-        if triggered_id == "close-definitions-modal-btn":
-            return False, dash.no_update, dash.no_update
+        
         return is_open, dash.no_update, dash.no_update
 
     @app.callback(Output('analysis-pane-content', 'children'), [Input('analysis-tabs', 'active_tab'), Input('user-selections-store', 'data')])

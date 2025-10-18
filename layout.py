@@ -7,6 +7,49 @@ from constants import SECTORS
 
 # --- Dictionary for Metric Definitions ---
 METRIC_DEFINITIONS = {
+    # Graph Definitions
+    "tab-performance": dcc.Markdown("""
+    **PERFORMANCE (Year-to-Date)**
+    * **Definition:** This chart displays the percentage change in the price of selected stocks and benchmarks from the first trading day of the current year to the present day. It helps visualize and compare the relative performance of different assets over the same period.
+    * **Calculation:**
+    $$
+    Performance = \\Big( \\frac{\\text{Current Price}}{\\text{Price at Start of Year}} - 1 \\Big) \\times 100
+    $$
+    * **Interpretation:** A rising line indicates positive returns (the asset has increased in value), while a falling line indicates negative returns. The steeper the line, the more significant the price change.
+    """, mathjax=True),
+    "tab-drawdown": dcc.Markdown("""
+    **DRAWDOWN (1-Year)**
+    * **Definition:** A drawdown is the peak-to-trough decline during a specific period for an investment. This chart shows the percentage loss from the most recent highest point (peak) over the last year.
+    * **Calculation:**
+    $$
+    Drawdown = \\Big( \\frac{\\text{Current Price}}{\\text{Rolling 1-Year Max Price}} - 1 \\Big) \\times 100
+    $$
+    * **Interpretation:** This chart is a key indicator of risk. A larger negative value (e.g., -25%) indicates a greater loss from its peak, suggesting higher volatility or a potential downturn. It helps assess how much an asset has fallen from its high.
+    """, mathjax=True),
+    "tab-scatter": dcc.Markdown("""
+    **VALUATION VS. QUALITY**
+    * **Definition:** This scatter plot positions companies on a 2x2 grid to compare their valuation against their operational quality.
+    * **Axes:**
+        * **X-Axis (Quality):** `EBITDA Margin`. A measure of a company's operating profitability as a percentage of its revenue. Higher is generally better.
+        * **Y-Axis (Valuation):** `EV/EBITDA`. A ratio comparing a company's total value (Enterprise Value) to its earnings before interest, taxes, depreciation, and amortization. Lower is generally considered cheaper or more attractive.
+    * **Interpretation:**
+        * **Top-Left:** Expensive valuation, low quality.
+        * **Top-Right:** Expensive valuation, high quality (e.g., growth stocks).
+        * **Bottom-Left:** Cheap valuation, low quality (e.g., potential value traps).
+        * **Bottom-Right:** Cheap valuation, high quality (e.g., ideal value investments).
+    """, mathjax=True),
+    "tab-dcf": dcc.Markdown("""
+    **MARGIN OF SAFETY (DCF)**
+    * **Definition:** This chart visualizes the "Margin of Safety," a core principle of value investing. It compares a stock's current market price to its estimated intrinsic value, calculated using a Discounted Cash Flow (DCF) model.
+    * **Components:**
+        * `Current Price` (Blue Dot): The price the stock is currently trading at in the market.
+        * `Intrinsic Value (DCF)` (Orange Diamond): The value of the company calculated by projecting its future cash flows and discounting them back to today's value. This model uses a default 5% growth forecast.
+        * `Connecting Line`: Represents the gap between the current price and the intrinsic value.
+    * **Interpretation:**
+        * If the **Intrinsic Value is higher than the Current Price** (a green line), a positive "Margin of Safety" exists, suggesting the stock may be undervalued.
+        * If the **Current Price is higher than the Intrinsic Value** (a red line), the margin of safety is negative, suggesting the stock may be overvalued.
+    """, mathjax=True),
+
     # Valuation Metrics
     "P/E": dcc.Markdown("""
     **P/E (Price-to-Earnings) Ratio**
@@ -279,14 +322,29 @@ def build_layout():
                     html.Div(id='index-summary-display', className="mt-2"),
                 ])), width=12, md=3, className="sidebar-fixed"),
                 dbc.Col([
-                    html.Div(className="custom-tabs-container", children=[
-                        dbc.Tabs(id="analysis-tabs", active_tab="tab-performance", children=[
-                            dbc.Tab(label="PERFORMANCE (YTD)", tab_id="tab-performance"),
-                            dbc.Tab(label="DRAWDOWN (RISK)", tab_id="tab-drawdown"),
-                            dbc.Tab(label="VALUATION VS. QUALITY", tab_id="tab-scatter"),
-                            dbc.Tab(label="MARGIN OF SAFETY (DCF)", tab_id="tab-dcf"),
-                        ])
-                    ]),
+                    dbc.Row([
+                        dbc.Col(
+                            html.Div(className="custom-tabs-container", children=[
+                                dbc.Tabs(id="analysis-tabs", active_tab="tab-performance", children=[
+                                    dbc.Tab(label="PERFORMANCE", tab_id="tab-performance"),
+                                    dbc.Tab(label="DRAWDOWN", tab_id="tab-drawdown"),
+                                    dbc.Tab(label="VALUATION VS. QUALITY", tab_id="tab-scatter"),
+                                    dbc.Tab(label="MARGIN OF SAFETY", tab_id="tab-dcf"),
+                                ])
+                            ]),
+                        ),
+                        dbc.Col(
+                            dbc.Stack(
+                                [
+                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-graphs", color="secondary", outline=True),
+                                ],
+                                direction="horizontal",
+                                gap=2
+                            ),
+                            width="auto",
+                            align="center"
+                        )
+                    ], justify="between", align="center"),
                     dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
                     html.Hr(className="my-5"),
                     dbc.Row([
@@ -304,7 +362,7 @@ def build_layout():
                             dbc.Stack(
                                 [
                                     dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
-                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn", color="secondary", outline=True),
+                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-tables", color="secondary", outline=True),
                                     dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by", style={'width': '180px'})
                                 ],
                                 direction="horizontal",

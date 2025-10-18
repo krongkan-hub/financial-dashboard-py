@@ -1,4 +1,4 @@
-# app.py (NEW - Core App Initialization)
+# app.py (FIXED - Core App Initialization with Absolute Path)
 
 import os
 import dash
@@ -7,6 +7,13 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin
 from config import Config
+
+# --- [MODIFICATION START] ---
+# Get the absolute path of the directory where this file is located
+basedir = os.path.abspath(os.path.dirname(__file__))
+# Define the absolute path to the assets folder
+assets_path = os.path.join(basedir, 'assets')
+# --- [MODIFICATION END] ---
 
 # --- App Initialization ---
 server = Flask(__name__)
@@ -17,7 +24,8 @@ app = dash.Dash(
     server=server,
     external_stylesheets=[dbc.themes.LUX, dbc.icons.BOOTSTRAP],
     suppress_callback_exceptions=True,
-    assets_folder='assets'
+    # --- [MODIFICATION] Use the absolute path we defined ---
+    assets_folder=assets_path
 )
 
 # --- Database & Login Manager Setup ---

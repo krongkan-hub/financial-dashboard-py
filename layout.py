@@ -367,7 +367,6 @@ def build_layout():
                 ])), width=12, md=3, className="sidebar-fixed"),
                 
                 dbc.Col([
-                    # --- [MODIFICATION START] ---
                     # Graph Controls Row (Responsive)
                     dbc.Row(
                         [
@@ -380,7 +379,7 @@ def build_layout():
                                         dbc.Tab(label="MARGIN OF SAFETY", tab_id="tab-dcf"),
                                     ])
                                 ]),
-                                width=12, lg="auto", className="flex-grow-1"
+                                lg=8, md=12
                             ),
                             dbc.Col(
                                 dbc.Stack(
@@ -390,20 +389,18 @@ def build_layout():
                                     ],
                                     direction="horizontal",
                                     gap=2,
-                                    className="justify-content-lg-end" # Align to the right on large screens
+                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0" 
                                 ),
-                                width=12, lg="auto", className="mt-2 mt-lg-0"
+                                lg=4, md=12
                             )
                         ],
                         align="center",
-                        className="g-2"
+                        className="control-row" # <-- Added a specific class
                     ),
-                    # --- [MODIFICATION END] ---
                     
                     dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
                     html.Hr(className="my-5"),
 
-                    # --- [MODIFICATION START] ---
                     # Table Controls Row (Responsive)
                     dbc.Row(
                         [
@@ -416,7 +413,7 @@ def build_layout():
                                         dbc.Tab(label="TARGET", tab_id="tab-forecast"),
                                     ])
                                 ]),
-                                width=12, lg="auto", className="flex-grow-1"
+                                lg=7, md=12,
                             ),
                              dbc.Col(
                                 dbc.Stack(
@@ -427,15 +424,14 @@ def build_layout():
                                     ],
                                     direction="horizontal",
                                     gap=2,
-                                    className="justify-content-lg-end"
+                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                 ),
-                                width=12, lg="auto", className="mt-2 mt-lg-0"
+                                lg=5, md=12
                             )
                         ],
                         align="center",
-                        className="mt-3 g-2"
+                        className="control-row mt-3" # <-- Added a specific class
                     ),
-                    # --- [MODIFICATION END] ---
                     
                     dcc.Loading(html.Div(id="table-pane-content", className="mt-2"))
                 ], width=12, md=9, className="content-offset"),

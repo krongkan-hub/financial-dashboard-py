@@ -1,13 +1,17 @@
-/* style.css (FINAL - BASED ON EXACT RENDERED HTML) */
+/* style.css (FINAL - ALL FIXES AND NO-WRAP TABS) */
 
 /* ============================================================== */
-/* === STYLES THAT APPLY TO ALL SCREEN SIZES (DO NOT CHANGE) === */
+/* === STYLES THAT APPLY TO ALL SCREEN SIZES === */
 /* ============================================================== */
 
 /* CORE LAYOUT STYLES */
 #navbar-container .navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 1030; }
 .main-content-container { padding-top: 80px !important; }
 #_dash-root, #_dash-app-content, #page-content { overflow: visible !important; }
+
+body {
+    zoom: 0.9; /* Sets the default view to 90% */
+}
 
 @media (min-width: 768px) {
   .sidebar-fixed { position: fixed !important; top: 80px; height: calc(100vh - 100px); overflow-y: auto; }
@@ -18,6 +22,7 @@
 .custom-tabs-container > .nav-tabs {
     border-bottom: none !important;
     margin-left: 0 !important;
+    flex-wrap: nowrap !important; /* Prevents tabs from wrapping to the next line */
 }
 /* Style for each tab button */
 .custom-tabs-container .nav-tabs .nav-link {
@@ -71,7 +76,29 @@
 === RESPONSIVE OVERRIDES THAT WILL FIX THE LAYOUT ===
 ================================================================
 */
-/* This section targets tablets and small laptops where the layout breaks */
+/* This section targets tablets in landscape and small laptops */
+@media (max-width: 1280px) {
+
+    /* Use the MOST specific selector to shrink the tabs slightly */
+    .control-row.row .custom-tabs-container .nav-tabs .nav-item a.nav-link {
+        font-size: 13px !important;
+        padding: 8px 12px !important;
+    }
+
+    /* Shrink the control buttons (Info, Gear) */
+    .control-row.row .hstack .btn {
+        padding: 6px 10px !important;
+        font-size: 14px !important;
+    }
+
+    /* Shrink the Dropdown 'Sort by' */
+    .control-row.row #sort-by-dropdown {
+        min-width: 150px !important;
+        font-size: 13px !important;
+    }
+}
+
+/* This section targets tablets and smaller devices */
 @media (max-width: 1024px) {
 
     /* Use the MOST specific selector from the rendered HTML to shrink the tabs */

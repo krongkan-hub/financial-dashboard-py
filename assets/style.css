@@ -1,4 +1,4 @@
-/* style.css (FINAL - ALL FIXES AND SLIM SIDEBAR) */
+/* style.css (FINAL - ALL FIXES AND MODAL SHADOW FIX) */
 
 /* ============================================================== */
 /* === STYLES THAT APPLY TO ALL SCREEN SIZES === */
@@ -14,8 +14,16 @@ body {
 }
 
 @media (min-width: 768px) {
-  .sidebar-fixed { position: fixed !important; top: 80px; height: calc(100vh - 100px); overflow-y: auto; }
-  .content-offset { margin-left: 25% !important; }
+  .sidebar-fixed {
+    position: fixed !important;
+    top: 80px;
+    height: calc(100vh - 100px);
+    overflow-y: auto;
+    z-index: 1020; /* Ensures modal backdrop covers sidebar */
+  }
+  .content-offset {
+    margin-left: 25% !important;
+  }
 }
 
 /* ================================================================ */
@@ -24,21 +32,21 @@ body {
 
 /* --- Adjust Dropdown Height --- */
 .sidebar-fixed .Select-control {
-    min-height: 32px !important; /* ลดความสูงขั้นต่ำ */
+    min-height: 32px !important;
     height: 32px !important;
 }
 .sidebar-fixed .Select-input {
     height: 30px !important;
 }
 .sidebar-fixed .Select-value, .sidebar-fixed .Select-placeholder {
-    line-height: 30px !important; /* จัดให้ข้อความอยู่กึ่งกลางแนวตั้ง */
+    line-height: 30px !important;
 }
 
 /* --- Adjust Button Height & Font --- */
 .sidebar-fixed .btn {
-    padding-top: 0.25rem !important; /* ลด padding แนวตั้ง */
+    padding-top: 0.25rem !important;
     padding-bottom: 0.25rem !important;
-    font-size: 0.9rem !important; /* ลดขนาดฟอนต์เล็กน้อย */
+    font-size: 0.9rem !important;
 }
 
 
@@ -46,7 +54,7 @@ body {
 .custom-tabs-container > .nav-tabs {
     border-bottom: none !important;
     margin-left: 0 !important;
-    flex-wrap: nowrap !important; /* Prevents tabs from wrapping to the next line */
+    flex-wrap: nowrap !important; /* Prevents tabs from wrapping */
 }
 /* Style for each tab button */
 .custom-tabs-container .nav-tabs .nav-link {

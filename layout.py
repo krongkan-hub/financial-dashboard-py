@@ -379,7 +379,7 @@ def build_layout():
                                         dbc.Tab(label="MARGIN OF SAFETY", tab_id="tab-dcf"),
                                     ])
                                 ]),
-                                lg=8, md=12
+                                md=8
                             ),
                             dbc.Col(
                                 dbc.Stack(
@@ -391,7 +391,7 @@ def build_layout():
                                     gap=2,
                                     className="justify-content-start justify-content-lg-end pt-2 pt-lg-0" 
                                 ),
-                                lg=4, md=12
+                                md=4
                             )
                         ],
                         align="center",
@@ -413,7 +413,7 @@ def build_layout():
                                         dbc.Tab(label="TARGET", tab_id="tab-forecast"),
                                     ])
                                 ]),
-                                lg=7, md=12,
+                                md=7
                             ),
                              dbc.Col(
                                 dbc.Stack(
@@ -426,7 +426,7 @@ def build_layout():
                                     gap=2,
                                     className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                 ),
-                                lg=5, md=12
+                                md=5
                             )
                         ],
                         align="center",

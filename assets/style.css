@@ -1,4 +1,8 @@
-/* style.css (Responsive Version - More Specific) */
+/* style.css (FINAL - BASED ON EXACT RENDERED HTML) */
+
+/* ============================================================== */
+/* === STYLES THAT APPLY TO ALL SCREEN SIZES (DO NOT CHANGE) === */
+/* ============================================================== */
 
 /* CORE LAYOUT STYLES */
 #navbar-container .navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 1030; }
@@ -10,19 +14,34 @@
   .content-offset { margin-left: 25% !important; }
 }
 
-/* CUSTOM TABS STYLES */
-.custom-tabs-container > .nav-tabs { border-bottom: none !important; margin-left: 0 !important; }
-.custom-tabs-container .nav-tabs .nav-link { text-transform: uppercase; font-weight: 500; white-space: nowrap; }
-.custom-tabs-container .nav-tabs .nav-link:not(.active) { background-color: white !important; border: 1px solid #dee2e6 !important; color: #495057 !important; border-radius: 0.375rem; margin-right: 5px; margin-bottom: 5px; }
-.custom-tabs-container .nav-tabs .nav-link:not(.active):hover { background-color: #f8f9fa !important; }
-.custom-tabs-container .nav-tabs .nav-link.active { background-color: #343a40 !important; color: white !important; border: 1px solid #343a40 !important; border-radius: 0.375rem; margin-right: 5px; margin-bottom: 5px; }
-
-/* === RESPONSIVE ADJUSTMENTS (NEW & IMPROVED) === */
-/* For screens smaller than large (992px), where 'lg' breakpoint kicks in */
-@media (max-width: 991.98px) {
-    .control-row > .col-md-12 {
-        padding-bottom: 0.5rem; /* Add some space between stacked elements */
-    }
+/* Main style for the tabs container */
+.custom-tabs-container > .nav-tabs {
+    border-bottom: none !important;
+    margin-left: 0 !important;
+}
+/* Style for each tab button */
+.custom-tabs-container .nav-tabs .nav-link {
+    text-transform: uppercase;
+    font-weight: 500;
+    white-space: nowrap;
+    margin-right: 5px;
+    margin-bottom: 5px;
+    border-radius: 0.375rem;
+}
+/* Style for non-active tab buttons */
+.custom-tabs-container .nav-tabs .nav-link:not(.active) {
+    background-color: white !important;
+    border: 1px solid #dee2e6 !important;
+    color: #495057 !important;
+}
+.custom-tabs-container .nav-tabs .nav-link:not(.active):hover {
+    background-color: #f8f9fa !important;
+}
+/* Style for the ACTIVE tab button */
+.custom-tabs-container .nav-tabs .nav-link.active {
+    background-color: #343a40 !important;
+    color: white !important;
+    border: 1px solid #343a40 !important;
 }
 
 /* TABLE STYLING */
@@ -33,16 +52,43 @@
 .dash-spreadsheet-container a { text-decoration: none !important; color: inherit !important; font-weight: 600; }
 .dash-spreadsheet-container a:hover { color: #0d6efd !important; }
 
-/* DEEP DIVE STYLES */
+/* DEEP DIVE STYLING */
 .marquee-header { padding-bottom: 1.5rem; }
 .company-logo { height: 60px; width: 60px; object-fit: contain; border-radius: 0.375rem; margin-right: 1.5rem; }
 .company-name { font-size: 2.25rem; font-weight: 700; line-height: 1.2; }
 .price-display { font-size: 2.5rem; font-weight: 700; line-height: 1.2; }
 .price-change { font-size: 1.1rem; font-weight: 500; }
-.price-positive { color: #198754; }
+.price-positive { color: #198574; }
 .price-negative { color: #dc3545; }
 .metric-card { border: 1px solid #e9ecef; text-align: center; }
 .metric-card-title { font-size: 0.8rem; font-weight: 500; color: #6c757d; text-transform: uppercase; margin-bottom: 0.5rem; min-height: 2.5em; display: flex; align-items: center; justify-content: center; }
 .metric-card-value { font-size: 1.5rem; font-weight: 600; color: #212529; margin-bottom: 0; }
 #deep-dive-tab-content .card-title { margin-bottom: 1.25rem; }
 #deep-dive-tab-content .table { font-size: 0.85rem; }
+
+/*
+================================================================
+=== RESPONSIVE OVERRIDES THAT WILL FIX THE LAYOUT ===
+================================================================
+*/
+/* This section targets tablets and small laptops where the layout breaks */
+@media (max-width: 1024px) {
+
+    /* Use the MOST specific selector from the rendered HTML to shrink the tabs */
+    .control-row.row .custom-tabs-container .nav-tabs .nav-item a.nav-link {
+        font-size: 11px !important;
+        padding: 8px 10px !important;
+    }
+
+    /* Shrink the control buttons (Info, Gear) */
+    .control-row.row .hstack .btn {
+        padding: 5px 8px !important;
+        font-size: 12px !important;
+    }
+
+    /* Shrink the Dropdown 'Sort by' */
+    .control-row.row #sort-by-dropdown {
+        min-width: 120px !important;
+        font-size: 12px !important;
+    }
+}

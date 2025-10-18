@@ -253,6 +253,16 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         if n_clicks:
             return not is_open
         return is_open
+    
+    @app.callback(
+        Output('open-forecast-modal-btn', 'style'),
+        Input('table-tabs', 'active_tab')
+    )
+    def toggle_gear_button_visibility(active_tab):
+        if active_tab == 'tab-forecast':
+            return {'display': 'inline-block'}
+        else:
+            return {'display': 'none'}
 
     @app.callback(
         Output('forecast-assumptions-store', 'data'),

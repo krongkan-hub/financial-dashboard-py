@@ -303,8 +303,8 @@ def build_layout():
                         dbc.Col(
                             dbc.Stack(
                                 [
-                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn", color="secondary", outline=True),
                                     dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
+                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn", color="secondary", outline=True),
                                     dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by", style={'width': '180px'})
                                 ],
                                 direction="horizontal",

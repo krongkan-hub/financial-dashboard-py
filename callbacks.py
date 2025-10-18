@@ -15,7 +15,7 @@ import logging
 from flask_login import current_user
 
 # Import core app objects from app.py
-from app import app, db, server, User, UserSelection
+from app import app, db, server, User, UserSelection, UserAssumptions
 
 # Import layout components from layout.py
 from layout import build_layout, create_navbar
@@ -154,15 +154,34 @@ def register_callbacks(app, METRIC_DEFINITIONS):
              return create_navbar()
         return None
 
-    @app.callback(Output('user-selections-store', 'data'), Input('url', 'pathname'))
-    def load_user_selections_to_store(pathname):
+    @app.callback(
+        Output('user-selections-store', 'data'),
+        Output('forecast-assumptions-store', 'data'),
+        Output('dcf-assumptions-store', 'data'),
+        Input('url', 'pathname')
+    )
+    def load_user_data_to_store(pathname):
         if pathname == '/':
             with server.app_context():
                 if current_user.is_authenticated:
+                    # Load tickers and indices
                     stocks = UserSelection.query.filter_by(user_id=current_user.id, symbol_type='stock').all()
                     indices = UserSelection.query.filter_by(user_id=current_user.id, symbol_type='index').all()
-                    return {'tickers': [s.symbol for s in stocks], 'indices': [i.symbol for i in indices]}
-        return {'tickers': [], 'indices': []}
+                    selections_data = {'tickers': [s.symbol for s in stocks], 'indices': [i.symbol for i in indices]}
+
+                    # Load assumptions
+                    assumptions = UserAssumptions.query.filter_by(user_id=current_user.id).first()
+                    if assumptions:
+                        forecast_data = {'years': assumptions.forecast_years, 'growth': assumptions.eps_growth, 'pe': assumptions.terminal_pe}
+                        dcf_data = {'forecast_growth': assumptions.dcf_forecast_growth, 'perpetual_growth': assumptions.dcf_perpetual_growth, 'wacc': assumptions.dcf_wacc}
+                    else: # Use default if no assumptions are saved
+                        forecast_data = {'years': 5, 'growth': 10, 'pe': 20}
+                        dcf_data = {'forecast_growth': 5, 'perpetual_growth': 2.5, 'wacc': 8.0}
+                    
+                    return selections_data, forecast_data, dcf_data
+        
+        # Default values for non-authenticated users or other pages
+        return {'tickers': [], 'indices': []}, {'years': 5, 'growth': 10, 'pe': 20}, {'forecast_growth': 5, 'perpetual_growth': 2.5, 'wacc': 8.0}
 
     def save_selections_to_db(user_id, symbols, symbol_type):
         with server.app_context():
@@ -271,7 +290,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             return {'display': 'none'}
 
     @app.callback(
-        Output('forecast-assumptions-store', 'data'),
+        Output('forecast-assumptions-store', 'data', allow_duplicate=True),
         Output('forecast-assumptions-modal', 'is_open', allow_duplicate=True),
         Input('apply-forecast-changes-btn', 'n_clicks'),
         [State('modal-forecast-years-input', 'value'),
@@ -281,7 +300,18 @@ def register_callbacks(app, METRIC_DEFINITIONS):
     )
     def save_forecast_assumptions(n_clicks, years, growth, pe):
         if n_clicks:
-            return {'years': years, 'growth': growth, 'pe': pe}, False
+            new_data = {'years': years, 'growth': growth, 'pe': pe}
+            if current_user.is_authenticated:
+                with server.app_context():
+                    assumptions = UserAssumptions.query.filter_by(user_id=current_user.id).first()
+                    if not assumptions:
+                        assumptions = UserAssumptions(user_id=current_user.id)
+                        db.session.add(assumptions)
+                    assumptions.forecast_years = years
+                    assumptions.eps_growth = growth
+                    assumptions.terminal_pe = pe
+                    db.session.commit()
+            return new_data, False
         return dash.no_update, dash.no_update
 
     @app.callback(
@@ -348,7 +378,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         return is_open
 
     @app.callback(
-        Output('dcf-assumptions-store', 'data'),
+        Output('dcf-assumptions-store', 'data', allow_duplicate=True),
         Output('dcf-assumptions-modal', 'is_open', allow_duplicate=True),
         Input('apply-dcf-changes-btn', 'n_clicks'),
         [State('modal-dcf-forecast-growth-input', 'value'),
@@ -358,8 +388,43 @@ def register_callbacks(app, METRIC_DEFINITIONS):
     )
     def save_dcf_assumptions(n_clicks, forecast_growth, perpetual_growth, wacc):
         if n_clicks:
-            return {'forecast_growth': forecast_growth, 'perpetual_growth': perpetual_growth, 'wacc': wacc}, False
+            new_data = {'forecast_growth': forecast_growth, 'perpetual_growth': perpetual_growth, 'wacc': wacc}
+            if current_user.is_authenticated:
+                with server.app_context():
+                    assumptions = UserAssumptions.query.filter_by(user_id=current_user.id).first()
+                    if not assumptions:
+                        assumptions = UserAssumptions(user_id=current_user.id)
+                        db.session.add(assumptions)
+                    assumptions.dcf_forecast_growth = forecast_growth
+                    assumptions.dcf_perpetual_growth = perpetual_growth
+                    assumptions.dcf_wacc = wacc
+                    db.session.commit()
+            return new_data, False
         return dash.no_update, dash.no_update
+
+    # --- [NEW CALLBACKS TO SYNC MODAL INPUTS] ---
+    @app.callback(
+        Output('modal-dcf-forecast-growth-input', 'value'),
+        Output('modal-dcf-perpetual-growth-input', 'value'),
+        Output('modal-dcf-wacc-input', 'value'),
+        Input('dcf-assumptions-store', 'data')
+    )
+    def sync_dcf_modal_inputs(dcf_data):
+        if not dcf_data:
+            return 5, 2.5, 8.0 # Defaults
+        return dcf_data.get('forecast_growth', 5), dcf_data.get('perpetual_growth', 2.5), dcf_data.get('wacc', 8.0)
+
+    @app.callback(
+        Output('modal-forecast-years-input', 'value'),
+        Output('modal-forecast-eps-growth-input', 'value'),
+        Output('modal-forecast-terminal-pe-input', 'value'),
+        Input('forecast-assumptions-store', 'data')
+    )
+    def sync_forecast_modal_inputs(forecast_data):
+        if not forecast_data:
+            return 5, 10, 20 # Defaults
+        return forecast_data.get('years', 5), forecast_data.get('growth', 10), forecast_data.get('pe', 20)
+    # --- [END NEW CALLBACKS] ---
 
     @app.callback(
         Output('analysis-pane-content', 'children'),

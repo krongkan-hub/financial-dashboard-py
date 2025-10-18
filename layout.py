@@ -341,9 +341,9 @@ def build_layout():
     """Builds the main dashboard layout."""
     from auth import create_login_modal
     return html.Div([
-        dcc.Store(id='user-selections-store', storage_type='session'),
-        dcc.Store(id='forecast-assumptions-store', storage_type='session', data={'years': 5, 'growth': 10, 'pe': 20}),
-        dcc.Store(id='dcf-assumptions-store', storage_type='session', data={'forecast_growth': 5, 'perpetual_growth': 2.5, 'wacc': 8.0}),
+        dcc.Store(id='user-selections-store', storage_type='memory'),
+        dcc.Store(id='forecast-assumptions-store', storage_type='memory'),
+        dcc.Store(id='dcf-assumptions-store', storage_type='memory'),
         html.Div(id="navbar-container"),
         dbc.Container([
             dbc.Row([

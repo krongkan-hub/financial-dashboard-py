@@ -42,6 +42,19 @@ class UserSelection(db.Model):
     symbol_type = db.Column(db.String(10), nullable=False)
     symbol = db.Column(db.String(20), nullable=False)
 
+class UserAssumptions(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+    # Forecast Assumptions
+    forecast_years = db.Column(db.Integer, default=5)
+    eps_growth = db.Column(db.Float, default=10.0)
+    terminal_pe = db.Column(db.Float, default=20.0)
+    # DCF Assumptions
+    dcf_forecast_growth = db.Column(db.Float, default=5.0)
+    dcf_perpetual_growth = db.Column(db.Float, default=2.5)
+    dcf_wacc = db.Column(db.Float, default=8.0)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     with server.app_context():

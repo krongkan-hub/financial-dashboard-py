@@ -1,4 +1,4 @@
-# callbacks.py (Final Version)
+# callbacks.py (Final Version with UX updates)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -212,8 +212,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         tickers = store_data.get('tickers', []) if store_data else []
         if not tickers:
             return html.Div([
-                html.Span("No stocks selected.", className="text-muted fst-italic"),
-                html.Small("Use the dropdowns above to start your analysis.", className="d-block text-muted mt-1")
+                html.Span("No stocks selected.", className="text-muted fst-italic")
             ])
         return [html.Label("Selected Stocks:", className="text-muted small")] + [dbc.Badge([t, html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-stock', 'index': t})], color="light", className="m-1 p-2 text-dark border") for t in tickers]
 
@@ -308,7 +307,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
         if active_tab == "tab-performance":
             all_symbols = tuple(set(tickers + indices))
-            if not all_symbols: return dbc.Card(dbc.CardBody(html.P("Please select items to display the chart", className="text-center text-muted")))
+            if not all_symbols: return dbc.Alert("Please select items to display the chart", color="info", className="mt-3 text-center")
             try:
                 raw_data = yf.download(all_symbols, period="ytd", auto_adjust=True, progress=False)
                 ytd_data = raw_data.get('Close', pd.DataFrame())
@@ -322,7 +321,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
         if active_tab == "tab-drawdown":
             all_symbols = tuple(set(tickers + indices))
-            if not all_symbols: return dbc.Card(dbc.CardBody(html.P("Please select items to display the chart", className="text-center text-muted")))
+            if not all_symbols: return dbc.Alert("Please select items to display the chart", color="info", className="mt-3 text-center")
             try:
                 drawdown_data = calculate_drawdown(all_symbols, period="1y")
                 if drawdown_data.empty: raise ValueError("Could not calculate drawdown data.")
@@ -332,7 +331,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             except Exception as e: return dbc.Alert(f"An error occurred while rendering 'Drawdown': {e}", color="danger")
 
         if active_tab == "tab-scatter":
-            if not tickers: return dbc.Card(dbc.CardBody(html.P("Please select stocks to display the chart.", className="text-center text-muted")))
+            if not tickers: return dbc.Alert("Please select stocks to display the chart.", color="info", className="mt-3 text-center")
             try:
                 df_scatter = get_scatter_data(tickers)
                 if df_scatter.empty: return dbc.Alert("Could not fetch data for some of the selected stocks.", color="warning")
@@ -346,7 +345,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             except Exception as e: return dbc.Alert(f"An error occurred while rendering Scatter Plot: {e}", color="danger")
 
         if active_tab == "tab-dcf":
-            if not tickers: return dbc.Card(dbc.CardBody(html.P("Please select stocks to display the chart.", className="text-center text-muted")))
+            if not tickers: return dbc.Alert("Please select stocks to display the chart.", color="info", className="mt-3 text-center")
             try:
                 growth_rate = 0.05
                 dcf_results = [calculate_dcf_intrinsic_value(t, growth_rate) for t in tickers]

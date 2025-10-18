@@ -43,8 +43,30 @@ METRIC_DEFINITIONS = {
     * **Definition:** This chart visualizes the "Margin of Safety," a core principle of value investing. It compares a stock's current market price to its estimated intrinsic value, calculated using a Discounted Cash Flow (DCF) model.
     * **Components:**
         * `Current Price` (Blue Dot): The price the stock is currently trading at in the market.
-        * `Intrinsic Value (DCF)` (Orange Diamond): The value of the company calculated by projecting its future cash flows and discounting them back to today's value. This model uses a default 5% growth forecast.
+        * `Intrinsic Value (DCF)` (Orange Diamond): The value of the company calculated by projecting its future cash flows and discounting them back to today's value. You can adjust the assumptions for this calculation using the gear icon.
         * `Connecting Line`: Represents the gap between the current price and the intrinsic value.
+    * **Formula Overview:**
+    The model calculates the Intrinsic Value per Share through these main steps:
+    1.  **Project Future Cash Flows (FCFF):**
+        $$
+        FCFF_n = \\text{Base FCFF} \\times (1 + \\textbf{Growth Rate})^n
+        $$
+    2.  **Calculate Terminal Value (TV):**
+        $$
+        TV = \\frac{FCFF_{\\text{final}} \\times (1 + \\textbf{Perpetual Growth})}{ \\textbf{WACC} - \\textbf{Perpetual Growth}}
+        $$
+    3.  **Discount Cash Flows and Terminal Value to Present Value (PV):**
+        $$
+        PV = \\sum_{n=1}^{N} \\frac{FCFF_n}{(1 + \\textbf{WACC})^n} + \\frac{TV}{(1 + \\textbf{WACC})^N}
+        $$
+    4.  **Calculate Intrinsic Value:**
+        $$
+        \\text{Intrinsic Value} = \\frac{(\\text{PV} - \\text{Net Debt})}{\\text{Shares Outstanding}}
+        $$
+    * **User-Adjustable Assumptions:**
+        * **Growth Rate:** The anticipated **high-growth, short-term rate** (e.g., for the next 5 years) for the company's expansion phase. This is used in step 1.
+        * **Perpetual Growth:** The assumed **stable, long-term growth rate** for the company forever after the initial high-growth period. This should realistically be a low number, similar to GDP growth. This is used in step 2.
+        * **WACC (Discount Rate):** The rate used to discount all future cash flows back to their present value. A higher WACC implies higher risk and results in a lower intrinsic value. This is used in step 3.
     * **Interpretation:**
         * If the **Intrinsic Value is higher than the Current Price** (a green line), a positive "Margin of Safety" exists, suggesting the stock may be undervalued.
         * If the **Current Price is higher than the Intrinsic Value** (a red line), the margin of safety is negative, suggesting the stock may be overvalued.
@@ -279,6 +301,27 @@ def create_forecast_modal():
         is_open=False,
     )
 
+def create_dcf_modal():
+    return dbc.Modal(
+        [
+            dbc.ModalHeader(dbc.ModalTitle("DCF ASSUMPTIONS")),
+            dbc.ModalBody([
+                dbc.Label("Forecast Growth Rate (%):"),
+                dbc.Input(id="modal-dcf-forecast-growth-input", type="number", value=5, step=0.5, className="mb-3"),
+                dbc.Label("Perpetual Growth Rate (%):"),
+                dbc.Input(id="modal-dcf-perpetual-growth-input", type="number", value=2.5, step=0.1, className="mb-3"),
+                dbc.Label("Discount Rate (WACC) (%):"),
+                dbc.Input(id="modal-dcf-wacc-input", type="number", value=8.0, step=0.5, className="mb-3"),
+                html.P("The WACC you enter here will override the automatic calculation.", className="text-muted small")
+            ]),
+            dbc.ModalFooter(
+                dbc.Button("Apply Changes", id="apply-dcf-changes-btn", color="primary")
+            ),
+        ],
+        id="dcf-assumptions-modal",
+        is_open=False,
+    )
+
 def create_definitions_modal():
     return dbc.Modal(
         [
@@ -300,6 +343,7 @@ def build_layout():
     return html.Div([
         dcc.Store(id='user-selections-store', storage_type='session'),
         dcc.Store(id='forecast-assumptions-store', storage_type='session', data={'years': 5, 'growth': 10, 'pe': 20}),
+        dcc.Store(id='dcf-assumptions-store', storage_type='session', data={'forecast_growth': 5, 'perpetual_growth': 2.5, 'wacc': 8.0}),
         html.Div(id="navbar-container"),
         dbc.Container([
             dbc.Row([
@@ -336,6 +380,7 @@ def build_layout():
                         dbc.Col(
                             dbc.Stack(
                                 [
+                                    dbc.Button(html.I(className="bi bi-gear-fill"), id="open-dcf-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
                                     dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-graphs", color="secondary", outline=True),
                                 ],
                                 direction="horizontal",
@@ -377,5 +422,6 @@ def build_layout():
         ], fluid=True, className="p-4 main-content-container"),
         create_login_modal(),
         create_forecast_modal(),
+        create_dcf_modal(),
         create_definitions_modal()
     ])

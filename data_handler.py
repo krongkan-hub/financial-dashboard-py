@@ -196,42 +196,68 @@ def get_deep_dive_data(ticker: str) -> dict:
         return {"error": str(e)}
 
 @lru_cache(maxsize=32)
-def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float) -> dict:
-    PROJECTION_YEARS, ASSUMED_MARKET_RETURN, ASSUMED_PERPETUAL_GROWTH = 5, 0.08, 0.025
+def calculate_dcf_intrinsic_value(
+    ticker: str,
+    forecast_growth_rate: float,
+    perpetual_growth_rate: Optional[float] = None,
+    wacc_override: Optional[float] = None
+) -> dict:
+    ASSUMED_PERPETUAL_GROWTH = perpetual_growth_rate if perpetual_growth_rate is not None else 0.025
+    PROJECTION_YEARS, ASSUMED_MARKET_RETURN = 5, 0.08
     try:
         ticker_obj, info = yf.Ticker(ticker), yf.Ticker(ticker).info
         if not info or not info.get('sharesOutstanding'): return {'Ticker': ticker, 'error': 'Missing shares outstanding or basic info.'}
         income_stmt, balance_sheet, cashflow = ticker_obj.financials, ticker_obj.balance_sheet, ticker_obj.cashflow
         if any(df.empty for df in [income_stmt, balance_sheet, cashflow]): return {'Ticker': ticker, 'error': 'One or more financial statements are empty.'}
         last_year_income, last_year_balance, last_year_cashflow = income_stmt.iloc[:, 0], balance_sheet.iloc[:, 0], cashflow.iloc[:, 0]
+        
         ebit = get_financial_data(last_year_income, ['EBIT', 'Ebit'])
-        tax_provision, pretax_income = get_financial_data(last_year_income, ['Tax Provision', 'Income Tax Expense']), get_financial_data(last_year_income, ['Pretax Income', 'Income Before Tax'])
-        d_and_a, capex = get_financial_data(last_year_cashflow, ['Depreciation And Amortization', 'Depreciation']), get_financial_data(last_year_cashflow, ['Capital Expenditure', 'CapEx'])
-        market_cap, total_debt = info.get('marketCap'), get_financial_data(last_year_balance, ['Total Debt', 'Total Debt Net Minority Interest'])
-        interest_expense, beta = get_financial_data(last_year_income, ['Interest Expense', 'Interest Expense Net']), info.get('beta')
+        tax_provision = get_financial_data(last_year_income, ['Tax Provision', 'Income Tax Expense'])
+        pretax_income = get_financial_data(last_year_income, ['Pretax Income', 'Income Before Tax'])
+        d_and_a = get_financial_data(last_year_cashflow, ['Depreciation And Amortization', 'Depreciation'])
+        capex = get_financial_data(last_year_cashflow, ['Capital Expenditure', 'CapEx'])
         cash_and_equivalents = get_financial_data(last_year_balance, ['Cash And Cash Equivalents', 'Cash'])
-        shares_outstanding, current_price = info.get('sharesOutstanding'), info.get('currentPrice') or info.get('previousClose')
-        required_components = [ebit, tax_provision, pretax_income, d_and_a, capex, market_cap, total_debt, interest_expense, beta, cash_and_equivalents, shares_outstanding, current_price]
+        total_debt = get_financial_data(last_year_balance, ['Total Debt', 'Total Debt Net Minority Interest'])
+        interest_expense = get_financial_data(last_year_income, ['Interest Expense', 'Interest Expense Net'])
+        
+        market_cap = info.get('marketCap')
+        beta = info.get('beta')
+        shares_outstanding = info.get('sharesOutstanding')
+        current_price = info.get('currentPrice') or info.get('previousClose')
+
+        required_components = [ebit, tax_provision, pretax_income, d_and_a, capex, cash_and_equivalents, shares_outstanding, current_price]
         if any(v is None for v in required_components): return {'Ticker': ticker, 'error': 'Missing essential data for DCF.'}
-        tax_rate = (tax_provision / pretax_income) if pretax_income != 0 else 0.21
+        
+        tax_rate = (tax_provision / pretax_income) if pretax_income and pretax_income != 0 else 0.21
         base_fcff = (ebit * (1 - tax_rate)) + d_and_a - capex
-        cost_of_debt_rd = (interest_expense / total_debt) if total_debt != 0 else 0.05
-        tnx_history = yf.Ticker('^TNX').history(period='1d')
-        risk_free_rate = (tnx_history['Close'].iloc[0] / 100) if not tnx_history.empty else 0.04
-        cost_of_equity_re = risk_free_rate + beta * (ASSUMED_MARKET_RETURN - risk_free_rate)
-        total_capital = market_cap + total_debt
-        if total_capital == 0: return {'Ticker': ticker, 'error': 'Total capital is zero.'}
-        equity_weight, debt_weight = market_cap / total_capital, total_debt / total_capital
-        wacc = (equity_weight * cost_of_equity_re) + (debt_weight * cost_of_debt_rd * (1 - tax_rate))
-        if wacc is None or wacc <= ASSUMED_PERPETUAL_GROWTH: return {'Ticker': ticker, 'error': 'WACC is invalid or less than perpetual growth rate.'}
+
+        wacc = None
+        if wacc_override is not None:
+            wacc = wacc_override
+        else:
+            if any(v is None for v in [beta, market_cap, total_debt, interest_expense]):
+                return {'Ticker': ticker, 'error': 'Missing data for automatic WACC calculation.'}
+            cost_of_debt_rd = (interest_expense / total_debt) if total_debt != 0 else 0.05
+            tnx_history = yf.Ticker('^TNX').history(period='1d')
+            risk_free_rate = (tnx_history['Close'].iloc[0] / 100) if not tnx_history.empty else 0.04
+            cost_of_equity_re = risk_free_rate + beta * (ASSUMED_MARKET_RETURN - risk_free_rate)
+            total_capital = market_cap + total_debt
+            if total_capital == 0: return {'Ticker': ticker, 'error': 'Total capital is zero.'}
+            equity_weight, debt_weight = market_cap / total_capital, total_debt / total_capital
+            wacc = (equity_weight * cost_of_equity_re) + (debt_weight * cost_of_debt_rd * (1 - tax_rate))
+
+        if wacc is None or wacc <= ASSUMED_PERPETUAL_GROWTH:
+             return {'Ticker': ticker, 'error': f'WACC ({wacc:.2%}) is invalid or less than perpetual growth ({ASSUMED_PERPETUAL_GROWTH:.2%}).'}
+        
         future_fcffs = [base_fcff * ((1 + forecast_growth_rate) ** year) for year in range(1, PROJECTION_YEARS + 1)]
         discounted_fcffs = [fcff / ((1 + wacc) ** (year + 1)) for year, fcff in enumerate(future_fcffs)]
         terminal_value = (future_fcffs[-1] * (1 + ASSUMED_PERPETUAL_GROWTH)) / (wacc - ASSUMED_PERPETUAL_GROWTH)
         discounted_terminal_value = terminal_value / ((1 + wacc) ** PROJECTION_YEARS)
         enterprise_value = sum(discounted_fcffs) + discounted_terminal_value
-        net_debt = total_debt - cash_and_equivalents
+        net_debt = total_debt - cash_and_equivalents if total_debt is not None else -cash_and_equivalents
         equity_value = enterprise_value - net_debt
         intrinsic_value_per_share = equity_value / shares_outstanding
+
         return {'Ticker': ticker, 'intrinsic_value': intrinsic_value_per_share, 'current_price': current_price, 'wacc': wacc}
     except Exception as e:
         logging.error(f"Critical failure in DCF calculation for {ticker}: {e}", exc_info=True)

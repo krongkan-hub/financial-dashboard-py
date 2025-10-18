@@ -325,9 +325,49 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             return True, title, body_content
         
         return is_open, dash.no_update, dash.no_update
+        
+    @app.callback(
+        Output('open-dcf-modal-btn', 'style'),
+        Input('analysis-tabs', 'active_tab')
+    )
+    def toggle_dcf_gear_button_visibility(active_tab):
+        if active_tab == 'tab-dcf':
+            return {'display': 'inline-block'}
+        else:
+            return {'display': 'none'}
 
-    @app.callback(Output('analysis-pane-content', 'children'), [Input('analysis-tabs', 'active_tab'), Input('user-selections-store', 'data')])
-    def render_graph_content(active_tab, store_data):
+    @app.callback(
+        Output('dcf-assumptions-modal', 'is_open'),
+        Input('open-dcf-modal-btn', 'n_clicks'),
+        State('dcf-assumptions-modal', 'is_open'),
+        prevent_initial_call=True
+    )
+    def toggle_dcf_modal(n_clicks, is_open):
+        if n_clicks:
+            return not is_open
+        return is_open
+
+    @app.callback(
+        Output('dcf-assumptions-store', 'data'),
+        Output('dcf-assumptions-modal', 'is_open', allow_duplicate=True),
+        Input('apply-dcf-changes-btn', 'n_clicks'),
+        [State('modal-dcf-forecast-growth-input', 'value'),
+         State('modal-dcf-perpetual-growth-input', 'value'),
+         State('modal-dcf-wacc-input', 'value')],
+        prevent_initial_call=True
+    )
+    def save_dcf_assumptions(n_clicks, forecast_growth, perpetual_growth, wacc):
+        if n_clicks:
+            return {'forecast_growth': forecast_growth, 'perpetual_growth': perpetual_growth, 'wacc': wacc}, False
+        return dash.no_update, dash.no_update
+
+    @app.callback(
+        Output('analysis-pane-content', 'children'),
+        [Input('analysis-tabs', 'active_tab'),
+         Input('user-selections-store', 'data'),
+         Input('dcf-assumptions-store', 'data')]
+    )
+    def render_graph_content(active_tab, store_data, dcf_data):
         store_data = store_data or {'tickers': [], 'indices': []}
         tickers = tuple(store_data.get('tickers', []))
         indices = tuple(store_data.get('indices', []))
@@ -374,14 +414,26 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         if active_tab == "tab-dcf":
             if not tickers: return dbc.Alert("Please select stocks to display the chart.", color="info", className="mt-3 text-center")
             try:
-                growth_rate = 0.05
-                dcf_results = [calculate_dcf_intrinsic_value(t, growth_rate) for t in tickers]
+                forecast_growth = dcf_data.get('forecast_growth', 5) / 100.0
+                perpetual_growth = dcf_data.get('perpetual_growth', 2.5) / 100.0
+                wacc_override = dcf_data.get('wacc', 8.0) / 100.0
+                
+                dcf_results = [calculate_dcf_intrinsic_value(
+                    t,
+                    forecast_growth_rate=forecast_growth,
+                    perpetual_growth_rate=perpetual_growth,
+                    wacc_override=wacc_override
+                ) for t in tickers]
+                
                 successful_results = [res for res in dcf_results if 'error' not in res]
                 failed_results = [res for res in dcf_results if 'error' in res]
                 output_components = []
+
                 if failed_results:
-                    failed_tickers = ', '.join([res['Ticker'] for res in failed_results])
-                    output_components.append(dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), f"Could not calculate DCF for: {failed_tickers} (Missing data)"], color="warning", className="mb-3",dismissable=True))
+                    error_messages = {res['Ticker']: res['error'] for res in failed_results}
+                    alerts = [dbc.Alert([html.I(className="bi bi-exclamation-triangle-fill me-2"), f"Could not calculate DCF for {ticker}: {reason}"], color="warning", className="mb-1", dismissable=True) for ticker, reason in error_messages.items()]
+                    output_components.extend(alerts)
+
                 if successful_results:
                     df_dcf = pd.DataFrame(successful_results)
                     fig = go.Figure()
@@ -389,10 +441,13 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                         fig.add_shape(type='line', x0=row['current_price'], y0=row['Ticker'], x1=row['intrinsic_value'], y1=row['Ticker'], line=dict(color='limegreen' if row['intrinsic_value'] > row['current_price'] else 'tomato', width=3))
                     fig.add_trace(go.Scatter(x=df_dcf['current_price'], y=df_dcf['Ticker'], mode='markers', marker=dict(color='royalblue', size=10), name='Current Price'))
                     fig.add_trace(go.Scatter(x=df_dcf['intrinsic_value'], y=df_dcf['Ticker'], mode='markers', marker=dict(color='darkorange', size=10, symbol='diamond'), name='Intrinsic Value (DCF)'))
-                    fig.update_layout(title=f'Margin of Safety (DCF) with {growth_rate:.0%} Growth Forecast', xaxis_title='Share Price ($)', yaxis_title='Ticker', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                    title_text = f'Margin of Safety (DCF) with {forecast_growth:.1%} Growth Forecast'
+                    fig.update_layout(title=title_text, xaxis_title='Share Price ($)', yaxis_title='Ticker', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     output_components.append(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig))))
+                
                 if not output_components:
                     return dbc.Alert("Could not process DCF for any selected stocks.", color="danger")
+
                 return output_components
             except Exception as e: return dbc.Alert(f"An error occurred while rendering DCF chart: {e}", color="danger")
         return html.P("This is an empty tab!")

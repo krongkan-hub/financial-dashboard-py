@@ -9,10 +9,6 @@
 .main-content-container { padding-top: 80px !important; }
 #_dash-root, #_dash-app-content, #page-content { overflow: visible !important; }
 
-body {
-    zoom: 0.9; /* Sets the default view to 90% */
-}
-
 @media (min-width: 768px) {
   .sidebar-fixed {
     position: fixed !important;

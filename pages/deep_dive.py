@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Improved UI/UX for Sentiment)
+# pages/deep_dive.py (Version with Plain Progress Bar)
 
 import dash
 from dash import dcc, html, dash_table
@@ -15,7 +15,6 @@ import yfinance as yf
 
 from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url
 
-# --- [MODIFIED] Helper function to create the new, improved sentiment layout ---
 def create_sentiment_layout(sentiment_data):
     if not sentiment_data or sentiment_data.get("error"):
         error_msg = sentiment_data.get("error", "Could not retrieve news sentiment.")
@@ -27,39 +26,34 @@ def create_sentiment_layout(sentiment_data):
     if not articles:
         return dbc.Alert("No recent news articles found for sentiment analysis.", color="info")
 
-    # --- New, improved Progress Bar ---
+    # --- Progress Bar with Labels ---
     progress_bar = dbc.Progress(
         [
             dbc.Progress(
-                f"{summary.get('positive_pct', 0):.1f}% Positive",
                 value=summary.get('positive_pct', 0),
                 color="success",
                 bar=True,
-                striped=True,
-                animated=True
+                # 'label' คือส่วนที่แสดงข้อความข้างใน
+                label=f"{summary.get('positive_pct', 0):.1f}%"
             ),
             dbc.Progress(
-                f"{summary.get('neutral_pct', 0):.1f}%",
                 value=summary.get('neutral_pct', 0),
                 color="warning",
                 bar=True,
-                striped=True
+                label=f"{summary.get('neutral_pct', 0):.1f}%"
             ),
             dbc.Progress(
-                f"{summary.get('negative_pct', 0):.1f}% Negative",
                 value=summary.get('negative_pct', 0),
                 color="danger",
                 bar=True,
-                striped=True,
-                animated=True
+                label=f"{summary.get('negative_pct', 0):.1f}%"
             ),
         ], style={"height": "25px", "fontSize": "0.85rem"}
     )
     
-    # --- New Card-based layout for news articles ---
     sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
     news_cards = []
-    for article in articles[:6]: # Display top 6 articles for a 2x3 grid
+    for article in articles[:6]:
         if not article.get('description'):
             continue
             
@@ -81,9 +75,9 @@ def create_sentiment_layout(sentiment_data):
                         dbc.CardFooter(
                             dbc.Button("Read More", href=article['url'], target="_blank", color="secondary", outline=True, size="sm")
                         )
-                    ], className="h-100" # Makes all cards in a row the same height
+                    ], className="h-100"
                 ),
-                width=12, lg=6, className="mb-4" # 1 card per row on small screens, 2 on large
+                width=12, lg=6, className="mb-4"
             )
         )
 
@@ -91,7 +85,7 @@ def create_sentiment_layout(sentiment_data):
         html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"),
         progress_bar,
         html.Hr(),
-        dbc.Row(news_cards) # Use a Row to contain the card columns
+        dbc.Row(news_cards)
     ])
 
 # --- ส่วนอื่นๆ ของไฟล์ไม่มีการเปลี่ยนแปลง ---

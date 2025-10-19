@@ -225,16 +225,37 @@ def create_deep_dive_layout(ticker=None):
     ], fluid=True, className="p-4 main-content-container")
 
 
+# --- [REFACTORED CALLBACK START] ---
+# This single callback replaces the old `render_deep_dive_tab_content` and `start_sentiment_analysis_task` callbacks
+# to fix the "nonexistent object" error.
 @dash.callback(
     Output('deep-dive-tab-content', 'children'),
-    Input('deep-dive-main-tabs', 'active_tab')
+    Output('sentiment-task-id-store', 'data'),
+    Output('sentiment-task-interval', 'disabled'),
+    Input('deep-dive-main-tabs', 'active_tab'),
+    State('deep-dive-ticker-store', 'data')
 )
-def render_deep_dive_tab_content(active_tab):
+def render_tab_content_and_handle_sentiment_task(active_tab, store_data):
     if active_tab == "tab-sentiment-deep-dive":
-        return html.Div(id="sentiment-content-target")
-    
-    if active_tab == "tab-financials-deep-dive":
-        return html.Div([
+        # Logic to start the sentiment task is now here
+        if not store_data or not store_data.get('company_name'):
+            return dbc.Alert("Company name not found.", color="warning"), dash.no_update, True
+
+        company_name = store_data.get('company_name')
+        task = get_news_and_sentiment_task.delay(company_name)
+        
+        # The loading spinner is returned directly as the tab's content
+        loading_spinner = html.Div(
+            [dbc.Spinner(color="primary", children="Analyzing news sentiment...")],
+            className="text-center p-5",
+            id="sentiment-content-target"  # Assign the ID here so the polling callback can find it
+        )
+        # Return the spinner, the new task ID, and enable the polling interval
+        return loading_spinner, {'task_id': task.id}, False
+
+    elif active_tab == "tab-financials-deep-dive":
+        # Return the layout for the financials tab
+        financials_layout = html.Div([
             dbc.Row([
                 dbc.Col(dcc.Dropdown(
                     id='financial-statement-dropdown',
@@ -247,8 +268,16 @@ def render_deep_dive_tab_content(active_tab):
             ], className="mb-4 mt-2"),
             dcc.Loading(html.Div(id="financial-statement-content"))
         ])
+        # No sentiment task needed, so return no_update and disable the interval
+        return financials_layout, dash.no_update, True
 
-    return dcc.Loading(html.Div(id=f"{active_tab}-content-target"))
+    else:
+        # For all other tabs (Charts, Technicals), return a generic loading container
+        # The specific callbacks for these tabs will fill the content.
+        other_layout = dcc.Loading(html.Div(id=f"{active_tab}-content-target"))
+        return other_layout, dash.no_update, True
+# --- [REFACTORED CALLBACK END] ---
+
 
 @dash.callback(
     Output('tab-charts-deep-dive-content-target', 'children'),
@@ -320,27 +349,6 @@ def load_technicals_tab(active_tab, store_data):
     fig.update_yaxes(title_text="MACD", row=3, col=1)
     return dcc.Graph(figure=fig)
 
-@dash.callback(
-    Output('sentiment-task-id-store', 'data'),
-    Output('sentiment-task-interval', 'disabled'),
-    Output('sentiment-content-target', 'children'),
-    Input('deep-dive-main-tabs', 'active_tab'),
-    State('deep-dive-ticker-store', 'data')
-)
-def start_sentiment_analysis_task(active_tab, store_data):
-    if active_tab != 'tab-sentiment-deep-dive' or not store_data or not store_data.get('company_name'):
-        return dash.no_update, True, dash.no_update
-
-    company_name = store_data.get('company_name')
-    if not company_name:
-        return dash.no_update, True, dbc.Alert("Company name not found.", color="warning")
-
-    task = get_news_and_sentiment_task.delay(company_name)
-    loading_spinner = html.Div(
-        [dbc.Spinner(color="primary", children="Analyzing news sentiment...")],
-        className="text-center p-5"
-    )
-    return {'task_id': task.id}, False, loading_spinner
 
 @dash.callback(
     Output('sentiment-content-target', 'children', allow_duplicate=True),
@@ -351,14 +359,23 @@ def start_sentiment_analysis_task(active_tab, store_data):
 )
 def poll_sentiment_task_status(n, task_data):
     if not task_data or 'task_id' not in task_data:
+        # This might happen briefly during tab switches, it's safe to ignore.
         return dash.no_update, True
+    
     task_id = task_data['task_id']
     task = celery.AsyncResult(task_id)
+
+    # When the task is done, get the result and disable the interval
     if task.state == 'SUCCESS':
         result = task.get()
         return create_sentiment_layout(result), True
+    
+    # If the task fails, show an error and disable the interval
     elif task.state in ['FAILURE', 'REVOKED']:
         return dbc.Alert("An error occurred during sentiment analysis.", color="danger"), True
+    
+    # If the task is still running, do nothing and keep the interval enabled
+    # The spinner is already being shown by the main tab-rendering callback
     return dash.no_update, False
 
 @dash.callback(

@@ -4,7 +4,7 @@ from celery import Celery
 import os
 
 # ใส่ IP ของ WSL ที่หาเจอ
-WSL_REDIS_IP = 'redis://192.168.241.69:6379/0' 
+WSL_REDIS_IP = 'redis://192.168.241.65:6379/0'
 
 celery = Celery(
     '__main__',

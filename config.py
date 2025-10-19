@@ -14,7 +14,7 @@ class Config:
     NEWS_API_KEY = os.environ.get('NEWS_API_KEY')
 
     # ใส่ IP ของ WSL ที่หาเจอ
-    WSL_REDIS_IP = 'redis://192.168.241.69:6379/0'
+    WSL_REDIS_IP = 'redis://192.168.241.65:6379/0'
 
     CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL') or WSL_REDIS_IP
     CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND') or WSL_REDIS_IP

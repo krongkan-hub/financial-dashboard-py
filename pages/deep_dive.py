@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Lazy Loading and All Fixes)
+# pages/deep_dive.py (Version with Improved UI/UX for Sentiment)
 
 import dash
 from dash import dcc, html, dash_table
@@ -11,12 +11,11 @@ import plotly.express as px
 import json
 import numpy as np
 from datetime import datetime
-import yfinance as yf # <-- FIX: Ensure yfinance is imported
+import yfinance as yf
 
-# --- FIX: Import _get_logo_url for creating the initial layout ---
 from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url
 
-# --- Helper function to create the sentiment layout (no changes) ---
+# --- [MODIFIED] Helper function to create the new, improved sentiment layout ---
 def create_sentiment_layout(sentiment_data):
     if not sentiment_data or sentiment_data.get("error"):
         error_msg = sentiment_data.get("error", "Could not retrieve news sentiment.")
@@ -28,50 +27,74 @@ def create_sentiment_layout(sentiment_data):
     if not articles:
         return dbc.Alert("No recent news articles found for sentiment analysis.", color="info")
 
+    # --- New, improved Progress Bar ---
     progress_bar = dbc.Progress(
         [
-            dbc.Progress(value=summary.get('positive_pct', 0), color="success", bar=True),
-            dbc.Progress(value=summary.get('neutral_pct', 0), color="warning", bar=True),
-            dbc.Progress(value=summary.get('negative_pct', 0), color="danger", bar=True),
-        ], style={"height": "30px", "fontSize": "1rem"}
+            dbc.Progress(
+                f"{summary.get('positive_pct', 0):.1f}% Positive",
+                value=summary.get('positive_pct', 0),
+                color="success",
+                bar=True,
+                striped=True,
+                animated=True
+            ),
+            dbc.Progress(
+                f"{summary.get('neutral_pct', 0):.1f}%",
+                value=summary.get('neutral_pct', 0),
+                color="warning",
+                bar=True,
+                striped=True
+            ),
+            dbc.Progress(
+                f"{summary.get('negative_pct', 0):.1f}% Negative",
+                value=summary.get('negative_pct', 0),
+                color="danger",
+                bar=True,
+                striped=True,
+                animated=True
+            ),
+        ], style={"height": "25px", "fontSize": "0.85rem"}
     )
     
-    summary_text = html.Div([
-        html.Span(f"🟢 Positive: {summary.get('positive_count', 0)} articles ({summary.get('positive_pct', 0):.1f}%)", className="me-3"),
-        html.Span(f"🟡 Neutral: {summary.get('neutral_count', 0)} articles ({summary.get('neutral_pct', 0):.1f}%)", className="me-3"),
-        html.Span(f"🔴 Negative: {summary.get('negative_count', 0)} articles ({summary.get('negative_pct', 0):.1f}%)")
-    ], className="text-center text-muted small mt-2")
-
+    # --- New Card-based layout for news articles ---
     sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
-    
-    news_list_items = []
-    for article in articles[:10]:
+    news_cards = []
+    for article in articles[:6]: # Display top 6 articles for a 2x3 grid
+        if not article.get('description'):
+            continue
+            
         published_at = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00")).strftime('%b %d, %Y')
         sentiment_label = article.get('sentiment', 'neutral')
         
-        news_list_items.append(
-            dbc.ListGroupItem([
-                html.Div([
-                    html.H6(article['title'], className="mb-1"),
-                    html.P(article['description'], className="mb-1 small text-muted"),
-                    html.Div([
-                        dbc.Badge(sentiment_label.upper(), color=sentiment_color_map[sentiment_label], className="me-2"),
-                        html.Small(f"Source: {article['source']['name']} | Published: {published_at}")
-                    ])
-                ])
-            ], href=article['url'], target="_blank", action=True)
+        news_cards.append(
+            dbc.Col(
+                dbc.Card(
+                    [
+                        dbc.CardHeader([
+                            dbc.Badge(sentiment_label.upper(), color=sentiment_color_map[sentiment_label], className="me-2"),
+                            html.Small(f"Source: {article['source']['name']}", className="text-muted")
+                        ]),
+                        dbc.CardBody([
+                            html.H6(article['title'], className="card-title"),
+                            html.P(article['description'], className="card-text small text-muted"),
+                        ]),
+                        dbc.CardFooter(
+                            dbc.Button("Read More", href=article['url'], target="_blank", color="secondary", outline=True, size="sm")
+                        )
+                    ], className="h-100" # Makes all cards in a row the same height
+                ),
+                width=12, lg=6, className="mb-4" # 1 card per row on small screens, 2 on large
+            )
         )
-    
-    news_list = dbc.ListGroup(news_list_items, flush=True)
 
     return html.Div([
         html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"),
         progress_bar,
-        summary_text,
         html.Hr(),
-        news_list
+        dbc.Row(news_cards) # Use a Row to contain the card columns
     ])
 
+# --- ส่วนอื่นๆ ของไฟล์ไม่มีการเปลี่ยนแปลง ---
 
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
@@ -97,7 +120,6 @@ def create_deep_dive_layout(ticker=None):
                 dcc.Link("Go back to Dashboard", href="/")
              ], fluid=True, className="mt-5 text-center")
 
-        # --- FIX: Call _get_logo_url to get the logo with fallback ---
         logo_url = _get_logo_url(info)
 
         current_price = info.get('currentPrice', 0)
@@ -115,7 +137,7 @@ def create_deep_dive_layout(ticker=None):
         data = {
             "company_name": info.get('longName', ticker),
             "exchange": info.get('exchange', 'N/A'),
-            "logo_url": logo_url, # <-- FIX: Use the variable from _get_logo_url
+            "logo_url": logo_url,
             "current_price": current_price,
             "daily_change_str": f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f}",
             "daily_change_pct_str": f"{'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%",
@@ -149,7 +171,7 @@ def create_deep_dive_layout(ticker=None):
             html.Div([
                 html.H2(f"${data.get('current_price', 0):,.2f}", className="price-display mb-0"),
                 html.P(f"{data.get('daily_change_str', 'N/A')} ({data.get('daily_change_pct_str', 'N/A')})",
-                    className=f"price-change {'price-positive' if daily_change >= 0 else 'price-negative'}")
+                    className=f"price-change {'price-positive' if data.get('daily_change', 0) >= 0 else 'price-negative'}")
             ], className="text-end"),
         width="auto", align="center")
     ], align="center", className="marquee-header g-3")
@@ -200,7 +222,6 @@ def create_deep_dive_layout(ticker=None):
     Input('deep-dive-main-tabs', 'active_tab')
 )
 def render_deep_dive_tab_content(active_tab):
-    # This callback is now very fast, just returning the placeholder structure
     if active_tab == "tab-sentiment-deep-dive":
         return dcc.Loading(html.Div(id="sentiment-content-target"), type="default")
     
@@ -220,8 +241,6 @@ def render_deep_dive_tab_content(active_tab):
         ])
 
     return dcc.Loading(html.Div(id=f"{active_tab}-content-target"))
-
-# --- Separate, slower callbacks for loading heavy content ---
 
 @dash.callback(
     Output('tab-charts-deep-dive-content-target', 'children'),

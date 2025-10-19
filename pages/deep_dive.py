@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Sentiment Analysis Tab)
+# pages/deep_dive.py (Version with Lazy Loading and All Fixes)
 
 import dash
 from dash import dcc, html, dash_table
@@ -11,10 +11,12 @@ import plotly.express as px
 import json
 import numpy as np
 from datetime import datetime
+import yfinance as yf # <-- FIX: Ensure yfinance is imported
 
-from data_handler import get_deep_dive_data, calculate_dcf_intrinsic_value, get_technical_analysis_data
+# --- FIX: Import _get_logo_url for creating the initial layout ---
+from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url
 
-# --- [NEW] Helper function to create the sentiment layout ---
+# --- Helper function to create the sentiment layout (no changes) ---
 def create_sentiment_layout(sentiment_data):
     if not sentiment_data or sentiment_data.get("error"):
         error_msg = sentiment_data.get("error", "Could not retrieve news sentiment.")
@@ -26,7 +28,6 @@ def create_sentiment_layout(sentiment_data):
     if not articles:
         return dbc.Alert("No recent news articles found for sentiment analysis.", color="info")
 
-    # Create the summary progress bar
     progress_bar = dbc.Progress(
         [
             dbc.Progress(value=summary.get('positive_pct', 0), color="success", bar=True),
@@ -41,11 +42,10 @@ def create_sentiment_layout(sentiment_data):
         html.Span(f"🔴 Negative: {summary.get('negative_count', 0)} articles ({summary.get('negative_pct', 0):.1f}%)")
     ], className="text-center text-muted small mt-2")
 
-    # Create the list of news articles
     sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
     
     news_list_items = []
-    for article in articles[:10]: # Display top 10 articles
+    for article in articles[:10]:
         published_at = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00")).strftime('%b %d, %Y')
         sentiment_label = article.get('sentiment', 'neutral')
         
@@ -75,11 +75,9 @@ def create_sentiment_layout(sentiment_data):
 
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
-    
     card_title_content = [title]
     if title == "Recommendation":
         card_title_content.append(html.Span(" (Yahoo)", style={'fontSize': '0.7em', 'color': '#6c757d', 'marginLeft': '4px'}))
-
     return dbc.Card(dbc.CardBody([
         html.H6(card_title_content, className="metric-card-title"),
         html.P(value, className="metric-card-value"),
@@ -88,13 +86,58 @@ def create_metric_card(title, value, className=""):
 def create_deep_dive_layout(ticker=None):
     if not ticker:
         return dbc.Container(html.P("Please provide a ticker by navigating from the main page."), className="p-5 text-center")
-    data = get_deep_dive_data(ticker)
-    if data.get("error"):
-        return dbc.Container([
+    
+    try:
+        tkr = yf.Ticker(ticker)
+        info = tkr.info
+        if not info or info.get('quoteType') != 'EQUITY':
+             return dbc.Container([
+                html.H2(f"Data Error for {ticker}", className="text-danger mt-5"),
+                html.P("Invalid ticker or no data available."),
+                dcc.Link("Go back to Dashboard", href="/")
+             ], fluid=True, className="mt-5 text-center")
+
+        # --- FIX: Call _get_logo_url to get the logo with fallback ---
+        logo_url = _get_logo_url(info)
+
+        current_price = info.get('currentPrice', 0)
+        previous_close = info.get('previousClose', 1)
+        daily_change = current_price - previous_close
+        daily_change_pct = (daily_change / previous_close) * 100 if previous_close != 0 else 0
+        
+        def format_large_number(n):
+            if pd.isna(n) or n is None: return "N/A"
+            if abs(n) >= 1e12: return f'${n/1e12:,.2f}T'
+            if abs(n) >= 1e9: return f'${n/1e9:,.2f}B'
+            if abs(n) >= 1e6: return f'${n/1e6:,.2f}M'
+            return f'${n:,.0f}'
+
+        data = {
+            "company_name": info.get('longName', ticker),
+            "exchange": info.get('exchange', 'N/A'),
+            "logo_url": logo_url, # <-- FIX: Use the variable from _get_logo_url
+            "current_price": current_price,
+            "daily_change_str": f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f}",
+            "daily_change_pct_str": f"{'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%",
+            "market_cap_str": format_large_number(info.get('marketCap')),
+            "target_mean_price": info.get('targetMeanPrice'),
+            "recommendation_key": info.get('recommendationKey', 'N/A').replace('_', ' ').title(),
+            "key_stats": {
+                "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A",
+                "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A",
+                "Dividend Yield": f"{info.get('dividendYield',0)*100:.2f}%" if info.get('dividendYield') else "N/A",
+                "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A"
+            },
+            "business_summary": info.get('longBusinessSummary', 'Business summary not available.')
+        }
+
+    except Exception as e:
+         return dbc.Container([
             html.H2(f"Data Error for {ticker}", className="text-danger mt-5"),
-            html.P(f"Could not retrieve data. Reason: {data['error']}"),
+            html.P(f"Could not retrieve initial data. Reason: {e}"),
             dcc.Link("Go back to Dashboard", href="/")
         ], fluid=True, className="mt-5 text-center")
+
 
     marquee = dbc.Row([
         dbc.Col(html.Img(src=data.get('logo_url', '/assets/placeholder_logo.png'), className="company-logo"), width="auto", align="center"),
@@ -106,7 +149,7 @@ def create_deep_dive_layout(ticker=None):
             html.Div([
                 html.H2(f"${data.get('current_price', 0):,.2f}", className="price-display mb-0"),
                 html.P(f"{data.get('daily_change_str', 'N/A')} ({data.get('daily_change_pct_str', 'N/A')})",
-                    className=f"price-change {'price-positive' if data.get('daily_change', 0) >= 0 else 'price-negative'}")
+                    className=f"price-change {'price-positive' if daily_change >= 0 else 'price-negative'}")
             ], className="text-end"),
         width="auto", align="center")
     ], align="center", className="marquee-header g-3")
@@ -116,9 +159,12 @@ def create_deep_dive_layout(ticker=None):
     target_price_str = f"${target_price:,.2f}" if target_price is not None and pd.notna(target_price) else "N/A"
     reco_key = data.get('recommendation_key', "N/A")
     all_cards = [
-        create_metric_card("Market Cap", data.get('market_cap_str')), create_metric_card("Analyst Target", target_price_str, "bg-light-subtle"),
-        create_metric_card("Recommendation", reco_key, "bg-light-subtle"), create_metric_card("P/E Ratio", key_stats.get('P/E Ratio')),
-        create_metric_card("Forward P/E", key_stats.get('Forward P/E')), create_metric_card("Dividend Yield", key_stats.get('Dividend Yield')),
+        create_metric_card("Market Cap", data.get('market_cap_str')),
+        create_metric_card("Analyst Target", target_price_str, "bg-light-subtle"),
+        create_metric_card("Recommendation", reco_key, "bg-light-subtle"),
+        create_metric_card("P/E Ratio", key_stats.get('P/E Ratio')),
+        create_metric_card("Forward P/E", key_stats.get('Forward P/E')),
+        create_metric_card("Dividend Yield", key_stats.get('Dividend Yield')),
         create_metric_card("PEG Ratio", key_stats.get('PEG Ratio')),
     ]
     cards_to_show = [card for card in all_cards if card is not None]
@@ -129,12 +175,11 @@ def create_deep_dive_layout(ticker=None):
 
     analysis_workspace = html.Div([
         html.Div(className="custom-tabs-container mt-4", children=[
-            # --- [MODIFIED] Add the new Sentiment Tab ---
             dbc.Tabs([
                     dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
-                    dbc.Tab(label="SENTIMENT", tab_id="tab-sentiment-deep-dive", label_class_name="fw-bold"), # <-- NEW TAB
+                    dbc.Tab(label="SENTIMENT", tab_id="tab-sentiment-deep-dive", label_class_name="fw-bold"),
                 ],
                 id="deep-dive-main-tabs",
                 active_tab="tab-charts-deep-dive",
@@ -142,7 +187,7 @@ def create_deep_dive_layout(ticker=None):
                 persistence_type='session'
             )
         ]),
-        dbc.Card(dbc.CardBody(dcc.Loading(html.Div(id="deep-dive-tab-content"))), className="mt-3")
+        dbc.Card(dbc.CardBody(html.Div(id="deep-dive-tab-content")), className="mt-3")
     ])
 
     return dbc.Container([
@@ -150,113 +195,118 @@ def create_deep_dive_layout(ticker=None):
         marquee, html.Hr(), at_a_glance, analysis_workspace,
     ], fluid=True, className="p-4 main-content-container")
 
-# --- [MODIFIED] Main callback to render content for all tabs ---
-@dash.callback(Output('deep-dive-tab-content', 'children'), Input('deep-dive-main-tabs', 'active_tab'), State('deep-dive-ticker-store', 'data'))
-def render_deep_dive_tab_content(active_tab, store_data):
-    if not store_data or not store_data.get('ticker'): return ""
-    ticker = store_data['ticker']
-    # We call get_deep_dive_data once and pass the data to the render functions
-    data = get_deep_dive_data(ticker)
-
-    if active_tab == "tab-charts-deep-dive":
-        financial_trends = data.get("financial_trends", pd.DataFrame())
-        margin_trends = data.get("margin_trends", pd.DataFrame())
-        fig_trends = make_subplots(specs=[[{"secondary_y": True}]])
-        if not financial_trends.empty:
-            fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends.get('Revenue'), name='Revenue', marker_color='royalblue'), secondary_y=False)
-            fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends.get('Net Income'), name='Net Income', mode='lines+markers', line=dict(color='darkorange')), secondary_y=True)
-        
-        fig_trends.update_layout(
-            title_text='Quarterly Financial Trends', 
-            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), 
-            margin=dict(t=50, b=50)
-        )
-        fig_trends.update_yaxes(title_text="Revenue ($)", secondary_y=False, rangemode='tozero')
-        fig_trends.update_yaxes(title_text="Net Income ($)", secondary_y=True, rangemode='tozero', showgrid=False)
-
-        if not margin_trends.empty:
-            fig_margins = px.line(margin_trends, markers=True, title="Quarterly Profitability Margins")
-            fig_margins.update_layout(
-                yaxis_tickformat=".2%", 
-                legend_title_text=None, 
-                yaxis_title='Percentage', 
-                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
-                margin=dict(t=50, b=50)
-            )
-            margin_graph = dcc.Graph(figure=fig_margins)
-        else:
-            margin_graph = dbc.Alert("Margin data not available.", color="info", className="h-100 d-flex align-items-center justify-content-center")
-
-        return dbc.Row([dbc.Col(dcc.Graph(figure=fig_trends), md=6), dbc.Col(margin_graph, md=6)], className="mt-3")
-
-    if active_tab == "tab-technicals-deep-dive":
-        price_history = data.get("price_history")
-        if price_history is None or price_history.empty:
-            return dbc.Alert("Price history is not available for technical analysis.", color="warning")
-
-        tech_data = get_technical_analysis_data(price_history)
-        if "error" in tech_data:
-            return dbc.Alert(tech_data["error"], color="danger")
-        
-        df = tech_data['data'].iloc[-365*2:]
-
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05,
-                            row_heights=[0.6, 0.2, 0.2])
-
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], mode='lines', name='EMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], mode='lines', name='SMA 50', line=dict(color='blue', width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], mode='lines', name='SMA 200', line=dict(color='purple', width=2)), row=1, col=1)
-        
-        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', name='BB Upper', line=dict(color='gray', width=1, dash='dash')), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
-
-        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI'), row=2, col=1)
-        fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=2, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=1, row=2, col=1)
-        
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='red')), row=3, col=1)
-        fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', marker_color=np.where(df['MACD_Hist'] > 0, 'green', 'red')), row=3, col=1)
-
-        fig.update_layout(
-            title_text=f'{ticker} - Technical Analysis',
-            height=800,
-            xaxis_rangeslider_visible=False,
-            legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
-        )
-        fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-        fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
-        fig.update_yaxes(title_text="MACD", row=3, col=1)
-
-        return dcc.Graph(figure=fig)
-
+@dash.callback(
+    Output('deep-dive-tab-content', 'children'),
+    Input('deep-dive-main-tabs', 'active_tab')
+)
+def render_deep_dive_tab_content(active_tab):
+    # This callback is now very fast, just returning the placeholder structure
+    if active_tab == "tab-sentiment-deep-dive":
+        return dcc.Loading(html.Div(id="sentiment-content-target"), type="default")
+    
     if active_tab == "tab-financials-deep-dive":
         return html.Div([
             dbc.Row([
-                dbc.Col(
-                    dcc.Dropdown(
-                        id='financial-statement-dropdown',
-                        options=[
-                            {'label': 'Income Statement', 'value': 'income'},
-                            {'label': 'Balance Sheet', 'value': 'balance'},
-                            {'label': 'Cash Flow', 'value': 'cashflow'},
-                        ],
-                        value='income',
-                        clearable=False,
-                    ),
-                    width=12, md=4, lg=3
-                )
+                dbc.Col(dcc.Dropdown(
+                    id='financial-statement-dropdown',
+                    options=[
+                        {'label': 'Income Statement', 'value': 'income'},
+                        {'label': 'Balance Sheet', 'value': 'balance'},
+                        {'label': 'Cash Flow', 'value': 'cashflow'},
+                    ], value='income', clearable=False,
+                ), width=12, md=4, lg=3)
             ], className="mb-4 mt-2"),
             dcc.Loading(html.Div(id="financial-statement-content"))
         ])
 
-    # --- [NEW] Logic to render the sentiment tab ---
-    if active_tab == "tab-sentiment-deep-dive":
-        sentiment_data = data.get("sentiment_data")
-        return create_sentiment_layout(sentiment_data)
+    return dcc.Loading(html.Div(id=f"{active_tab}-content-target"))
 
-    return html.P("Select a tab")
+# --- Separate, slower callbacks for loading heavy content ---
+
+@dash.callback(
+    Output('tab-charts-deep-dive-content-target', 'children'),
+    Input('deep-dive-main-tabs', 'active_tab'),
+    State('deep-dive-ticker-store', 'data')
+)
+def load_charts_tab(active_tab, store_data):
+    if active_tab != 'tab-charts-deep-dive' or not store_data:
+        return dash.no_update
+    
+    ticker = store_data['ticker']
+    data = get_deep_dive_data(ticker)
+    
+    financial_trends = data.get("financial_trends", pd.DataFrame())
+    margin_trends = data.get("margin_trends", pd.DataFrame())
+    
+    fig_trends = make_subplots(specs=[[{"secondary_y": True}]])
+    if not financial_trends.empty:
+        fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends.get('Revenue'), name='Revenue', marker_color='royalblue'), secondary_y=False)
+        fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends.get('Net Income'), name='Net Income', mode='lines+markers', line=dict(color='darkorange')), secondary_y=True)
+    fig_trends.update_layout(title_text='Quarterly Financial Trends', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
+    fig_trends.update_yaxes(title_text="Revenue ($)", secondary_y=False, rangemode='tozero')
+    fig_trends.update_yaxes(title_text="Net Income ($)", secondary_y=True, rangemode='tozero', showgrid=False)
+
+    if not margin_trends.empty:
+        fig_margins = px.line(margin_trends, markers=True, title="Quarterly Profitability Margins")
+        fig_margins.update_layout(yaxis_tickformat=".2%", legend_title_text=None, yaxis_title='Percentage', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
+        margin_graph = dcc.Graph(figure=fig_margins)
+    else:
+        margin_graph = dbc.Alert("Margin data not available.", color="info")
+
+    return dbc.Row([dbc.Col(dcc.Graph(figure=fig_trends), md=6), dbc.Col(margin_graph, md=6)], className="mt-3")
+
+@dash.callback(
+    Output('tab-technicals-deep-dive-content-target', 'children'),
+    Input('deep-dive-main-tabs', 'active_tab'),
+    State('deep-dive-ticker-store', 'data')
+)
+def load_technicals_tab(active_tab, store_data):
+    if active_tab != 'tab-technicals-deep-dive' or not store_data:
+        return dash.no_update
+        
+    ticker = store_data['ticker']
+    data = get_deep_dive_data(ticker)
+    price_history = data.get("price_history")
+    
+    if price_history is None or price_history.empty:
+        return dbc.Alert("Price history is not available.", color="warning")
+
+    tech_data = get_technical_analysis_data(price_history)
+    
+    df = tech_data['data'].iloc[-365*2:]
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
+    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], mode='lines', name='EMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], mode='lines', name='SMA 50', line=dict(color='blue', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], mode='lines', name='SMA 200', line=dict(color='purple', width=2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', name='BB Upper', line=dict(color='gray', width=1, dash='dash')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI'), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=1, row=2, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='red')), row=3, col=1)
+    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', marker_color=np.where(df['MACD_Hist'] > 0, 'green', 'red')), row=3, col=1)
+    fig.update_layout(title_text=f'{ticker} - Technical Analysis', height=800, xaxis_rangeslider_visible=False, legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5))
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+    fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
+    fig.update_yaxes(title_text="MACD", row=3, col=1)
+    return dcc.Graph(figure=fig)
+
+@dash.callback(
+    Output('sentiment-content-target', 'children'),
+    Input('deep-dive-main-tabs', 'active_tab'),
+    State('deep-dive-ticker-store', 'data')
+)
+def load_sentiment_tab(active_tab, store_data):
+    if active_tab != 'tab-sentiment-deep-dive' or not store_data:
+        return dash.no_update
+    
+    ticker = store_data['ticker']
+    data = get_deep_dive_data(ticker)
+    sentiment_data = data.get("sentiment_data")
+    
+    return create_sentiment_layout(sentiment_data)
 
 @dash.callback(
     Output('financial-statement-content', 'children'),
@@ -264,7 +314,9 @@ def render_deep_dive_tab_content(active_tab, store_data):
     State('deep-dive-ticker-store', 'data')
 )
 def render_financial_statement_table(selected_statement, store_data):
-    if not store_data or not store_data.get('ticker'): return ""
+    if not selected_statement or not store_data:
+        return dash.no_update
+        
     ticker = store_data['ticker']
     data = get_deep_dive_data(ticker)
     statements = data.get("financial_statements", {})
@@ -284,36 +336,12 @@ def render_financial_statement_table(selected_statement, store_data):
         df_formatted[col] = numeric_col.apply(
             lambda x: f"{x/1_000_000:,.1f}M" if pd.notna(x) else "-"
         )
-
     df_reset = df_formatted.reset_index().rename(columns={'index': 'Metric'})
-
     columns = [{"name": col, "id": col} for col in df_reset.columns]
     data = df_reset.to_dict('records')
-
     return dash_table.DataTable(
-        data=data,
-        columns=columns,
-        style_header={
-            'backgroundColor': 'transparent',
-            'border': '0px',
-            'borderBottom': '2px solid #dee2e6',
-            'textTransform': 'uppercase',
-            'fontWeight': '600',
-        },
-        style_cell={
-            'textAlign': 'right',
-            'padding': '14px',
-            'border': '0px',
-            'borderBottom': '1px solid #f0f0f0',
-            'fontFamily': 'inherit',
-            'fontSize': '0.9rem',
-        },
-        style_cell_conditional=[
-            {
-                'if': {'column_id': 'Metric'},
-                'textAlign': 'left',
-                'fontWeight': '600',
-                'width': '35%'
-            }
-        ]
+        data=data, columns=columns,
+        style_header={'backgroundColor': 'transparent','border': '0px','borderBottom': '2px solid #dee2e6','textTransform': 'uppercase','fontWeight': '600'},
+        style_cell={'textAlign': 'right','padding': '14px','border': '0px','borderBottom': '1px solid #f0f0f0','fontFamily': 'inherit','fontSize': '0.9rem'},
+        style_cell_conditional=[{'if': {'column_id': 'Metric'},'textAlign': 'left','fontWeight': '600','width': '35%'}]
     )

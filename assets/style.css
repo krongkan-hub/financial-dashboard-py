@@ -1,133 +1,16 @@
-/* ============= NAVBAR FIXED POSITION WORKAROUND ============= */
+/* style.css (FINAL - ALL FIXES AND MODAL SHADOW FIX) */
 
-/* 1. บังคับให้ Navbar ตรึงตำแหน่งด้านบนสุดของหน้าจอ */
-#navbar-container .navbar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 1030; /* ทำให้ Navbar อยู่เหนือเนื้อหาอื่นเสมอ */
-}
+/* ============================================================== */
+/* === STYLES THAT APPLY TO ALL SCREEN SIZES === */
+/* ============================================================== */
 
-/* 2. ดันเนื้อหาหลักทั้งหมดลงมา เพื่อไม่ให้ถูก Navbar ที่ลอยอยู่ทับ */
-.p-4.container-fluid {
-    padding-top: 100px !important; /* ปรับค่านี้ให้พอดีกับความสูงของ Navbar ของคุณ */
-    padding-bottom: 200px !important;
-}
-/* style.css (Definitive Final Version) */
+/* CORE LAYOUT STYLES */
+#navbar-container .navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 1030; }
+.main-content-container { padding-top: 80px !important; }
+#_dash-root, #_dash-app-content, #page-content { overflow: visible !important; }
 
-/*
-[FIX] This is the definitive fix for the sticky navbar.
-Dash's internal layout containers can sometimes have an 'overflow'
-property that breaks 'position: sticky'. This rule targets all
-potential parent containers and forces them to allow sticky
-positioning to work correctly.
-*/
-#_dash-root, #_dash-app-content, #page-content {
-    overflow: visible !important;
-}
-
-/* ============== CORE LAYOUT STYLES ============== */
-@media (min-width: 768px) {
-  .sidebar-fixed {
-    position: fixed !important;
-    top: 50px;
-    height: calc(100vh - 100px);
-    overflow-y: auto;
-  }
-  .content-offset {
-     margin-left: 25% !important;
-  }
-}
-
-/* ============== CUSTOM TABS STYLES ============== */
-.custom-tabs-container > .nav-tabs {
-    border-bottom: none !important;
-    margin-left: 1.5rem !important;
-}
-
-/* --- [NEW] --- */
-/* ทำให้ข้อความบนปุ่ม Tab เป็นตัวพิมพ์ใหญ่ทั้งหมด */
-.custom-tabs-container .nav-tabs .nav-link {
-    text-transform: uppercase;
-}
-/* --- [END NEW] --- */
-
-.custom-tabs-container .nav-tabs .nav-link:not(.active) {
-    background-color: white !important;
-    border: 1px solid #dee2e6 !important;
-    color: #495057 !important;
-    border-radius: 0.375rem;
-    margin-right: 5px;
-}
-
-.custom-tabs-container .nav-tabs .nav-link:not(.active):hover {
-    background-color: #f8f9fa !important;
-}
-
-.custom-tabs-container .nav-tabs .nav-link.active {
-    background-color: #343a40 !important;
-    color: white !important;
-    border: 1px solid #343a40 !important;
-    border-radius: 0.375rem;
-    margin-right: 5px;
-}
-
-/* ================================================= */
-/* ============== NEW: TABLE FONT FIX ============== */
-/* ================================================= */
-/* [ข้อ 3] บังคับให้ตารางใช้ฟอนต์เดียวกับธีมหลักของเว็บ */
-.dash-spreadsheet, .dash-spreadsheet-container .dash-spreadsheet-inner * {
-    font-family: inherit !important;
-}
-
-/* ================================================= */
-/* ============== NEW: TABLE STYLING =============== */
-/* ================================================= */
-
-/* --- General Table Font & Container --- */
-.dash-spreadsheet, .dash-spreadsheet-container .dash-spreadsheet-inner * {
-    font-family: inherit !important;
-    font-size: 0.9rem; /* Slightly smaller font for density */
-}
-
-/* --- Table Header Styling --- */
-.dash-spreadsheet-container .dash-header {
-    background-color: #f8f9fa !important; /* Light grey background */
-    border-bottom: 2px solid #dee2e6 !important;
-    text-transform: uppercase; /* Match the tabs */
-    font-weight: 600 !important;
-    padding: 12px 0px;
-}
-
-/* --- Table Data Row Styling --- */
-.dash-spreadsheet-container .dash-cell {
-    background-color: transparent !important;
-    border-bottom: 1px solid #f0f0f0 !important;
-    padding: 14px 0px;
-    /* --- [MODIFICATION] --- */
-    vertical-align: middle !important; /* Force vertical alignment */
-    /* --- [END MODIFICATION] --- */
-}
-
-/* --- Hover effect for data rows --- */
-.dash-spreadsheet-container .dash-row:hover .dash-cell {
-    background-color: #f8f9fa !important; /* Subtle hover effect */
-}
-
-/* --- Link Styling within Table (for Ticker) --- */
-.dash-spreadsheet-container a {
-    text-decoration: none !important;
-    color: inherit !important;
-    font-weight: 600 !important; /* <--- เพิ่ม !important ตรงนี้ */
-}
-
-.dash-spreadsheet-container a:hover {
-    color: #0d6efd !important; /* Optional: Change color on hover */
-}
-
-#_dash-root, #_dash-app-content, #page-content {
-    overflow: visible !important;
+body {
+    zoom: 0.9; /* Sets the default view to 90% */
 }
 
 @media (min-width: 768px) {
@@ -136,139 +19,135 @@ positioning to work correctly.
     top: 80px;
     height: calc(100vh - 100px);
     overflow-y: auto;
+    z-index: 1020; /* Ensures modal backdrop covers sidebar */
   }
   .content-offset {
-     margin-left: 25% !important;
+    margin-left: 25% !important;
   }
 }
 
-.main-content-container {
-    padding-top: 80px !important;
+/* ================================================================ */
+/* === SIDEBAR CONTROL STYLING === */
+/* ================================================================ */
+
+/* --- Adjust Dropdown Height --- */
+.sidebar-fixed .Select-control {
+    min-height: 32px !important;
+    height: 32px !important;
+}
+.sidebar-fixed .Select-input {
+    height: 30px !important;
+}
+.sidebar-fixed .Select-value, .sidebar-fixed .Select-placeholder {
+    line-height: 30px !important;
 }
 
+/* --- Adjust Button Height & Font --- */
+.sidebar-fixed .btn {
+    padding-top: 0.25rem !important;
+    padding-bottom: 0.25rem !important;
+    font-size: 0.9rem !important;
+}
+
+
+/* Main style for the tabs container */
 .custom-tabs-container > .nav-tabs {
     border-bottom: none !important;
-    margin-left: 1.5rem !important;
+    margin-left: 0 !important;
+    flex-wrap: nowrap !important; /* Prevents tabs from wrapping */
 }
+/* Style for each tab button */
 .custom-tabs-container .nav-tabs .nav-link {
     text-transform: uppercase;
     font-weight: 500;
+    white-space: nowrap;
+    margin-right: 5px;
+    margin-bottom: 5px;
+    border-radius: 0.375rem;
 }
+/* Style for non-active tab buttons */
 .custom-tabs-container .nav-tabs .nav-link:not(.active) {
     background-color: white !important;
     border: 1px solid #dee2e6 !important;
     color: #495057 !important;
-    border-radius: 0.375rem;
-    margin-right: 5px;
 }
 .custom-tabs-container .nav-tabs .nav-link:not(.active):hover {
     background-color: #f8f9fa !important;
 }
+/* Style for the ACTIVE tab button */
 .custom-tabs-container .nav-tabs .nav-link.active {
     background-color: #343a40 !important;
     color: white !important;
     border: 1px solid #343a40 !important;
-    border-radius: 0.375rem;
-    margin-right: 5px;
-}
-.dash-spreadsheet, .dash-spreadsheet-container .dash-spreadsheet-inner * {
-    font-family: inherit !important;
-    font-size: 0.9rem;
-}
-.dash-spreadsheet-container .dash-header {
-    background-color: #f8f9fa !important;
-    border-bottom: 2px solid #dee2e6 !important;
-    text-transform: uppercase;
-    font-weight: 600 !important;
-    padding: 12px 0px;
-}
-.dash-spreadsheet-container .dash-cell {
-    background-color: transparent !important;
-    border-bottom: 1px solid #f0f0f0 !important;
-    padding: 14px 0px;
-    vertical-align: middle !important;
-}
-.dash-spreadsheet-container .dash-row:hover .dash-cell {
-    background-color: #f8f9fa !important;
-}
-.dash-spreadsheet-container a {
-    text-decoration: none !important;
-    color: inherit !important;
-    font-weight: 600;
-}
-.dash-spreadsheet-container a:hover {
-    color: #0d6efd !important;
 }
 
+/* TABLE STYLING */
+.dash-spreadsheet, .dash-spreadsheet-container .dash-spreadsheet-inner * { font-family: inherit !important; font-size: 0.9rem; }
+.dash-spreadsheet-container .dash-header { background-color: #f8f9fa !important; border-bottom: 2px solid #dee2e6 !important; text-transform: uppercase; font-weight: 600 !important; padding: 12px 0px; }
+.dash-spreadsheet-container .dash-cell { background-color: transparent !important; border-bottom: 1px solid #f0f0f0 !important; padding: 14px 0px; vertical-align: middle !important; }
+.dash-spreadsheet-container .dash-row:hover .dash-cell { background-color: #f8f9fa !important; }
+.dash-spreadsheet-container a { text-decoration: none !important; color: inherit !important; font-weight: 600; }
+.dash-spreadsheet-container a:hover { color: #0d6efd !important; }
 
-/* ================================================= */
-/* ============== NEW DEEP DIVE STYLES ============== */
-/* ================================================= */
+/* DEEP DIVE STYLING */
+.marquee-header { padding-bottom: 1.5rem; }
+.company-logo { height: 60px; width: 60px; object-fit: contain; border-radius: 0.375rem; margin-right: 1.5rem; }
+.company-name { font-size: 2.25rem; font-weight: 700; line-height: 1.2; }
+.price-display { font-size: 2.5rem; font-weight: 700; line-height: 1.2; }
+.price-change { font-size: 1.1rem; font-weight: 500; }
+.price-positive { color: #198574; }
+.price-negative { color: #dc3545; }
+.metric-card { border: 1px solid #e9ecef; text-align: center; }
+.metric-card-title { font-size: 0.8rem; font-weight: 500; color: #6c757d; text-transform: uppercase; margin-bottom: 0.5rem; min-height: 2.5em; display: flex; align-items: center; justify-content: center; }
+.metric-card-value { font-size: 1.5rem; font-weight: 600; color: #212529; margin-bottom: 0; }
+#deep-dive-tab-content .card-title { margin-bottom: 1.25rem; }
+#deep-dive-tab-content .table { font-size: 0.85rem; }
 
-/* --- Marquee Header --- */
-.marquee-header {
-    padding-bottom: 1.5rem;
-}
-.company-logo {
-    height: 60px;
-    width: 60px;
-    object-fit: contain;
-    border-radius: 0.375rem;
-    margin-right: 1.5rem;
-}
-.company-name {
-    font-size: 2.25rem;
-    font-weight: 700;
-    line-height: 1.2;
-}
-.price-display {
-    font-size: 2.5rem;
-    font-weight: 700;
-    line-height: 1.2;
-}
-.price-change {
-    font-size: 1.1rem;
-    font-weight: 500;
-}
-.price-positive {
-    color: #198754; /* Bootstrap success green */
-}
-.price-negative {
-    color: #dc3545; /* Bootstrap danger red */
-}
+/*
+================================================================
+=== RESPONSIVE OVERRIDES THAT WILL FIX THE LAYOUT ===
+================================================================
+*/
+/* This section targets tablets in landscape and small laptops */
+@media (max-width: 1280px) {
 
-/* --- Metric Cards --- */
-.metric-card {
-    border: 1px solid #e9ecef;
-    text-align: center;
-}
-.metric-card-title {
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: #6c757d; /* Bootstrap secondary text color */
-    text-transform: uppercase;
-    margin-bottom: 0.5rem;
-    
-    /* --- [MODIFICATION] --- */
-    /* Vertically align all values by giving titles a consistent minimum height */
-    min-height: 2.5em;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    /* --- [END MODIFICATION] --- */
-}
-.metric-card-value {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: #212529; /* Bootstrap primary text color */
-    margin-bottom: 0;
+    /* Use the MOST specific selector to shrink the tabs slightly */
+    .control-row.row .custom-tabs-container .nav-tabs .nav-item a.nav-link {
+        font-size: 13px !important;
+        padding: 8px 12px !important;
+    }
+
+    /* Shrink the control buttons (Info, Gear) */
+    .control-row.row .hstack .btn {
+        padding: 6px 10px !important;
+        font-size: 14px !important;
+    }
+
+    /* Shrink the Dropdown 'Sort by' */
+    .control-row.row #sort-by-dropdown {
+        min-width: 150px !important;
+        font-size: 13px !important;
+    }
 }
 
-/* --- Deep Dive Tab Content --- */
-#deep-dive-tab-content .card-title {
-    margin-bottom: 1.25rem;
-}
+/* This section targets tablets and smaller devices */
+@media (max-width: 1024px) {
 
-#deep-dive-tab-content .table {
-    font-size: 0.85rem; /* Make financial tables smaller */
+    /* Use the MOST specific selector from the rendered HTML to shrink the tabs */
+    .control-row.row .custom-tabs-container .nav-tabs .nav-item a.nav-link {
+        font-size: 11px !important;
+        padding: 8px 10px !important;
+    }
+
+    /* Shrink the control buttons (Info, Gear) */
+    .control-row.row .hstack .btn {
+        padding: 5px 8px !important;
+        font-size: 12px !important;
+    }
+
+    /* Shrink the Dropdown 'Sort by' */
+    .control-row.row #sort-by-dropdown {
+        min-width: 120px !important;
+        font-size: 12px !important;
+    }
 }

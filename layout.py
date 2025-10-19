@@ -1,11 +1,11 @@
-# layout.py (Final Version with Full Definitions)
+# layout.py (Responsive Version)
 
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 from flask_login import current_user
 from constants import SECTORS
 
-# --- Dictionary for Metric Definitions ---
+# --- Dictionary for Metric Definitions (ไม่เปลี่ยนแปลง) ---
 METRIC_DEFINITIONS = {
     # Graph Definitions
     "tab-performance": dcc.Markdown("""
@@ -365,57 +365,74 @@ def build_layout():
                     html.Div(id='ticker-summary-display'),
                     html.Div(id='index-summary-display', className="mt-2"),
                 ])), width=12, md=3, className="sidebar-fixed"),
+                
                 dbc.Col([
-                    dbc.Row([
-                        dbc.Col(
-                            html.Div(className="custom-tabs-container", children=[
-                                dbc.Tabs(id="analysis-tabs", active_tab="tab-performance", children=[
-                                    dbc.Tab(label="PERFORMANCE", tab_id="tab-performance"),
-                                    dbc.Tab(label="DRAWDOWN", tab_id="tab-drawdown"),
-                                    dbc.Tab(label="VALUATION VS. QUALITY", tab_id="tab-scatter"),
-                                    dbc.Tab(label="MARGIN OF SAFETY", tab_id="tab-dcf"),
-                                ])
-                            ]),
-                        ),
-                        dbc.Col(
-                            dbc.Stack(
-                                [
-                                    dbc.Button(html.I(className="bi bi-gear-fill"), id="open-dcf-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-graphs", color="secondary", outline=True),
-                                ],
-                                direction="horizontal",
-                                gap=2
+                    # Graph Controls Row (Responsive)
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Div(className="custom-tabs-container", children=[
+                                    dbc.Tabs(id="analysis-tabs", active_tab="tab-performance", children=[
+                                        dbc.Tab(label="PERFORMANCE", tab_id="tab-performance"),
+                                        dbc.Tab(label="DRAWDOWN", tab_id="tab-drawdown"),
+                                        dbc.Tab(label="VALUATION VS. QUALITY", tab_id="tab-scatter"),
+                                        dbc.Tab(label="MARGIN OF SAFETY", tab_id="tab-dcf"),
+                                    ])
+                                ]),
+                                md=8
                             ),
-                            width="auto",
-                            align="center"
-                        )
-                    ], justify="between", align="center"),
+                            dbc.Col(
+                                dbc.Stack(
+                                    [
+                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-dcf-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
+                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-graphs", color="secondary", outline=True),
+                                    ],
+                                    direction="horizontal",
+                                    gap=2,
+                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0" 
+                                ),
+                                md=4
+                            )
+                        ],
+                        align="center",
+                        className="control-row" # <-- Added a specific class
+                    ),
+                    
                     dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
                     html.Hr(className="my-5"),
-                    dbc.Row([
-                        dbc.Col(
-                            html.Div(className="custom-tabs-container", children=[
-                                dbc.Tabs(id="table-tabs", active_tab="tab-valuation", children=[
-                                    dbc.Tab(label="VALUATION", tab_id="tab-valuation"),
-                                    dbc.Tab(label="GROWTH", tab_id="tab-growth"),
-                                    dbc.Tab(label="FUNDAMENTALS", tab_id="tab-fundamentals"),
-                                    dbc.Tab(label="TARGET", tab_id="tab-forecast"),
-                                ])
-                            ]),
-                        ),
-                        dbc.Col(
-                            dbc.Stack(
-                                [
-                                    dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
-                                    dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-tables", color="secondary", outline=True),
-                                    dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by", style={'width': '180px'})
-                                ],
-                                direction="horizontal",
-                                gap=2
+
+                    # Table Controls Row (Responsive)
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Div(className="custom-tabs-container", children=[
+                                    dbc.Tabs(id="table-tabs", active_tab="tab-valuation", children=[
+                                        dbc.Tab(label="VALUATION", tab_id="tab-valuation"),
+                                        dbc.Tab(label="GROWTH", tab_id="tab-growth"),
+                                        dbc.Tab(label="FUNDAMENTALS", tab_id="tab-fundamentals"),
+                                        dbc.Tab(label="TARGET", tab_id="tab-forecast"),
+                                    ])
+                                ]),
+                                md=7
                             ),
-                            width="auto"
-                        )
-                    ], justify="between", align="center", className="mt-3 g-2"),
+                             dbc.Col(
+                                dbc.Stack(
+                                    [
+                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
+                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-tables", color="secondary", outline=True),
+                                        dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
+                                    ],
+                                    direction="horizontal",
+                                    gap=2,
+                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
+                                ),
+                                md=5
+                            )
+                        ],
+                        align="center",
+                        className="control-row mt-3" # <-- Added a specific class
+                    ),
+                    
                     dcc.Loading(html.Div(id="table-pane-content", className="mt-2"))
                 ], width=12, md=9, className="content-offset"),
             ], className="g-4")

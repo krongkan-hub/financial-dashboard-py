@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Final News UI Polish)
+# pages/deep_dive.py (Version with Celery Background Task and Layout Fix)
 
 import dash
 from dash import dcc, html, dash_table
@@ -13,9 +13,14 @@ import numpy as np
 from datetime import datetime
 import yfinance as yf
 
+# Import Task ที่เราสร้างขึ้น และ celery instance เพื่อเช็คสถานะ
+from tasks import get_news_and_sentiment_task
+from celery_worker import celery
+
 from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url
 
 def create_sentiment_layout(sentiment_data):
+    # ฟังก์ชันนี้ไม่มีการเปลี่ยนแปลง
     if not sentiment_data or sentiment_data.get("error"):
         error_msg = sentiment_data.get("error", "Could not retrieve news.")
         return dbc.Alert(f"Error: {error_msg}", color="danger")
@@ -55,16 +60,15 @@ def create_sentiment_layout(sentiment_data):
                     ),
                     dbc.Col(
                         [
-                            # --- [MODIFIED] Swapped headline and metadata position ---
                             html.A(
-                                html.H6(article['title'], className="mb-1"), # Add bottom margin to headline
+                                html.H6(article['title'], className="mb-1"),
                                 href=article['url'],
                                 target="_blank",
                                 className="news-headline-link"
                             ),
                             html.P(
                                 f"{published_at_str} | Source: {article['source']['name']}",
-                                className="small text-muted mb-0" # Remove bottom margin
+                                className="small text-muted mb-0"
                             ),
                         ],
                         width=True
@@ -85,8 +89,6 @@ def create_sentiment_layout(sentiment_data):
         *news_items
     ])
 
-# --- ส่วนอื่นๆ ของไฟล์ไม่มีการเปลี่ยนแปลง ---
-
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
     card_title_content = [title]
@@ -99,19 +101,28 @@ def create_metric_card(title, value, className=""):
 
 def create_deep_dive_layout(ticker=None):
     if not ticker:
-        return dbc.Container(html.P("Please provide a ticker by navigating from the main page."), className="p-5 text-center")
+        # --- [FIX] เพิ่ม Store และ Interval ใน Layout กรณีไม่มี Ticker ---
+        return dbc.Container([
+            dcc.Store(id='sentiment-task-id-store'),
+            dcc.Interval(id='sentiment-task-interval', disabled=True),
+            html.P("Please provide a ticker by navigating from the main page.")
+        ], className="p-5 text-center")
     
     try:
         tkr = yf.Ticker(ticker)
         info = tkr.info
         if not info or info.get('quoteType') != 'EQUITY':
+             # --- [FIX] เพิ่ม Store และ Interval ใน Layout กรณี Ticker ผิดพลาด ---
              return dbc.Container([
+                dcc.Store(id='sentiment-task-id-store'),
+                dcc.Interval(id='sentiment-task-interval', disabled=True),
                 html.H2(f"Data Error for {ticker}", className="text-danger mt-5"),
                 html.P("Invalid ticker or no data available."),
                 dcc.Link("Go back to Dashboard", href="/")
              ], fluid=True, className="mt-5 text-center")
 
         logo_url = _get_logo_url(info)
+        company_name = info.get('longName', ticker)
 
         current_price = info.get('currentPrice', 0)
         previous_close = info.get('previousClose', 1)
@@ -145,7 +156,10 @@ def create_deep_dive_layout(ticker=None):
         }
 
     except Exception as e:
+         # --- [FIX] เพิ่ม Store และ Interval ใน Layout กรณี Exception อื่นๆ ---
          return dbc.Container([
+            dcc.Store(id='sentiment-task-id-store'),
+            dcc.Interval(id='sentiment-task-interval', disabled=True),
             html.H2(f"Data Error for {ticker}", className="text-danger mt-5"),
             html.P(f"Could not retrieve initial data. Reason: {e}"),
             dcc.Link("Go back to Dashboard", href="/")
@@ -162,7 +176,7 @@ def create_deep_dive_layout(ticker=None):
             html.Div([
                 html.H2(f"${data.get('current_price', 0):,.2f}", className="price-display mb-0"),
                 html.P(f"{data.get('daily_change_str', 'N/A')} ({data.get('daily_change_pct_str', 'N/A')})",
-                    className=f"price-change {'price-positive' if data.get('daily_change', 0) >= 0 else 'price-negative'}")
+                    className=f"price-change {'price-positive' if daily_change >= 0 else 'price-negative'}")
             ], className="text-end"),
         width="auto", align="center")
     ], align="center", className="marquee-header g-3")
@@ -200,13 +214,16 @@ def create_deep_dive_layout(ticker=None):
                 persistence_type='session'
             )
         ]),
+        dcc.Store(id='sentiment-task-id-store'),
+        dcc.Interval(id='sentiment-task-interval', interval=2*1000, n_intervals=0, disabled=True),
         dbc.Card(dbc.CardBody(html.Div(id="deep-dive-tab-content")), className="mt-3")
     ])
 
     return dbc.Container([
-        dcc.Store(id='deep-dive-ticker-store', data={'ticker': ticker}),
+        dcc.Store(id='deep-dive-ticker-store', data={'ticker': ticker, 'company_name': company_name}),
         marquee, html.Hr(), at_a_glance, analysis_workspace,
     ], fluid=True, className="p-4 main-content-container")
+
 
 @dash.callback(
     Output('deep-dive-tab-content', 'children'),
@@ -214,7 +231,7 @@ def create_deep_dive_layout(ticker=None):
 )
 def render_deep_dive_tab_content(active_tab):
     if active_tab == "tab-sentiment-deep-dive":
-        return dcc.Loading(html.Div(id="sentiment-content-target"), type="default")
+        return html.Div(id="sentiment-content-target")
     
     if active_tab == "tab-financials-deep-dive":
         return html.Div([
@@ -239,7 +256,7 @@ def render_deep_dive_tab_content(active_tab):
     State('deep-dive-ticker-store', 'data')
 )
 def load_charts_tab(active_tab, store_data):
-    if active_tab != 'tab-charts-deep-dive' or not store_data:
+    if active_tab != 'tab-charts-deep-dive' or not store_data or not store_data.get('ticker'):
         return dash.no_update
     
     ticker = store_data['ticker']
@@ -271,7 +288,7 @@ def load_charts_tab(active_tab, store_data):
     State('deep-dive-ticker-store', 'data')
 )
 def load_technicals_tab(active_tab, store_data):
-    if active_tab != 'tab-technicals-deep-dive' or not store_data:
+    if active_tab != 'tab-technicals-deep-dive' or not store_data or not store_data.get('ticker'):
         return dash.no_update
         
     ticker = store_data['ticker']
@@ -304,19 +321,45 @@ def load_technicals_tab(active_tab, store_data):
     return dcc.Graph(figure=fig)
 
 @dash.callback(
+    Output('sentiment-task-id-store', 'data'),
+    Output('sentiment-task-interval', 'disabled'),
     Output('sentiment-content-target', 'children'),
     Input('deep-dive-main-tabs', 'active_tab'),
     State('deep-dive-ticker-store', 'data')
 )
-def load_sentiment_tab(active_tab, store_data):
-    if active_tab != 'tab-sentiment-deep-dive' or not store_data:
-        return dash.no_update
-    
-    ticker = store_data['ticker']
-    data = get_deep_dive_data(ticker)
-    sentiment_data = data.get("sentiment_data")
-    
-    return create_sentiment_layout(sentiment_data)
+def start_sentiment_analysis_task(active_tab, store_data):
+    if active_tab != 'tab-sentiment-deep-dive' or not store_data or not store_data.get('company_name'):
+        return dash.no_update, True, dash.no_update
+
+    company_name = store_data.get('company_name')
+    if not company_name:
+        return dash.no_update, True, dbc.Alert("Company name not found.", color="warning")
+
+    task = get_news_and_sentiment_task.delay(company_name)
+    loading_spinner = html.Div(
+        [dbc.Spinner(color="primary", children="Analyzing news sentiment...")],
+        className="text-center p-5"
+    )
+    return {'task_id': task.id}, False, loading_spinner
+
+@dash.callback(
+    Output('sentiment-content-target', 'children', allow_duplicate=True),
+    Output('sentiment-task-interval', 'disabled', allow_duplicate=True),
+    Input('sentiment-task-interval', 'n_intervals'),
+    State('sentiment-task-id-store', 'data'),
+    prevent_initial_call=True
+)
+def poll_sentiment_task_status(n, task_data):
+    if not task_data or 'task_id' not in task_data:
+        return dash.no_update, True
+    task_id = task_data['task_id']
+    task = celery.AsyncResult(task_id)
+    if task.state == 'SUCCESS':
+        result = task.get()
+        return create_sentiment_layout(result), True
+    elif task.state in ['FAILURE', 'REVOKED']:
+        return dbc.Alert("An error occurred during sentiment analysis.", color="danger"), True
+    return dash.no_update, False
 
 @dash.callback(
     Output('financial-statement-content', 'children'),
@@ -324,7 +367,7 @@ def load_sentiment_tab(active_tab, store_data):
     State('deep-dive-ticker-store', 'data')
 )
 def render_financial_statement_table(selected_statement, store_data):
-    if not selected_statement or not store_data:
+    if not selected_statement or not store_data or not store_data.get('ticker'):
         return dash.no_update
         
     ticker = store_data['ticker']

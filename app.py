@@ -1,4 +1,4 @@
-# app.py (FIXED - Core App Initialization with Absolute Path)
+# app.py (FIXED - Core App Initialization with Absolute Path & Celery Integration)
 
 import os
 import dash
@@ -7,6 +7,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin
 from config import Config
+from celery_worker import celery # <-- 1. Import celery instance ที่เราสร้าง
 
 # --- [MODIFICATION START] ---
 # Get the absolute path of the directory where this file is located
@@ -18,6 +19,10 @@ assets_path = os.path.join(basedir, 'assets')
 # --- App Initialization ---
 server = Flask(__name__)
 server.config.from_object(Config)
+
+# 2. เชื่อม Flask config เข้ากับ Celery config
+#    เพื่อให้ Celery รู้จักค่า CELERY_BROKER_URL จากไฟล์ config.py
+celery.conf.update(server.config)
 
 app = dash.Dash(
     __name__,

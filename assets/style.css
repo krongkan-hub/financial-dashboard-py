@@ -1,8 +1,4 @@
-/* style.css (FINAL - Hover Effect Removed) */
-
-/* ============================================================== */
-/* === STYLES THAT APPLY TO ALL SCREEN SIZES === */
-/* ============================================================== */
+/* style.css (FINAL - with Final Font and UI Fixes) */
 
 /* CORE LAYOUT STYLES */
 #navbar-container .navbar { position: fixed; top: 0; left: 0; right: 0; z-index: 1030; }
@@ -15,34 +11,37 @@
     top: 80px;
     height: calc(100vh - 100px);
     overflow-y: auto;
-    z-index: 1020; /* Ensures modal backdrop covers sidebar */
+    z-index: 1020;
   }
   .content-offset {
     margin-left: 25% !important;
   }
 }
 
-/* ================================================================ */
-/* === UI/UX IMPROVEMENTS FOR CARDS === */
-/* ================================================================ */
-
-/* Make news card headers and footers smaller and cleaner */
-#deep-dive-tab-content .card-header,
-#deep-dive-tab-content .card-footer {
-    padding: 0.5rem 1rem;
-    font-size: 0.8rem;
-    background-color: #f8f9fa; /* Light grey background */
-    border-color: #dee2e6;
+/* --- [MODIFIED] Styles for the clickable news headline --- */
+.news-headline-link {
+    text-decoration: none !important;
+    color: inherit;
+    font-weight: 600;
 }
 
-#deep-dive-tab-content .card-title {
-    font-size: 1rem;
+/* Target the H6 inside the link to make it bigger */
+.news-headline-link h6 {
+    font-size: 1.1rem; /* Slightly larger font size */
 }
 
-/* ================================================================ */
-/* === SIDEBAR CONTROL STYLING === */
-/* ================================================================ */
+.news-headline-link:hover {
+    color: #0d6efd;
+    text-decoration: underline !important;
+}
 
+/* Force news card to inherit the main font */
+.news-item-card, .news-item-card * {
+    font-family: inherit !important;
+}
+/* --- End of modified styles --- */
+
+/* SIDEBAR CONTROL STYLING */
 .sidebar-fixed .Select-control { min-height: 32px !important; height: 32px !important; }
 .sidebar-fixed .Select-input { height: 30px !important; }
 .sidebar-fixed .Select-value, .sidebar-fixed .Select-placeholder { line-height: 30px !important; }

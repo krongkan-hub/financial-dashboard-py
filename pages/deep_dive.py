@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Plain Progress Bar)
+# pages/deep_dive.py (Version with Final News UI Polish)
 
 import dash
 from dash import dcc, html, dash_table
@@ -17,75 +17,72 @@ from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_l
 
 def create_sentiment_layout(sentiment_data):
     if not sentiment_data or sentiment_data.get("error"):
-        error_msg = sentiment_data.get("error", "Could not retrieve news sentiment.")
+        error_msg = sentiment_data.get("error", "Could not retrieve news.")
         return dbc.Alert(f"Error: {error_msg}", color="danger")
 
     summary = sentiment_data.get("summary", {})
     articles = sentiment_data.get("articles", [])
 
     if not articles:
-        return dbc.Alert("No recent news articles found for sentiment analysis.", color="info")
+        return dbc.Alert("No recent news articles found.", color="info")
 
-    # --- Progress Bar with Labels ---
     progress_bar = dbc.Progress(
         [
-            dbc.Progress(
-                value=summary.get('positive_pct', 0),
-                color="success",
-                bar=True,
-                # 'label' คือส่วนที่แสดงข้อความข้างใน
-                label=f"{summary.get('positive_pct', 0):.1f}%"
-            ),
-            dbc.Progress(
-                value=summary.get('neutral_pct', 0),
-                color="warning",
-                bar=True,
-                label=f"{summary.get('neutral_pct', 0):.1f}%"
-            ),
-            dbc.Progress(
-                value=summary.get('negative_pct', 0),
-                color="danger",
-                bar=True,
-                label=f"{summary.get('negative_pct', 0):.1f}%"
-            ),
+            dbc.Progress(value=summary.get('positive_pct', 0), color="success", bar=True, label=f"{summary.get('positive_pct', 0):.1f}%"),
+            dbc.Progress(value=summary.get('neutral_pct', 0), color="warning", bar=True, label=f"{summary.get('neutral_pct', 0):.1f}%"),
+            dbc.Progress(value=summary.get('negative_pct', 0), color="danger", bar=True, label=f"{summary.get('negative_pct', 0):.1f}%"),
         ], style={"height": "25px", "fontSize": "0.85rem"}
     )
     
     sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
-    news_cards = []
-    for article in articles[:6]:
+    
+    news_items = []
+    for article in articles[:7]:
         if not article.get('description'):
             continue
             
-        published_at = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00")).strftime('%b %d, %Y')
+        published_dt = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
+        published_at_str = f"{published_dt.strftime('%b %d, %Y, %I:%M %p')}"
         sentiment_label = article.get('sentiment', 'neutral')
         
-        news_cards.append(
-            dbc.Col(
-                dbc.Card(
-                    [
-                        dbc.CardHeader([
-                            dbc.Badge(sentiment_label.upper(), color=sentiment_color_map[sentiment_label], className="me-2"),
-                            html.Small(f"Source: {article['source']['name']}", className="text-muted")
-                        ]),
-                        dbc.CardBody([
-                            html.H6(article['title'], className="card-title"),
-                            html.P(article['description'], className="card-text small text-muted"),
-                        ]),
-                        dbc.CardFooter(
-                            dbc.Button("Read More", href=article['url'], target="_blank", color="secondary", outline=True, size="sm")
-                        )
-                    ], className="h-100"
-                ),
-                width=12, lg=6, className="mb-4"
-            )
+        news_card = dbc.Card(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dbc.Badge(sentiment_label.upper(), color=sentiment_color_map[sentiment_label], className="p-2"),
+                        width="auto",
+                        className="d-flex align-items-center"
+                    ),
+                    dbc.Col(
+                        [
+                            # --- [MODIFIED] Swapped headline and metadata position ---
+                            html.A(
+                                html.H6(article['title'], className="mb-1"), # Add bottom margin to headline
+                                href=article['url'],
+                                target="_blank",
+                                className="news-headline-link"
+                            ),
+                            html.P(
+                                f"{published_at_str} | Source: {article['source']['name']}",
+                                className="small text-muted mb-0" # Remove bottom margin
+                            ),
+                        ],
+                        width=True
+                    ),
+                ],
+                align="center",
+            ),
+            body=True,
+            className="mb-2 news-item-card"
         )
+
+        news_items.append(news_card)
 
     return html.Div([
         html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"),
         progress_bar,
         html.Hr(),
-        dbc.Row(news_cards)
+        *news_items
     ])
 
 # --- ส่วนอื่นๆ ของไฟล์ไม่มีการเปลี่ยนแปลง ---
@@ -195,7 +192,7 @@ def create_deep_dive_layout(ticker=None):
                     dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
-                    dbc.Tab(label="SENTIMENT", tab_id="tab-sentiment-deep-dive", label_class_name="fw-bold"),
+                    dbc.Tab(label="NEWS", tab_id="tab-sentiment-deep-dive", label_class_name="fw-bold"),
                 ],
                 id="deep-dive-main-tabs",
                 active_tab="tab-charts-deep-dive",

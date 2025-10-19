@@ -24,3 +24,6 @@ class Config:
 
     # Disable a feature of SQLAlchemy that is not needed and adds overhead.
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # API Key for fetching news articles.
+    NEWS_API_KEY = os.environ.get('NEWS_API_KEY')

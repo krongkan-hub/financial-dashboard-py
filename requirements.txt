@@ -10,3 +10,8 @@ Werkzeug==3.1.1
 python-dotenv==1.1.1
 gunicorn==23.0.0
 psycopg2-binary
+# Added for Sentiment Analysis Feature
+transformers==4.42.3
+torch==2.3.1
+newsapi-python==0.2.7
+tf-keras==2.16.0

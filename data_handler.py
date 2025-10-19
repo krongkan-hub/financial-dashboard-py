@@ -1,4 +1,4 @@
-# data_handler.py (Version with Beta added for Scoring)
+# data_handler.py (Version with Hugging Face Sentiment Analysis)
 
 import pandas as pd
 import yfinance as yf
@@ -7,11 +7,35 @@ from typing import Dict, List, Optional
 from functools import lru_cache
 import logging
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
+
+# --- [NEW] Imports for Sentiment Analysis ---
+from config import Config
+from newsapi import NewsApiClient
+from transformers import pipeline
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 warnings.filterwarnings("ignore", category=UserWarning)
+
+# --- [NEW] Initialize NewsAPI and Hugging Face Model ---
+# Load the NewsAPI key from config
+if Config.NEWS_API_KEY:
+    newsapi = NewsApiClient(api_key=Config.NEWS_API_KEY)
+else:
+    newsapi = None
+    logging.warning("NEWS_API_KEY not found in config. News fetching will be disabled.")
+
+# Load the sentiment analysis model once when the app starts for performance
+try:
+    sentiment_analyzer = pipeline(
+        "sentiment-analysis",
+        model="mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
+    )
+except Exception as e:
+    sentiment_analyzer = None
+    logging.error(f"Failed to load Hugging Face sentiment model: {e}", exc_info=True)
+
 
 FIN_KEYS = {
     "revenue": ["Total Revenue", "Revenues", "Revenue"],
@@ -22,6 +46,66 @@ FIN_KEYS = {
 }
 CF_KEYS = { "cfo": ["Total Cash From Operating Activities", "Operating Cash Flow"], "capex": ["Capital Expenditures"] }
 
+# --- [NEW] Function to get and analyze news sentiment ---
+@lru_cache(maxsize=32)
+def get_news_and_sentiment(company_name: str) -> dict:
+    if not newsapi or not sentiment_analyzer:
+        return {"error": "News or sentiment analysis service is not configured."}
+
+    try:
+        # Fetch news from the last 7 days
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=7)
+        
+        all_articles = newsapi.get_everything(
+            q=f'"{company_name}"', # Use quotes for exact phrase matching
+            language='en',
+            sort_by='relevancy',
+            from_param=from_date.strftime('%Y-%m-%d'),
+            to=to_date.strftime('%Y-%m-%d'),
+            page_size=20 # Get top 20 relevant articles
+        )
+
+        if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0:
+            return {"articles": [], "summary": {}}
+
+        # Analyze sentiment for each article
+        analyzed_articles = []
+        sentiment_scores = {'positive': 0, 'neutral': 0, 'negative': 0}
+        
+        for article in all_articles['articles']:
+            # Skip articles without description
+            if not article.get('description'):
+                continue
+
+            text_to_analyze = article['title'] + ". " + article['description']
+            # Truncate text to fit model's max length
+            result = sentiment_analyzer(text_to_analyze[:512])[0]
+            
+            article['sentiment'] = result['label'].lower()
+            article['sentiment_score'] = result['score']
+            analyzed_articles.append(article)
+            sentiment_scores[result['label'].lower()] += 1
+
+        # Create a summary
+        total_analyzed = len(analyzed_articles)
+        summary = {
+            'positive_count': sentiment_scores['positive'],
+            'neutral_count': sentiment_scores['neutral'],
+            'negative_count': sentiment_scores['negative'],
+            'total_count': total_analyzed,
+            'positive_pct': (sentiment_scores['positive'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
+            'neutral_pct': (sentiment_scores['neutral'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
+            'negative_pct': (sentiment_scores['negative'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
+        }
+
+        return {"articles": analyzed_articles, "summary": summary}
+
+    except Exception as e:
+        logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
+        return {"error": str(e)}
+
+# --- Helper functions (no changes) ---
 def _pick_row(df: pd.DataFrame, candidates: List[str]) -> Optional[pd.Series]:
     if df is None or df.empty: return None
     clean_lower_index = df.index.str.lower().str.strip()
@@ -108,7 +192,7 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
                 if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0: cash_conversion = latest_cfo / latest_ni
             all_data.append({
                 "Ticker": ticker, "logo_url": logo_url, "Price": info.get('currentPrice') or info.get('previousClose'),
-                "Market Cap": info.get("marketCap"), "Beta": info.get("beta"), # <-- ADDED BETA HERE
+                "Market Cap": info.get("marketCap"), "Beta": info.get("beta"),
                 "P/E": info.get('trailingPE'), "P/B": info.get('priceToBook'),
                 "EV/EBITDA": info.get('enterpriseToEbitda'), "Revenue Growth (YoY)": info.get('revenueGrowth'), "Revenue CAGR (3Y)": cagr_3y,
                 "Net Income Growth (YoY)": info.get('earningsGrowth'), "ROE": info.get('returnOnEquity'),
@@ -128,12 +212,19 @@ def get_scatter_data(tickers: tuple) -> pd.DataFrame:
         except Exception as e: logging.warning(f"Could not fetch scatter data for {ticker}: {e}")
     return pd.DataFrame(scatter_data).dropna()
 
+# --- [MODIFIED] Main function to integrate sentiment analysis ---
 @lru_cache(maxsize=32)
 def get_deep_dive_data(ticker: str) -> dict:
     try:
         tkr = yf.Ticker(ticker)
         info = tkr.info
         if not info or info.get('quoteType') != 'EQUITY': return {"error": "Invalid ticker or no data available."}
+
+        # --- [NEW] Call the sentiment analysis function ---
+        company_name = info.get('longName', ticker)
+        sentiment_data = get_news_and_sentiment(company_name)
+        # --- [END NEW] ---
+
         logo_url = _get_logo_url(info)
         def format_large_number(n):
             if pd.isna(n) or n is None: return "N/A"
@@ -144,13 +235,16 @@ def get_deep_dive_data(ticker: str) -> dict:
         current_price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
         previous_close = info.get('previousClose', 1)
         daily_change, daily_change_pct = current_price - previous_close, ((current_price - previous_close) / previous_close) * 100
+        
         result = {
-            "company_name": info.get('longName', ticker), "exchange": info.get('exchange', 'N/A'), "logo_url": logo_url,
+            "company_name": company_name,
+            "exchange": info.get('exchange', 'N/A'), "logo_url": logo_url,
             "business_summary": info.get('longBusinessSummary', 'Business summary not available.'), "current_price": current_price,
             "daily_change_str": f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f}", "daily_change_pct_str": f"{'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%",
             "market_cap_str": format_large_number(info.get('marketCap')), "target_mean_price": info.get('targetMeanPrice'),
             "recommendation_key": info.get('recommendationKey', 'N/A').replace('_', ' ').title(),
-            "key_stats": { "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A", "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A", "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A", "Dividend Yield": f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A", }
+            "key_stats": { "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A", "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A", "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A", "Dividend Yield": f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A", },
+            "sentiment_data": sentiment_data # <-- [NEW] Add sentiment data to the result
         }
         
         income_stmt_quarterly = tkr.quarterly_financials.iloc[:, :16]
@@ -195,6 +289,7 @@ def get_deep_dive_data(ticker: str) -> dict:
         logging.error(f"Critical failure in get_deep_dive_data for {ticker}: {e}", exc_info=True)
         return {"error": str(e)}
 
+# --- Unchanged functions below ---
 @lru_cache(maxsize=32)
 def calculate_dcf_intrinsic_value(
     ticker: str,
@@ -287,8 +382,6 @@ def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
     df['MACD'] = ema12 - ema26
     df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
-    
-    # --- Trend Line Logic Removed ---
             
     return {"data": df}
 
@@ -299,37 +392,21 @@ def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_grow
     Returns a dictionary with the results for a single ticker.
     """
     try:
-        # Convert percentage to decimal
         eps_growth_rate_decimal = eps_growth_rate / 100.0
-
         tkr = yf.Ticker(ticker)
         info = tkr.info
-        
         current_price = info.get('currentPrice') or info.get('previousClose')
         trailing_eps = info.get('trailingEps')
-
-        # Check for necessary data
         if not all([current_price, trailing_eps, trailing_eps > 0]):
             return {'error': 'Missing data'}
-            
-        # 1. Project future EPS
         future_eps = trailing_eps * ((1 + eps_growth_rate_decimal) ** forecast_years)
-        
-        # 2. Calculate Target Price
         target_price = future_eps * terminal_pe
-        
-        # 3. Calculate Target Upside
         target_upside = (target_price / current_price) - 1 if current_price > 0 else 0
-        
-        # 4. Calculate IRR
         irr = ((target_price / current_price) ** (1 / forecast_years)) - 1 if current_price > 0 and forecast_years > 0 else 0
-        
         return {
             'Target Price': target_price,
             'Target Upside': target_upside,
             'IRR %': irr
         }
-
     except Exception:
-        # Handle cases where ticker info fails or other errors occur
         return {'error': 'Calculation failed'}

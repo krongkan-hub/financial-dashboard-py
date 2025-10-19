@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Recommendation Source Added)
+# pages/deep_dive.py (Version with Sentiment Analysis Tab)
 
 import dash
 from dash import dcc, html, dash_table
@@ -10,18 +10,75 @@ import pandas as pd
 import plotly.express as px
 import json
 import numpy as np
+from datetime import datetime
 
 from data_handler import get_deep_dive_data, calculate_dcf_intrinsic_value, get_technical_analysis_data
+
+# --- [NEW] Helper function to create the sentiment layout ---
+def create_sentiment_layout(sentiment_data):
+    if not sentiment_data or sentiment_data.get("error"):
+        error_msg = sentiment_data.get("error", "Could not retrieve news sentiment.")
+        return dbc.Alert(f"Error: {error_msg}", color="danger")
+
+    summary = sentiment_data.get("summary", {})
+    articles = sentiment_data.get("articles", [])
+
+    if not articles:
+        return dbc.Alert("No recent news articles found for sentiment analysis.", color="info")
+
+    # Create the summary progress bar
+    progress_bar = dbc.Progress(
+        [
+            dbc.Progress(value=summary.get('positive_pct', 0), color="success", bar=True),
+            dbc.Progress(value=summary.get('neutral_pct', 0), color="warning", bar=True),
+            dbc.Progress(value=summary.get('negative_pct', 0), color="danger", bar=True),
+        ], style={"height": "30px", "fontSize": "1rem"}
+    )
+    
+    summary_text = html.Div([
+        html.Span(f"🟢 Positive: {summary.get('positive_count', 0)} articles ({summary.get('positive_pct', 0):.1f}%)", className="me-3"),
+        html.Span(f"🟡 Neutral: {summary.get('neutral_count', 0)} articles ({summary.get('neutral_pct', 0):.1f}%)", className="me-3"),
+        html.Span(f"🔴 Negative: {summary.get('negative_count', 0)} articles ({summary.get('negative_pct', 0):.1f}%)")
+    ], className="text-center text-muted small mt-2")
+
+    # Create the list of news articles
+    sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
+    
+    news_list_items = []
+    for article in articles[:10]: # Display top 10 articles
+        published_at = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00")).strftime('%b %d, %Y')
+        sentiment_label = article.get('sentiment', 'neutral')
+        
+        news_list_items.append(
+            dbc.ListGroupItem([
+                html.Div([
+                    html.H6(article['title'], className="mb-1"),
+                    html.P(article['description'], className="mb-1 small text-muted"),
+                    html.Div([
+                        dbc.Badge(sentiment_label.upper(), color=sentiment_color_map[sentiment_label], className="me-2"),
+                        html.Small(f"Source: {article['source']['name']} | Published: {published_at}")
+                    ])
+                ])
+            ], href=article['url'], target="_blank", action=True)
+        )
+    
+    news_list = dbc.ListGroup(news_list_items, flush=True)
+
+    return html.Div([
+        html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"),
+        progress_bar,
+        summary_text,
+        html.Hr(),
+        news_list
+    ])
+
 
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
     
-    # --- [MODIFICATION] ---
-    # Add a source label specifically for the Recommendation card
     card_title_content = [title]
     if title == "Recommendation":
         card_title_content.append(html.Span(" (Yahoo)", style={'fontSize': '0.7em', 'color': '#6c757d', 'marginLeft': '4px'}))
-    # --- [END MODIFICATION] ---
 
     return dbc.Card(dbc.CardBody([
         html.H6(card_title_content, className="metric-card-title"),
@@ -72,10 +129,12 @@ def create_deep_dive_layout(ticker=None):
 
     analysis_workspace = html.Div([
         html.Div(className="custom-tabs-container mt-4", children=[
+            # --- [MODIFIED] Add the new Sentiment Tab ---
             dbc.Tabs([
                     dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
+                    dbc.Tab(label="SENTIMENT", tab_id="tab-sentiment-deep-dive", label_class_name="fw-bold"), # <-- NEW TAB
                 ],
                 id="deep-dive-main-tabs",
                 active_tab="tab-charts-deep-dive",
@@ -91,10 +150,12 @@ def create_deep_dive_layout(ticker=None):
         marquee, html.Hr(), at_a_glance, analysis_workspace,
     ], fluid=True, className="p-4 main-content-container")
 
+# --- [MODIFIED] Main callback to render content for all tabs ---
 @dash.callback(Output('deep-dive-tab-content', 'children'), Input('deep-dive-main-tabs', 'active_tab'), State('deep-dive-ticker-store', 'data'))
 def render_deep_dive_tab_content(active_tab, store_data):
     if not store_data or not store_data.get('ticker'): return ""
     ticker = store_data['ticker']
+    # We call get_deep_dive_data once and pass the data to the render functions
     data = get_deep_dive_data(ticker)
 
     if active_tab == "tab-charts-deep-dive":
@@ -189,6 +250,11 @@ def render_deep_dive_tab_content(active_tab, store_data):
             ], className="mb-4 mt-2"),
             dcc.Loading(html.Div(id="financial-statement-content"))
         ])
+
+    # --- [NEW] Logic to render the sentiment tab ---
+    if active_tab == "tab-sentiment-deep-dive":
+        sentiment_data = data.get("sentiment_data")
+        return create_sentiment_layout(sentiment_data)
 
     return html.P("Select a tab")
 

@@ -7,7 +7,7 @@ import os
 WSL_REDIS_IP = 'redis://192.168.241.65:6379/0'
 
 celery = Celery(
-    '__main__',
+    'tasks',  # <--- เปลี่ยนจาก '__main__' เป็น 'tasks'
     broker=os.environ.get('CELERY_BROKER_URL', WSL_REDIS_IP),
     backend=os.environ.get('CELERY_RESULT_BACKEND', WSL_REDIS_IP)
 )

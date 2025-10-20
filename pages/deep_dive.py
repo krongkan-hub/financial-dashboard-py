@@ -1,4 +1,4 @@
-# pages/deep_dive.py (FINAL FIX - Decoupling Web App from Task Code)
+# pages/deep_dive.py (FINAL FIX - Decoupling Web App from Task Code & Syntax Correction)
 
 import dash
 from dash import dcc, html, dash_table

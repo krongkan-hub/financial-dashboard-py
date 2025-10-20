@@ -1,4 +1,4 @@
-# data_handler.py (Version with Hugging Face Sentiment Analysis)
+# data_handler.py (Final Version with Hugging Face API)
 
 import pandas as pd
 import yfinance as yf
@@ -9,33 +9,99 @@ import logging
 import warnings
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
-
-# --- [NEW] Imports for Sentiment Analysis ---
-from config import Config
-from newsapi import NewsApiClient
-from transformers import pipeline
+import requests # <-- Import ที่จำเป็น
+import os       # <-- Import ที่จำเป็น
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# --- [NEW] Initialize NewsAPI and Hugging Face Model ---
-# Load the NewsAPI key from config
+# --- ส่วนที่ 1: การตั้งค่า NewsAPI (เหมือนเดิม) ---
+from config import Config
+from newsapi import NewsApiClient
+
 if Config.NEWS_API_KEY:
     newsapi = NewsApiClient(api_key=Config.NEWS_API_KEY)
 else:
     newsapi = None
     logging.warning("NEWS_API_KEY not found in config. News fetching will be disabled.")
 
-# Load the sentiment analysis model once when the app starts for performance
-# try:
-#     sentiment_analyzer = pipeline(
-#         "sentiment-analysis",
-#         model="mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
-#     )
-# except Exception as e:
-#     sentiment_analyzer = None
-#     logging.error(f"Failed to load Hugging Face sentiment model: {e}", exc_info=True)
+# --- ส่วนที่ 2: ฟังก์ชันใหม่สำหรับเรียกใช้ Hugging Face API ---
+def analyze_sentiment_via_api(text_to_analyze: str) -> dict:
+    API_URL = "https://api-inference.huggingface.co/models/mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
+    hf_token = os.environ.get('HUGGING_FACE_TOKEN')
 
+    if not hf_token:
+        logging.error("HUGGING_FACE_TOKEN environment variable not set.")
+        return {'label': 'neutral', 'score': 0.0}
+        
+    headers = {"Authorization": f"Bearer {hf_token}"}
+    payload = {"inputs": text_to_analyze[:512]} # ตัดข้อความไม่ให้เกิน 512 ตัวอักษร
+    
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+        response.raise_for_status() # เช็คว่า request สำเร็จหรือไม่ (เช่น 200 OK)
+        result = response.json()
+        
+        if result and isinstance(result, list) and isinstance(result[0], list):
+            best_prediction = max(result[0], key=lambda x: x['score'])
+            return {'label': best_prediction['label'].lower(), 'score': best_prediction['score']}
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"API request failed: {e}")
+    except (KeyError, IndexError, TypeError):
+        # logging.error(f"Could not parse API response. Response: {result}, Error: {e}")
+        pass
+        
+    return {'label': 'neutral', 'score': 0.0} # คืนค่า default ถ้ามีปัญหา
+
+# --- ส่วนที่ 3: ฟังก์ชันดึงข่าวที่ถูกแก้ไขให้เรียกใช้ API ---
+@lru_cache(maxsize=32)
+def get_news_and_sentiment(company_name: str) -> dict:
+    if not newsapi or not os.environ.get('HUGGING_FACE_TOKEN'):
+        return {"error": "News service or Hugging Face Token is not configured."}
+
+    try:
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=7)
+        
+        all_articles = newsapi.get_everything(
+            q=f'"{company_name}"', language='en', sort_by='relevancy',
+            from_param=from_date.strftime('%Y-%m-%d'), to=to_date.strftime('%Y-%m-%d'),
+            page_size=20
+        )
+
+        if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0:
+            return {"articles": [], "summary": {}}
+
+        analyzed_articles = []
+        sentiment_scores = {'positive': 0, 'neutral': 0, 'negative': 0}
+        
+        for article in all_articles['articles']:
+            if not article.get('description'): continue
+            
+            text_to_analyze = article['title'] + ". " + article['description']
+            result = analyze_sentiment_via_api(text_to_analyze) # <-- เรียกใช้ API แทนการโหลดโมเดล
+            
+            article['sentiment'] = result['label']
+            article['sentiment_score'] = result['score']
+            analyzed_articles.append(article)
+            sentiment_scores[result['label']] += 1
+
+        total_analyzed = len(analyzed_articles)
+        summary = {
+            'positive_count': sentiment_scores['positive'], 'neutral_count': sentiment_scores['neutral'],
+            'negative_count': sentiment_scores['negative'], 'total_count': total_analyzed,
+            'positive_pct': (sentiment_scores['positive'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
+            'neutral_pct': (sentiment_scores['neutral'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
+            'negative_pct': (sentiment_scores['negative'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
+        }
+        return {"articles": analyzed_articles, "summary": summary}
+        
+    except Exception as e:
+        logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
+        return {"error": str(e)}
+
+# --- โค้ดส่วนที่เหลือ (ตั้งแต่บรรทัดนี้ลงไป) ไม่มีการเปลี่ยนแปลง ---
 
 FIN_KEYS = {
     "revenue": ["Total Revenue", "Revenues", "Revenue"],
@@ -46,66 +112,6 @@ FIN_KEYS = {
 }
 CF_KEYS = { "cfo": ["Total Cash From Operating Activities", "Operating Cash Flow"], "capex": ["Capital Expenditures"] }
 
-# --- [NEW] Function to get and analyze news sentiment ---
-@lru_cache(maxsize=32)
-def get_news_and_sentiment(company_name: str) -> dict:
-    if not newsapi or not sentiment_analyzer:
-        return {"error": "News or sentiment analysis service is not configured."}
-
-    try:
-        # Fetch news from the last 7 days
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=7)
-        
-        all_articles = newsapi.get_everything(
-            q=f'"{company_name}"', # Use quotes for exact phrase matching
-            language='en',
-            sort_by='relevancy',
-            from_param=from_date.strftime('%Y-%m-%d'),
-            to=to_date.strftime('%Y-%m-%d'),
-            page_size=20 # Get top 20 relevant articles
-        )
-
-        if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0:
-            return {"articles": [], "summary": {}}
-
-        # Analyze sentiment for each article
-        analyzed_articles = []
-        sentiment_scores = {'positive': 0, 'neutral': 0, 'negative': 0}
-        
-        for article in all_articles['articles']:
-            # Skip articles without description
-            if not article.get('description'):
-                continue
-
-            text_to_analyze = article['title'] + ". " + article['description']
-            # Truncate text to fit model's max length
-            result = sentiment_analyzer(text_to_analyze[:512])[0]
-            
-            article['sentiment'] = result['label'].lower()
-            article['sentiment_score'] = result['score']
-            analyzed_articles.append(article)
-            sentiment_scores[result['label'].lower()] += 1
-
-        # Create a summary
-        total_analyzed = len(analyzed_articles)
-        summary = {
-            'positive_count': sentiment_scores['positive'],
-            'neutral_count': sentiment_scores['neutral'],
-            'negative_count': sentiment_scores['negative'],
-            'total_count': total_analyzed,
-            'positive_pct': (sentiment_scores['positive'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
-            'neutral_pct': (sentiment_scores['neutral'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
-            'negative_pct': (sentiment_scores['negative'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
-        }
-
-        return {"articles": analyzed_articles, "summary": summary}
-
-    except Exception as e:
-        logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
-        return {"error": str(e)}
-
-# --- Helper functions (no changes) ---
 def _pick_row(df: pd.DataFrame, candidates: List[str]) -> Optional[pd.Series]:
     if df is None or df.empty: return None
     clean_lower_index = df.index.str.lower().str.strip()
@@ -152,7 +158,7 @@ def _get_logo_url(info: dict) -> Optional[str]:
 @lru_cache(maxsize=32)
 def get_revenue_series(ticker: str) -> pd.Series:
     try:
-        tkr = yf.Ticker(ticker)
+        tkr = yfinance.Ticker(ticker)
         fin = tkr.financials
         if fin is not None and not fin.empty:
             revenue = _pick_row(fin, FIN_KEYS["revenue"])
@@ -166,7 +172,7 @@ def get_revenue_series(ticker: str) -> pd.Series:
 def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
     if not tickers: return pd.DataFrame()
     try:
-        data = yf.download(list(tickers), period=period, auto_adjust=True, progress=False)
+        data = yfinance.download(list(tickers), period=period, auto_adjust=True, progress=False)
         if data.empty: return pd.DataFrame()
         prices = data['Close']
         if isinstance(prices, pd.Series): prices = prices.to_frame(name=tickers[0])
@@ -180,7 +186,7 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
     all_data = []
     for ticker in tickers:
         try:
-            tkr = yf.Ticker(ticker)
+            tkr = yfinance.Ticker(ticker)
             info = tkr.info
             if not info or info.get('quoteType') != 'EQUITY': continue
             logo_url, revenue_series = _get_logo_url(info), get_revenue_series(ticker)
@@ -207,23 +213,20 @@ def get_scatter_data(tickers: tuple) -> pd.DataFrame:
     scatter_data = []
     for ticker in tickers:
         try:
-            info = yf.Ticker(ticker).info
+            info = yfinance.Ticker(ticker).info
             scatter_data.append({'Ticker': ticker, 'EV/EBITDA': info.get('enterpriseToEbitda'), 'EBITDA Margin': info.get('ebitdaMargins')})
         except Exception as e: logging.warning(f"Could not fetch scatter data for {ticker}: {e}")
     return pd.DataFrame(scatter_data).dropna()
 
-# --- [MODIFIED] Main function to integrate sentiment analysis ---
 @lru_cache(maxsize=32)
 def get_deep_dive_data(ticker: str) -> dict:
     try:
-        tkr = yf.Ticker(ticker)
+        tkr = yfinance.Ticker(ticker)
         info = tkr.info
         if not info or info.get('quoteType') != 'EQUITY': return {"error": "Invalid ticker or no data available."}
 
-        # --- [NEW] Call the sentiment analysis function ---
         company_name = info.get('longName', ticker)
         sentiment_data = get_news_and_sentiment(company_name)
-        # --- [END NEW] ---
 
         logo_url = _get_logo_url(info)
         def format_large_number(n):
@@ -244,7 +247,7 @@ def get_deep_dive_data(ticker: str) -> dict:
             "market_cap_str": format_large_number(info.get('marketCap')), "target_mean_price": info.get('targetMeanPrice'),
             "recommendation_key": info.get('recommendationKey', 'N/A').replace('_', ' ').title(),
             "key_stats": { "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A", "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A", "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A", "Dividend Yield": f"{info.get('dividendYield')*100:.2f}%" if info.get('dividendYield') else "N/A", },
-            "sentiment_data": sentiment_data # <-- [NEW] Add sentiment data to the result
+            "sentiment_data": sentiment_data
         }
         
         income_stmt_quarterly = tkr.quarterly_financials.iloc[:, :16]
@@ -289,7 +292,6 @@ def get_deep_dive_data(ticker: str) -> dict:
         logging.error(f"Critical failure in get_deep_dive_data for {ticker}: {e}", exc_info=True)
         return {"error": str(e)}
 
-# --- Unchanged functions below ---
 @lru_cache(maxsize=32)
 def calculate_dcf_intrinsic_value(
     ticker: str,
@@ -300,7 +302,7 @@ def calculate_dcf_intrinsic_value(
     ASSUMED_PERPETUAL_GROWTH = perpetual_growth_rate if perpetual_growth_rate is not None else 0.025
     PROJECTION_YEARS, ASSUMED_MARKET_RETURN = 5, 0.08
     try:
-        ticker_obj, info = yf.Ticker(ticker), yf.Ticker(ticker).info
+        ticker_obj, info = yfinance.Ticker(ticker), yfinance.Ticker(ticker).info
         if not info or not info.get('sharesOutstanding'): return {'Ticker': ticker, 'error': 'Missing shares outstanding or basic info.'}
         income_stmt, balance_sheet, cashflow = ticker_obj.financials, ticker_obj.balance_sheet, ticker_obj.cashflow
         if any(df.empty for df in [income_stmt, balance_sheet, cashflow]): return {'Ticker': ticker, 'error': 'One or more financial statements are empty.'}
@@ -333,7 +335,7 @@ def calculate_dcf_intrinsic_value(
             if any(v is None for v in [beta, market_cap, total_debt, interest_expense]):
                 return {'Ticker': ticker, 'error': 'Missing data for automatic WACC calculation.'}
             cost_of_debt_rd = (interest_expense / total_debt) if total_debt != 0 else 0.05
-            tnx_history = yf.Ticker('^TNX').history(period='1d')
+            tnx_history = yfinance.Ticker('^TNX').history(period='1d')
             risk_free_rate = (tnx_history['Close'].iloc[0] / 100) if not tnx_history.empty else 0.04
             cost_of_equity_re = risk_free_rate + beta * (ASSUMED_MARKET_RETURN - risk_free_rate)
             total_capital = market_cap + total_debt
@@ -393,7 +395,7 @@ def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_grow
     """
     try:
         eps_growth_rate_decimal = eps_growth_rate / 100.0
-        tkr = yf.Ticker(ticker)
+        tkr = yfinance.Ticker(ticker)
         info = tkr.info
         current_price = info.get('currentPrice') or info.get('previousClose')
         trailing_eps = info.get('trailingEps')

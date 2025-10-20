@@ -48,43 +48,45 @@ def create_sentiment_layout(sentiment_data):
     
     news_items = []
     for article in articles[:7]:
-        if not article.get('description'):
+        title = article.get('title')
+        published_at = article.get('publishedAt')
+        description = article.get('description')
+        if not all([title, published_at, description]):
             continue
-            
-        published_dt = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
+
+        published_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
         published_at_str = f"{published_dt.strftime('%b %d, %Y, %I:%M %p')}"
         sentiment_label = article.get('sentiment', 'neutral')
         
         news_card = dbc.Card(
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dbc.Badge(sentiment_label.upper(), color=sentiment_color_map[sentiment_label], className="p-2"),
-                        width="auto",
-                        className="d-flex align-items-center"
-                    ),
-                    dbc.Col(
-                        [
-                            html.A(
-                                html.H6(article['title'], className="mb-1"),
-                                href=article['url'],
-                                target="_blank",
-                                className="news-headline-link"
-                            ),
-                            html.P(
-                                f"{published_at_str} | Source: {article['source']['name']}",
-                                className="small text-muted mb-0"
-                            ),
-                        ],
-                        width=True
-                    ),
-                ],
-                align="center",
+            dbc.CardBody(
+                # Use inline style to guarantee the alignment
+                html.Div(
+                    [
+                        html.Div(
+                            dbc.Badge(sentiment_label, color=sentiment_color_map.get(sentiment_label, "secondary"), className="p-2 me-2")
+                        ),
+                        html.Div(
+                            [
+                                html.A(
+                                    html.P(title, className="mb-1"),
+                                    href=article.get('url'),
+                                    target="_blank",
+                                    className="news-headline-link"
+                                ),
+                                html.P(
+                                    f"{published_at_str} | Source: {article.get('source', {}).get('name')}",
+                                    className="small text-muted mb-0"
+                                ),
+                            ],
+                            className="flex-grow-1"
+                        ),
+                    ],
+                    style={'display': 'flex', 'align-items': 'flex-start'}
+                )
             ),
-            body=True,
             className="mb-2 news-item-card"
         )
-
         news_items.append(news_card)
 
     return html.Div([

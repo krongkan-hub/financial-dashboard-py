@@ -22,22 +22,18 @@
 .news-headline-link {
     text-decoration: none !important;
     color: inherit;
-    font-weight: 600;
 }
 
-/* Target the H6 inside the link to make it bigger */
-.news-headline-link h6 {
-    font-size: 1.1rem; /* Slightly larger font size */
+/* Target the P inside the link to make it bold */
+.news-headline-link p {
+    font-weight: 600; /* Make headline bold */
+    font-family: inherit !important;
+    letter-spacing: normal;
 }
 
 .news-headline-link:hover {
     color: #0d6efd;
     text-decoration: underline !important;
-}
-
-/* Force news card to inherit the main font */
-.news-item-card, .news-item-card * {
-    font-family: inherit !important;
 }
 /* --- End of modified styles --- */
 

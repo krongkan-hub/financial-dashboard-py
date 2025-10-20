@@ -1,4 +1,4 @@
-# data_handler.py (Final Attempt with Tiny Model)
+# data_handler.py (Final Version with Hugging Face API)
 
 import pandas as pd
 import yfinance as yf
@@ -9,51 +9,53 @@ import logging
 import warnings
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
-
-# --- [MODIFIED] Imports for TINY Sentiment Analysis ---
-from config import Config
-from newsapi import NewsApiClient
-from transformers import pipeline # นำ pipeline กลับมา
+import requests 
+import os
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# --- [MODIFIED] Initialize NewsAPI and TINY Hugging Face Model ---
+from config import Config
+from newsapi import NewsApiClient
+
 if Config.NEWS_API_KEY:
     newsapi = NewsApiClient(api_key=Config.NEWS_API_KEY)
 else:
     newsapi = None
     logging.warning("NEWS_API_KEY not found in config. News fetching will be disabled.")
 
-# Load the TINY sentiment analysis model
-try:
-    sentiment_analyzer = pipeline(
-        "sentiment-analysis",
-        model="pysentimiento/bert-tiny-sentiment-analysis" # <-- เปลี่ยนเป็นโมเดลขนาดเล็กจิ๋ว
-    )
-except Exception as e:
-    sentiment_analyzer = None
-    logging.error(f"Failed to load Hugging Face sentiment model: {e}", exc_info=True)
+def analyze_sentiment_via_api(text_to_analyze: str) -> dict:
+    # URL ชี้ไปที่โมเดลการเงินตัวแรกสุดที่แม่นยำกว่า
+    API_URL = "https://api-inference.huggingface.co/models/mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
+    hf_token = os.environ.get('HUGGING_FACE_TOKEN')
+    if not hf_token:
+        logging.error("HUGGING_FACE_TOKEN environment variable not set.")
+        return {'label': 'neutral', 'score': 0.0}
+        
+    headers = {"Authorization": f"Bearer {hf_token}"}
+    payload = {"inputs": text_to_analyze[:512]}
+    
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        result = response.json()
+        
+        if result and isinstance(result, list) and isinstance(result[0], list):
+            best_prediction = max(result[0], key=lambda x: x['score'])
+            return {'label': best_prediction['label'].lower(), 'score': best_prediction['score']}
+    except Exception as e:
+        logging.error(f"API request failed or parsing failed: {e}")
+        
+    return {'label': 'neutral', 'score': 0.0}
 
-FIN_KEYS = {
-    "revenue": ["Total Revenue", "Revenues", "Revenue"],
-    "cost_of_revenue": ["Cost Of Revenue", "Cost of Revenue", "Cost Of Goods Sold"],
-    "gross_profit": ["Gross Profit"],
-    "op_income": ["Operating Income", "Operating Income or Loss", "Ebit", "Earnings Before Interest and Taxes"],
-    "net_income": ["Net Income", "Net Income From Continuing Ops", "Net Income Applicable To Common Shares"],
-}
-CF_KEYS = { "cfo": ["Total Cash From Operating Activities", "Operating Cash Flow"], "capex": ["Capital Expenditures"] }
-
-# --- [REVERTED] Function to get and analyze news sentiment using the local model ---
 @lru_cache(maxsize=32)
 def get_news_and_sentiment(company_name: str) -> dict:
-    if not newsapi or not sentiment_analyzer:
-        return {"error": "News or sentiment analysis service is not configured."}
+    if not newsapi or not os.environ.get('HUGGING_FACE_TOKEN'):
+        return {"error": "News service or Hugging Face Token is not configured."}
 
     try:
         to_date = datetime.now()
         from_date = to_date - timedelta(days=7)
-        
         all_articles = newsapi.get_everything(
             q=f'"{company_name}"', language='en', sort_by='relevancy',
             from_param=from_date.strftime('%Y-%m-%d'), to=to_date.strftime('%Y-%m-%d'),
@@ -68,18 +70,13 @@ def get_news_and_sentiment(company_name: str) -> dict:
         
         for article in all_articles['articles']:
             if not article.get('description'): continue
-
             text_to_analyze = article['title'] + ". " + article['description']
-            result = sentiment_analyzer(text_to_analyze[:512])[0]
+            result = analyze_sentiment_via_api(text_to_analyze)
             
-            # แปลงผลลัพธ์จากโมเดลใหม่ (POS, NEU, NEG) ให้เป็นรูปแบบเดิม
-            label_map = {'POS': 'positive', 'NEU': 'neutral', 'NEG': 'negative'}
-            final_label = label_map.get(result['label'], 'neutral')
-
-            article['sentiment'] = final_label
+            article['sentiment'] = result['label']
             article['sentiment_score'] = result['score']
             analyzed_articles.append(article)
-            sentiment_scores[final_label] += 1
+            sentiment_scores[result['label']] += 1
 
         total_analyzed = len(analyzed_articles)
         summary = {
@@ -90,7 +87,6 @@ def get_news_and_sentiment(company_name: str) -> dict:
             'negative_pct': (sentiment_scores['negative'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
         }
         return {"articles": analyzed_articles, "summary": summary}
-
     except Exception as e:
         logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
         return {"error": str(e)}

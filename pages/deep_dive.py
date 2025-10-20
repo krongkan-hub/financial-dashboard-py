@@ -1,5 +1,4 @@
-# krongkan-hub/financial-dashboard-py/financial-dashboard-py-7001da7059918cf23cef631d9e329fe7540d2db7/pages/deep_dive.py
-# pages/deep_dive.py (FINAL FIX - Decoupling Web App from Task Code & Syntax Correction)
+# pages/deep_dive.py (CHARTS Tab Removed)
 
 import dash
 from dash import dcc, html, dash_table
@@ -9,141 +8,63 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import plotly.express as px
-import json
 import numpy as np
 from datetime import datetime
 import yfinance as yf
 from itertools import groupby
 
-# --- [MODIFICATION 1] ---
-# เราจะ import แค่ celery instance ไม่ใช่ task โดยตรง
-# เพื่อป้องกันไม่ให้ Web App โหลดโค้ดของ task ที่หนักๆ เข้ามา
 from celery_worker import celery
-# --- [END MODIFICATION 1] ---
-
-from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url
+from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url, get_news_and_sentiment
 
 # ==============================================================================
-# SECTION 1: Layout Generating Functions (No callbacks here)
+# SECTION 1: Layout Generating Functions
 # ==============================================================================
 
 def create_sentiment_layout(sentiment_data):
     if not sentiment_data or sentiment_data.get("error"):
-        error_msg = sentiment_data.get("error", "Could not retrieve news.")
-        return dbc.Alert(f"Error: {error_msg}", color="danger")
-
-    summary = sentiment_data.get("summary", {})
-    articles_raw = sentiment_data.get("articles", [])
-
-    if not articles_raw:
-        return dbc.Alert("No recent news articles found.", color="info")
-
+        return dbc.Alert(f"Error: {sentiment_data.get('error', 'Could not retrieve news.')}", color="danger")
+    summary, articles_raw = sentiment_data.get("summary", {}), sentiment_data.get("articles", [])
+    if not articles_raw: return dbc.Alert("No recent news articles found.", color="info")
+    
     processed_articles = []
     for article in articles_raw:
-        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]):
-            continue
+        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]): continue
         try:
             article['published_dt'] = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
             processed_articles.append(article)
-        except (ValueError, TypeError):
-            continue
-
+        except (ValueError, TypeError): continue
     processed_articles.sort(key=lambda x: x['published_dt'], reverse=True)
-
-    progress_bar = dbc.Progress(
-        [
-            dbc.Progress(value=summary.get('positive_pct', 0), color="success", bar=True, label=f"{summary.get('positive_pct', 0):.1f}%"),
-            dbc.Progress(value=summary.get('neutral_pct', 0), color="warning", bar=True, label=f"{summary.get('neutral_pct', 0):.1f}%"),
-            dbc.Progress(value=summary.get('negative_pct', 0), color="danger", bar=True, label=f"{summary.get('negative_pct', 0):.1f}%"),
-        ], style={"height": "25px", "fontSize": "0.85rem"}
-    )
+    
+    progress_bar = dbc.Progress([
+        dbc.Progress(value=summary.get('positive_pct', 0), color="success", bar=True, label=f"{summary.get('positive_pct', 0):.1f}%"),
+        dbc.Progress(value=summary.get('neutral_pct', 0), color="warning", bar=True, label=f"{summary.get('neutral_pct', 0):.1f}%"),
+        dbc.Progress(value=summary.get('negative_pct', 0), color="danger", bar=True, label=f"{summary.get('negative_pct', 0):.1f}%"),
+    ], style={"height": "25px", "fontSize": "0.85rem"})
     
     sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
-    
     grouped_layout_items = []
     for article_date, articles_on_day in groupby(processed_articles[:10], key=lambda x: x['published_dt'].date()):
-        
-        grouped_layout_items.append(
-            html.H6(article_date.strftime('%B %d, %Y'), className="text-muted mt-4 mb-3")
-        )
-        
+        grouped_layout_items.append(html.H6(article_date.strftime('%B %d, %Y'), className="text-muted mt-4 mb-3"))
         for article in articles_on_day:
             published_at_str = f"{article['published_dt'].strftime('%I:%M %p')} | Source: {article.get('source', {}).get('name')}"
             sentiment_label = article.get('sentiment', 'neutral')
+            card_content = dbc.CardBody(html.Div([
+                html.Div(dbc.Badge(sentiment_label, color=sentiment_color_map.get(sentiment_label, "secondary"), className="p-2 me-3 sentiment-badge-fixed"), className="flex-shrink-0"),
+                html.Div([
+                    html.P(article.get('title'), className="mb-1 news-headline-text"),
+                    html.P(published_at_str, className="small text-muted mb-0"),
+                ], className="flex-grow-1"),
+            ], className="news-item-container"))
+            grouped_layout_items.append(html.A(dbc.Card(card_content, className="mb-2 news-item-card"), href=article.get('url'), target="_blank", className="card-link-wrapper"))
             
-            card_content = dbc.CardBody(
-                html.Div(
-                    [
-                        html.Div(
-                            dbc.Badge(
-                                sentiment_label, 
-                                color=sentiment_color_map.get(sentiment_label, "secondary"), 
-                                className="p-2 me-3 sentiment-badge-fixed"
-                            ),
-                            className="flex-shrink-0"
-                        ),
-                        html.Div(
-                            [
-                                html.P(article.get('title'), className="mb-1 news-headline-text"),
-                                html.P(published_at_str, className="small text-muted mb-0"),
-                            ],
-                            className="flex-grow-1"
-                        ),
-                    ],
-                    className="news-item-container"
-                )
-            )
-            
-            clickable_card = html.A(
-                dbc.Card(card_content, className="mb-2 news-item-card"),
-                href=article.get('url'),
-                target="_blank",
-                className="card-link-wrapper"
-            )
-            
-            grouped_layout_items.append(clickable_card)
-
-    return html.Div([
-        html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"),
-        progress_bar,
-        html.Hr(),
-        *grouped_layout_items
-    ])
-
-def create_charts_layout(ticker: str):
-    """Generates the layout for the 'Charts' tab."""
-    data = get_deep_dive_data(ticker)
-    
-    financial_trends = data.get("financial_trends", pd.DataFrame())
-    margin_trends = data.get("margin_trends", pd.DataFrame())
-    
-    fig_trends = make_subplots(specs=[[{"secondary_y": True}]])
-    if not financial_trends.empty:
-        fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends.get('Revenue'), name='Revenue', marker_color='royalblue'), secondary_y=False)
-        fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends.get('Net Income'), name='Net Income', mode='lines+markers', line=dict(color='darkorange')), secondary_y=True)
-    fig_trends.update_layout(title_text='Quarterly Financial Trends', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
-    fig_trends.update_yaxes(title_text="Revenue ($)", secondary_y=False, rangemode='tozero')
-    fig_trends.update_yaxes(title_text="Net Income ($)", secondary_y=True, rangemode='tozero', showgrid=False)
-
-    if not margin_trends.empty:
-        fig_margins = px.line(margin_trends, markers=True, title="Quarterly Profitability Margins")
-        fig_margins.update_layout(yaxis_tickformat=".2%", legend_title_text=None, yaxis_title='Percentage', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
-        margin_graph = dcc.Graph(figure=fig_margins)
-    else:
-        margin_graph = dbc.Alert("Margin data not available.", color="info")
-
-    return dbc.Row([dbc.Col(dcc.Graph(figure=fig_trends), md=6), dbc.Col(margin_graph, md=6)], className="mt-3")
+    return html.Div([html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"), progress_bar, html.Hr(), *grouped_layout_items])
 
 def create_technicals_layout(ticker: str):
-    """Generates the layout for the 'Technicals' tab."""
     data = get_deep_dive_data(ticker)
     price_history = data.get("price_history")
-    
     if price_history is None or price_history.empty:
         return dbc.Alert("Price history is not available.", color="warning")
-
     tech_data = get_technical_analysis_data(price_history)
-    
     df = tech_data['data'].iloc[-365*2:]
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
     fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
@@ -166,122 +87,63 @@ def create_technicals_layout(ticker: str):
 
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
-    card_title_content = [title]
     return dbc.Card(dbc.CardBody([
-        html.H6(card_title_content, className="metric-card-title"),
+        html.H6(title, className="metric-card-title"),
         html.P(value, className="metric-card-value"),
     ]), className=f"metric-card h-100 {className}")
 
 def create_deep_dive_layout(ticker=None):
     if not ticker:
-        return dbc.Container([
-            dcc.Store(id='sentiment-task-id-store'),
-            dcc.Interval(id='sentiment-task-interval', disabled=True),
-            html.P("Please provide a ticker by navigating from the main page.")
-        ], className="p-5 text-center")
+        return dbc.Container([html.P("Please provide a ticker.")], className="p-5 text-center")
     
     try:
-        tkr = yf.Ticker(ticker)
-        info = tkr.info
+        info = yf.Ticker(ticker).info
         if not info or info.get('quoteType') != 'EQUITY':
-             return dbc.Container([
-                dcc.Store(id='sentiment-task-id-store'),
-                dcc.Interval(id='sentiment-task-interval', disabled=True),
-                html.H2(f"Data Error for {ticker}", className="text-danger mt-5"),
-                html.P("Invalid ticker or no data available."),
-                dcc.Link("Go back to Dashboard", href="/")
-             ], fluid=True, className="mt-5 text-center")
-
-        logo_url = _get_logo_url(info)
-        company_name = info.get('longName', ticker)
-
-        current_price = info.get('currentPrice', 0)
-        previous_close = info.get('previousClose', 1)
+             return dbc.Container([html.H2(f"Data Error for {ticker}"), html.P("Invalid ticker."), dcc.Link("Go back", href="/")], fluid=True, className="mt-5 text-center")
+        
+        logo_url, company_name = _get_logo_url(info), info.get('longName', ticker)
+        current_price, previous_close = info.get('currentPrice', 0), info.get('previousClose', 1)
         daily_change = current_price - previous_close
         daily_change_pct = (daily_change / previous_close) * 100 if previous_close != 0 else 0
-        
         def format_large_number(n):
             if pd.isna(n) or n is None: return "N/A"
             if abs(n) >= 1e12: return f'${n/1e12:,.2f}T'
             if abs(n) >= 1e9: return f'${n/1e9:,.2f}B'
-            if abs(n) >= 1e6: return f'${n/1e6:,.2f}M'
-            return f'${n:,.0f}'
-
-        data = {
-            "company_name": info.get('longName', ticker),
-            "exchange": info.get('exchange', 'N/A'),
-            "logo_url": logo_url,
-            "current_price": current_price,
-            "daily_change_str": f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f}",
-            "daily_change_pct_str": f"{'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%",
-            "market_cap_str": format_large_number(info.get('marketCap')),
-            "target_mean_price": info.get('targetMeanPrice'),
-            "recommendation_key": info.get('recommendationKey', 'N/A').replace('_', ' ').title(),
-            "key_stats": {
-                "P/E Ratio": f"{info.get('trailingPE'):.2f}" if info.get('trailingPE') else "N/A",
-                "Forward P/E": f"{info.get('forwardPE'):.2f}" if info.get('forwardPE') else "N/A",
-                "Dividend Yield": f"{info.get('dividendYield',0)*100:.2f}%" if info.get('dividendYield') else "N/A",
-                "PEG Ratio": f"{info.get('pegRatio'):.2f}" if info.get('pegRatio') else "N/A"
-            },
-            "business_summary": info.get('longBusinessSummary', 'Business summary not available.')
-        }
-
+            return f'${n/1e6:,.2f}M'
+        
     except Exception as e:
-         return dbc.Container([
-            dcc.Store(id='sentiment-task-id-store'),
-            dcc.Interval(id='sentiment-task-interval', disabled=True),
-            html.H2(f"Data Error for {ticker}", className="text-danger mt-5"),
-            html.P(f"Could not retrieve initial data. Reason: {e}"),
-            dcc.Link("Go back to Dashboard", href="/")
-        ], fluid=True, className="mt-5 text-center")
-
+         return dbc.Container([html.H2(f"Data Error for {ticker}"), html.P(f"Reason: {e}"), dcc.Link("Go back", href="/")], fluid=True, className="mt-5 text-center")
 
     marquee = dbc.Row([
-        dbc.Col(html.Img(src=data.get('logo_url', '/assets/placeholder_logo.png'), className="company-logo"), width="auto", align="center"),
-        dbc.Col([
-            html.H1(data.get('company_name', ticker), className="company-name mb-0"),
-            html.P(f"{data.get('exchange', '')}: {ticker}", className="text-muted small")
-        ], width=True, align="center"),
-        dbc.Col(
-            html.Div([
-                html.H2(f"${data.get('current_price', 0):,.2f}", className="price-display mb-0"),
-                html.P(f"{data.get('daily_change_str', 'N/A')} ({data.get('daily_change_pct_str', 'N/A')})",
-                    className=f"price-change {'price-positive' if daily_change >= 0 else 'price-negative'}")
-            ], className="text-end"),
-        width="auto", align="center")
+        dbc.Col(html.Img(src=logo_url or '/assets/placeholder_logo.png', className="company-logo"), width="auto", align="center"),
+        dbc.Col([html.H1(company_name, className="company-name mb-0"), html.P(f"{info.get('exchange', '')}: {ticker}", className="text-muted small")], width=True, align="center"),
+        dbc.Col(html.Div([html.H2(f"${current_price:,.2f}", className="price-display mb-0"), html.P(f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f} ({'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%)", className=f"price-change {'price-positive' if daily_change >= 0 else 'price-negative'}")], className="text-end"), width="auto", align="center")
     ], align="center", className="marquee-header g-3")
 
-    key_stats = data.get("key_stats", {})
-    target_price = data.get('target_mean_price')
-    target_price_str = f"${target_price:,.2f}" if target_price is not None and pd.notna(target_price) else "N/A"
-    reco_key = data.get('recommendation_key', "N/A")
-    all_cards = [
-        create_metric_card("Market Cap", data.get('market_cap_str')),
-        create_metric_card("Analyst Target", target_price_str, "bg-light-subtle"),
-        create_metric_card("Recommendation", reco_key, "bg-light-subtle"),
-        create_metric_card("P/E Ratio", key_stats.get('P/E Ratio')),
-        create_metric_card("Forward P/E", key_stats.get('Forward P/E')),
-        create_metric_card("Dividend Yield", key_stats.get('Dividend Yield')),
-        create_metric_card("PEG Ratio", key_stats.get('PEG Ratio')),
+    key_stats = info
+    cards_to_show = [
+        create_metric_card("Market Cap", format_large_number(key_stats.get('marketCap'))),
+        create_metric_card("Analyst Target", f"${key_stats.get('targetMeanPrice'):,.2f}" if key_stats.get('targetMeanPrice') else "N/A", "bg-light-subtle"),
+        create_metric_card("Recommendation", key_stats.get('recommendationKey', 'N/A').replace('_', ' ').title(), "bg-light-subtle"),
+        create_metric_card("P/E Ratio", f"{key_stats.get('trailingPE'):.2f}" if key_stats.get('trailingPE') else "N/A"),
+        create_metric_card("Forward P/E", f"{key_stats.get('forwardPE'):.2f}" if key_stats.get('forwardPE') else "N/A"),
+        create_metric_card("Dividend Yield", f"{key_stats.get('dividendYield', 0)*100:.2f}%" if key_stats.get('dividendYield') else "N/A"),
+        create_metric_card("PEG Ratio", f"{key_stats.get('pegRatio'):.2f}" if key_stats.get('pegRatio') else "N/A"),
     ]
-    cards_to_show = [card for card in all_cards if card is not None]
     at_a_glance = html.Div([
-        dbc.Row([dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show], className="g-3"),
-        dbc.Card(dbc.CardBody([html.H5("Business Summary", className="card-title"), html.P(data.get('business_summary', 'Business summary not available.'), className="small")]))
+        dbc.Row([dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show if card is not None], className="g-3"),
+        dbc.Card(dbc.CardBody([html.H5("Business Summary", className="card-title"), html.P(info.get('longBusinessSummary', 'Not available.'), className="small")]))
     ])
 
     analysis_workspace = html.Div([
         html.Div(className="custom-tabs-container mt-4", children=[
             dbc.Tabs([
-                    dbc.Tab(label="CHARTS", tab_id="tab-charts-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"),
                     dbc.Tab(label="NEWS", tab_id="tab-sentiment-deep-dive", label_class_name="fw-bold"),
                 ],
                 id="deep-dive-main-tabs",
-                active_tab="tab-charts-deep-dive",
-                persistence=True,
-                persistence_type='session'
+                active_tab="tab-technicals-deep-dive", # <-- Default to Technicals
             )
         ]),
         dcc.Store(id='sentiment-task-id-store'),
@@ -307,57 +169,25 @@ def create_deep_dive_layout(ticker=None):
 )
 def render_master_tab_content(active_tab, store_data):
     if not store_data or not store_data.get('ticker'):
-        return dbc.Alert("Ticker not found in store.", color="danger"), dash.no_update, True
+        return dbc.Alert("Ticker not found.", color="danger"), dash.no_update, True
 
-    ticker = store_data.get('ticker')
+    ticker, company_name = store_data.get('ticker'), store_data.get('company_name')
     
-    # --- NEWS TAB ---
     if active_tab == "tab-sentiment-deep-dive":
-        company_name = store_data.get('company_name')
-        if not company_name:
-            return dbc.Alert("Company name not found.", color="warning"), dash.no_update, True
-        
-        # --- [MODIFICATION 2] ---
-        # เราจะส่ง Task โดยใช้ชื่อของมัน (string) เพื่อไม่ให้ Web App ต้อง import task โดยตรง
-        # 'tasks.get_news_and_sentiment_task' คือ 'ชื่อไฟล์.ชื่อฟังก์ชัน'
+        if not company_name: return dbc.Alert("Company name not found.", color="warning"), dash.no_update, True
         task = celery.send_task('tasks.get_news_and_sentiment_task', args=[company_name])
-        # --- [END MODIFICATION 2] ---
+        return html.Div([dbc.Spinner(color="primary")], className="text-center p-5", id="sentiment-content-target"), {'task_id': task.id}, False
 
-        loading_spinner = html.Div(
-            [dbc.Spinner(color="primary", children="Analyzing news sentiment...")],
-            className="text-center p-5",
-            id="sentiment-content-target"
-        )
-        return loading_spinner, {'task_id': task.id}, False # Enable polling
-
-    # --- CHARTS TAB ---
-    elif active_tab == "tab-charts-deep-dive":
-        return dcc.Loading(create_charts_layout(ticker)), dash.no_update, True
-
-    # --- TECHNICALS TAB ---
     elif active_tab == "tab-technicals-deep-dive":
         return dcc.Loading(create_technicals_layout(ticker)), dash.no_update, True
 
-    # --- FINANCIALS TAB ---
     elif active_tab == "tab-financials-deep-dive":
-        financials_layout = html.Div([
-            dbc.Row([
-                dbc.Col(dcc.Dropdown(
-                    id='financial-statement-dropdown',
-                    options=[
-                        {'label': 'Income Statement', 'value': 'income'},
-                        {'label': 'Balance Sheet', 'value': 'balance'},
-                        {'label': 'Cash Flow', 'value': 'cashflow'},
-                    ], value='income', clearable=False,
-                ), width=12, md=4, lg=3)
-            ], className="mb-4 mt-2"),
+        return html.Div([
+            dbc.Row(dbc.Col(dcc.Dropdown(id='financial-statement-dropdown', options=[{'label': 'Income Statement', 'value': 'income'},{'label': 'Balance Sheet', 'value': 'balance'},{'label': 'Cash Flow', 'value': 'cashflow'},], value='income', clearable=False), width=12, md=4, lg=3), className="mb-4 mt-2"),
             dcc.Loading(html.Div(id="financial-statement-content"))
-        ])
-        return financials_layout, dash.no_update, True
+        ]), dash.no_update, True
 
-    # Default case (should not happen)
     return html.Div(), dash.no_update, True
-
 
 @dash.callback(
     Output('sentiment-content-target', 'children', allow_duplicate=True),
@@ -367,21 +197,12 @@ def render_master_tab_content(active_tab, store_data):
     prevent_initial_call=True
 )
 def poll_sentiment_task_status(n, task_data):
-    """Polls the Celery task for the news sentiment results."""
-    if not task_data or 'task_id' not in task_data:
-        return dash.no_update, True
-    
-    task_id = task_data['task_id']
-    task = celery.AsyncResult(task_id)
-
+    if not task_data or 'task_id' not in task_data: return dash.no_update, True
+    task = celery.AsyncResult(task_data['task_id'])
     if task.state == 'SUCCESS':
-        result = task.get()
-        return create_sentiment_layout(result), True
-    
+        return create_sentiment_layout(task.get()), True
     elif task.state in ['FAILURE', 'REVOKED']:
-        return dbc.Alert("An error occurred during sentiment analysis.", color="danger"), True
-    
-    # Task is still pending, keep spinner and interval running
+        return dbc.Alert("Error during sentiment analysis.", color="danger"), True
     return dash.no_update, False
 
 @dash.callback(
@@ -390,34 +211,21 @@ def poll_sentiment_task_status(n, task_data):
     State('deep-dive-ticker-store', 'data')
 )
 def render_financial_statement_table(selected_statement, store_data):
-    """Renders the financial data table for the 'Financials' tab."""
-    if not selected_statement or not store_data or not store_data.get('ticker'):
-        return dash.no_update
-        
-    ticker = store_data['ticker']
-    data = get_deep_dive_data(ticker)
+    if not selected_statement or not store_data or not store_data.get('ticker'): return dash.no_update
+    data = get_deep_dive_data(store_data['ticker'])
     statements = data.get("financial_statements", {})
-    df = pd.DataFrame()
-
-    if selected_statement == 'income': df = statements.get('income', pd.DataFrame())
-    elif selected_statement == 'balance': df = statements.get('balance', pd.DataFrame())
-    elif selected_statement == 'cashflow': df = statements.get('cashflow', pd.DataFrame())
-
+    df = statements.get(selected_statement, pd.DataFrame())
     if df.empty: return dbc.Alert("Financial data not available.", color="warning")
 
     df.columns = [col.strftime('%Y-%m-%d') if isinstance(col, pd.Timestamp) else col for col in df.columns]
-
     df_formatted = df.copy()
     for col in df_formatted.columns:
-        numeric_col = pd.to_numeric(df_formatted[col], errors='coerce')
-        df_formatted[col] = numeric_col.apply(
-            lambda x: f"{x/1_000_000:,.1f}M" if pd.notna(x) else "-"
-        )
+        df_formatted[col] = pd.to_numeric(df_formatted[col], errors='coerce').apply(lambda x: f"{x/1e6:,.1f}M" if pd.notna(x) else "-")
     df_reset = df_formatted.reset_index().rename(columns={'index': 'Metric'})
-    columns = [{"name": col, "id": col} for col in df_reset.columns]
-    data = df_reset.to_dict('records')
+    
     return dash_table.DataTable(
-        data=data, columns=columns,
+        data=df_reset.to_dict('records'),
+        columns=[{"name": col, "id": col} for col in df_reset.columns],
         style_header={'backgroundColor': 'transparent','border': '0px','borderBottom': '2px solid #dee2e6','textTransform': 'uppercase','fontWeight': '600'},
         style_cell={'textAlign': 'right','padding': '14px','border': '0px','borderBottom': '1px solid #f0f0f0','fontFamily': 'inherit','fontSize': '0.9rem'},
         style_cell_conditional=[{'if': {'column_id': 'Metric'},'textAlign': 'left','fontWeight': '600','width': '35%'}]

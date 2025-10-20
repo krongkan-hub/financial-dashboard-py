@@ -1,4 +1,4 @@
-# data_handler.py (Final Robust Version)
+# data_handler.py (Corrected Final Version)
 
 import pandas as pd
 import yfinance as yf
@@ -32,32 +32,25 @@ def analyze_sentiment_via_api(text_to_analyze: str) -> dict:
     if not hf_token:
         logging.warning("HUGGING_FACE_TOKEN not found. Returning neutral sentiment.")
         return {'label': 'neutral', 'score': 0.0}
-        
     headers = {"Authorization": f"Bearer {hf_token}"}
     payload = {"inputs": text_to_analyze[:512]}
-    
     try:
         response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
         response.raise_for_status()
         result = response.json()
-        
         if result and isinstance(result, list) and isinstance(result[0], list):
             best_prediction = max(result[0], key=lambda x: x['score'])
             return {'label': best_prediction['label'].lower(), 'score': best_prediction['score']}
     except Exception as e:
         logging.error(f"API request failed or parsing failed: {e}")
-        
     return {'label': 'neutral', 'score': 0.0}
 
 # --- News Fetching Function ---
 @lru_cache(maxsize=32)
 def get_news_and_sentiment(company_name: str) -> dict:
-    if not newsapi:
-        return {"error": "News service is not configured."}
+    if not newsapi: return {"error": "News service is not configured."}
     try:
-        # ... (rest of the function is unchanged)
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=7)
+        to_date, from_date = datetime.now(), datetime.now() - timedelta(days=7)
         all_articles = newsapi.get_everything(q=f'"{company_name}"', language='en', sort_by='relevancy', from_param=from_date.strftime('%Y-%m-%d'), to=to_date.strftime('%Y-%m-%d'), page_size=20)
         if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0: return {"articles": [], "summary": {}}
         analyzed_articles, sentiment_scores = [], {'positive': 0, 'neutral': 0, 'negative': 0}
@@ -80,8 +73,8 @@ def get_news_and_sentiment(company_name: str) -> dict:
         logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
         return {"error": str(e)}
 
-# --- Helper Functions ---
-FIN_KEYS = { "revenue": ["Total Revenue", "Revenues", "Revenue"], "cost_of_revenue": ["Cost Of Revenue", "Cost of Revenue", "Cost Of Goods Sold"], "gross_profit": ["Gross Profit"], "op_income": ["Operating Income", "Operating Income or Loss", "Ebit", "Earnings Before Interest and Taxes"], "net_income": ["Net Income", "Net Income From Continuing Ops", "Net Income Applicable To Common Shares"],}
+# --- Helper Functions & Constants ---
+FIN_KEYS = {"revenue": ["Total Revenue", "Revenues", "Revenue"],"cost_of_revenue": ["Cost Of Revenue", "Cost of Revenue", "Cost Of Goods Sold"],"gross_profit": ["Gross Profit"],"op_income": ["Operating Income", "Operating Income or Loss", "Ebit", "Earnings Before Interest and Taxes"],"net_income": ["Net Income", "Net Income From Continuing Ops", "Net Income Applicable To Common Shares"],}
 CF_KEYS = { "cfo": ["Total Cash From Operating Activities", "Operating Cash Flow"], "capex": ["Capital Expenditures"] }
 
 def _pick_row(df: pd.DataFrame, candidates: List[str]) -> Optional[pd.Series]:
@@ -126,7 +119,7 @@ def _get_logo_url(info: dict) -> Optional[str]:
             except Exception: logo_url = None
     return logo_url
 
-# --- Data Fetching Functions ---
+# --- Core Data Fetching Functions ---
 @lru_cache(maxsize=32)
 def get_revenue_series(ticker: str) -> pd.Series:
     try:
@@ -144,10 +137,9 @@ def get_revenue_series(ticker: str) -> pd.Series:
 def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
     try:
         data = yf.download(list(tickers), period=period, auto_adjust=True, progress=False)
-        if data.empty: return pd.DataFrame()
         prices = data.get('Close', pd.DataFrame())
-        if isinstance(prices, pd.Series): prices = prices.to_frame(name=tickers[0])
         if prices.empty: return pd.DataFrame()
+        if isinstance(prices, pd.Series): prices = prices.to_frame(name=list(tickers)[0])
         rolling_max = prices.cummax()
         return (prices / rolling_max) - 1
     except Exception as e:
@@ -197,33 +189,39 @@ def get_deep_dive_data(ticker: str) -> dict:
         tkr = yf.Ticker(ticker)
         info = tkr.info
         if not info or info.get('quoteType') != 'EQUITY': return {"error": "Invalid ticker or no data available."}
-        # ... (rest of the function is unchanged)
-        company_name, result = info.get('longName', ticker), {"company_name": info.get('longName', ticker)}
+        
+        result = {"info": info} # <-- [FIX] Restored the full info object to the result
+        
         income_stmt_quarterly = tkr.quarterly_financials.iloc[:, :16]
         revenue = _pick_row(income_stmt_quarterly, FIN_KEYS['revenue'])
         net_income = _pick_row(income_stmt_quarterly, FIN_KEYS['net_income'])
+        
         financial_trends = pd.DataFrame({'Revenue': revenue, 'Net Income': net_income}).dropna(how='all')
         if not financial_trends.empty:
             financial_trends.index = pd.to_datetime(financial_trends.index).to_period('Q').strftime('%Y-Q%q')
         result["financial_trends"] = financial_trends.sort_index()
+
         margin_trends = pd.DataFrame(index=financial_trends.index)
         if revenue is not None and not revenue.empty:
             revenue_safe = revenue.replace(0, np.nan)
-            gross_profit, op_income = _pick_row(income_stmt_quarterly, FIN_KEYS['gross_profit']), _pick_row(income_stmt_quarterly, FIN_KEYS['op_income'])
+            gross_profit = _pick_row(income_stmt_quarterly, FIN_KEYS['gross_profit'])
+            op_income = _pick_row(income_stmt_quarterly, FIN_KEYS['op_income'])
             if gross_profit is not None: margin_trends['Gross Margin'] = gross_profit / revenue_safe
             if op_income is not None: margin_trends['Operating Margin'] = op_income / revenue_safe
             if net_income is not None: margin_trends['Net Margin'] = net_income / revenue_safe
         result["margin_trends"] = margin_trends.sort_index().dropna(how='all')
-        result.update({
-            "financial_statements": {"income": tkr.quarterly_financials.iloc[:,:16].dropna(how='all', axis=1), "balance": tkr.quarterly_balance_sheet.iloc[:,:16].dropna(how='all', axis=1), "cashflow": tkr.quarterly_cashflow.iloc[:,:16].dropna(how='all', axis=1)},
-            "price_history": tkr.history(period="5y")
-        })
+
+        result["financial_statements"] = {
+            "income": tkr.quarterly_financials.iloc[:,:16].dropna(how='all', axis=1),
+            "balance": tkr.quarterly_balance_sheet.iloc[:,:16].dropna(how='all', axis=1),
+            "cashflow": tkr.quarterly_cashflow.iloc[:,:16].dropna(how='all', axis=1)
+        }
+        result["price_history"] = tkr.history(period="5y")
         return result
     except Exception as e:
         logging.error(f"Critical failure in get_deep_dive_data for {ticker}: {e}", exc_info=True)
         return {"error": str(e)}
 
-# --- [MODIFIED] Functions with better error handling ---
 @lru_cache(maxsize=32)
 def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perpetual_growth_rate: float, wacc_override: Optional[float]) -> dict:
     try:
@@ -231,7 +229,7 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perp
         info = ticker_obj.info
         if not info: return {'Ticker': ticker, 'error': 'Could not fetch company info from yfinance.'}
         
-        # ... (rest of the DCF logic is unchanged)
+        # ... (rest of the DCF logic is unchanged, it's correct)
         ASSUMED_PERPETUAL_GROWTH, PROJECTION_YEARS, ASSUMED_MARKET_RETURN = perpetual_growth_rate, 5, 0.08
         income_stmt, balance_sheet, cashflow = ticker_obj.financials, ticker_obj.balance_sheet, ticker_obj.cashflow
         if any(df.empty for df in [income_stmt, balance_sheet, cashflow]): return {'Ticker': ticker, 'error': 'Financial statements missing.'}
@@ -240,8 +238,7 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perp
         d_and_a, capex = get_financial_data(last_year_cashflow, ['Depreciation And Amortization', 'Depreciation']), get_financial_data(last_year_cashflow, ['Capital Expenditure', 'CapEx'])
         cash, total_debt = get_financial_data(last_year_balance, ['Cash And Cash Equivalents', 'Cash']), get_financial_data(last_year_balance, ['Total Debt'])
         interest_expense = get_financial_data(last_year_income, ['Interest Expense', 'Interest Expense Net'])
-        market_cap, beta = info.get('marketCap'), info.get('beta')
-        shares_outstanding, current_price = info.get('sharesOutstanding'), info.get('currentPrice') or info.get('previousClose')
+        market_cap, beta, shares_outstanding, current_price = info.get('marketCap'), info.get('beta'), info.get('sharesOutstanding'), info.get('currentPrice') or info.get('previousClose')
         required = [ebit, tax_provision, pretax_income, d_and_a, capex, cash, shares_outstanding, current_price]
         if any(v is None for v in required): return {'Ticker': ticker, 'error': 'Missing essential data for DCF.'}
         tax_rate = (tax_provision / pretax_income) if pretax_income and pretax_income != 0 else 0.21
@@ -273,7 +270,6 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perp
 def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
     if not isinstance(price_history_df, pd.DataFrame) or price_history_df.empty: return {"error": "Price history data is missing."}
     df = price_history_df.copy()
-    # ... (rest of the function is unchanged)
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     df['SMA200'] = df['Close'].rolling(window=200).mean()
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
@@ -298,13 +294,9 @@ def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_grow
         info = yf.Ticker(ticker).info
         if not info:
             return {'error': 'Could not fetch company info from yfinance.'}
-            
-        current_price = info.get('currentPrice') or info.get('previousClose')
-        trailing_eps = info.get('trailingEps')
-        
+        current_price, trailing_eps = info.get('currentPrice') or info.get('previousClose'), info.get('trailingEps')
         if not all([current_price, trailing_eps, trailing_eps > 0]):
             return {'error': 'Missing essential data (Price or EPS) for valuation.'}
-        
         eps_growth_decimal = eps_growth_rate / 100.0
         future_eps = trailing_eps * ((1 + eps_growth_decimal) ** forecast_years)
         target_price = future_eps * terminal_pe

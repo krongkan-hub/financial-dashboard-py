@@ -1,4 +1,4 @@
-# pages/deep_dive.py (Version with Celery Background Task and Layout Fix)
+# pages/deep_dive.py (FINAL FIX - Decoupling Web App from Task Code)
 
 import dash
 from dash import dcc, html, dash_table
@@ -13,14 +13,19 @@ import numpy as np
 from datetime import datetime
 import yfinance as yf
 
-# Import Task ที่เราสร้างขึ้น และ celery instance เพื่อเช็คสถานะ
-from tasks import get_news_and_sentiment_task
+# --- [MODIFICATION 1] ---
+# เราจะ import แค่ celery instance ไม่ใช่ task โดยตรง
+# เพื่อป้องกันไม่ให้ Web App โหลดโค้ดของ task ที่หนักๆ เข้ามา
 from celery_worker import celery
+# --- [END MODIFICATION 1] ---
 
 from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url
 
+# ==============================================================================
+# SECTION 1: Layout Generating Functions (No callbacks here)
+# ==============================================================================
+
 def create_sentiment_layout(sentiment_data):
-    # ฟังก์ชันนี้ไม่มีการเปลี่ยนแปลง
     if not sentiment_data or sentiment_data.get("error"):
         error_msg = sentiment_data.get("error", "Could not retrieve news.")
         return dbc.Alert(f"Error: {error_msg}", color="danger")
@@ -89,6 +94,60 @@ def create_sentiment_layout(sentiment_data):
         *news_items
     ])
 
+def create_charts_layout(ticker: str):
+    """Generates the layout for the 'Charts' tab."""
+    data = get_deep_dive_data(ticker)
+    
+    financial_trends = data.get("financial_trends", pd.DataFrame())
+    margin_trends = data.get("margin_trends", pd.DataFrame())
+    
+    fig_trends = make_subplots(specs=[[{"secondary_y": True}]])
+    if not financial_trends.empty:
+        fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends.get('Revenue'), name='Revenue', marker_color='royalblue'), secondary_y=False)
+        fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends.get('Net Income'), name='Net Income', mode='lines+markers', line=dict(color='darkorange')), secondary_y=True)
+    fig_trends.update_layout(title_text='Quarterly Financial Trends', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
+    fig_trends.update_yaxes(title_text="Revenue ($)", secondary_y=False, rangemode='tozero')
+    fig_trends.update_yaxes(title_text="Net Income ($)", secondary_y=True, rangemode='tozero', showgrid=False)
+
+    if not margin_trends.empty:
+        fig_margins = px.line(margin_trends, markers=True, title="Quarterly Profitability Margins")
+        fig_margins.update_layout(yaxis_tickformat=".2%", legend_title_text=None, yaxis_title='Percentage', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
+        margin_graph = dcc.Graph(figure=fig_margins)
+    else:
+        margin_graph = dbc.Alert("Margin data not available.", color="info")
+
+    return dbc.Row([dbc.Col(dcc.Graph(figure=fig_trends), md=6), dbc.Col(margin_graph, md=6)], className="mt-3")
+
+def create_technicals_layout(ticker: str):
+    """Generates the layout for the 'Technicals' tab."""
+    data = get_deep_dive_data(ticker)
+    price_history = data.get("price_history")
+    
+    if price_history is None or price_history.empty:
+        return dbc.Alert("Price history is not available.", color="warning")
+
+    tech_data = get_technical_analysis_data(price_history)
+    
+    df = tech_data['data'].iloc[-365*2:]
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
+    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], mode='lines', name='EMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], mode='lines', name='SMA 50', line=dict(color='blue', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], mode='lines', name='SMA 200', line=dict(color='purple', width=2)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', name='BB Upper', line=dict(color='gray', width=1, dash='dash')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI'), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=1, row=2, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='red')), row=3, col=1)
+    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', marker_color=np.where(df['MACD_Hist'] > 0, 'green', 'red')), row=3, col=1)
+    fig.update_layout(title_text=f'{ticker} - Technical Analysis', height=800, xaxis_rangeslider_visible=False, legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5))
+    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
+    fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
+    fig.update_yaxes(title_text="MACD", row=3, col=1)
+    return dcc.Graph(figure=fig)
+
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
     card_title_content = [title]
@@ -101,7 +160,6 @@ def create_metric_card(title, value, className=""):
 
 def create_deep_dive_layout(ticker=None):
     if not ticker:
-        # --- [FIX] เพิ่ม Store และ Interval ใน Layout กรณีไม่มี Ticker ---
         return dbc.Container([
             dcc.Store(id='sentiment-task-id-store'),
             dcc.Interval(id='sentiment-task-interval', disabled=True),
@@ -112,7 +170,6 @@ def create_deep_dive_layout(ticker=None):
         tkr = yf.Ticker(ticker)
         info = tkr.info
         if not info or info.get('quoteType') != 'EQUITY':
-             # --- [FIX] เพิ่ม Store และ Interval ใน Layout กรณี Ticker ผิดพลาด ---
              return dbc.Container([
                 dcc.Store(id='sentiment-task-id-store'),
                 dcc.Interval(id='sentiment-task-interval', disabled=True),
@@ -156,7 +213,6 @@ def create_deep_dive_layout(ticker=None):
         }
 
     except Exception as e:
-         # --- [FIX] เพิ่ม Store และ Interval ใน Layout กรณี Exception อื่นๆ ---
          return dbc.Container([
             dcc.Store(id='sentiment-task-id-store'),
             dcc.Interval(id='sentiment-task-interval', disabled=True),
@@ -224,10 +280,10 @@ def create_deep_dive_layout(ticker=None):
         marquee, html.Hr(), at_a_glance, analysis_workspace,
     ], fluid=True, className="p-4 main-content-container")
 
+# ==============================================================================
+# SECTION 2: Dash Callbacks
+# ==============================================================================
 
-# --- [REFACTORED CALLBACK START] ---
-# This single callback replaces the old `render_deep_dive_tab_content` and `start_sentiment_analysis_task` callbacks
-# to fix the "nonexistent object" error.
 @dash.callback(
     Output('deep-dive-tab-content', 'children'),
     Output('sentiment-task-id-store', 'data'),
@@ -235,26 +291,41 @@ def create_deep_dive_layout(ticker=None):
     Input('deep-dive-main-tabs', 'active_tab'),
     State('deep-dive-ticker-store', 'data')
 )
-def render_tab_content_and_handle_sentiment_task(active_tab, store_data):
-    if active_tab == "tab-sentiment-deep-dive":
-        # Logic to start the sentiment task is now here
-        if not store_data or not store_data.get('company_name'):
-            return dbc.Alert("Company name not found.", color="warning"), dash.no_update, True
+def render_master_tab_content(active_tab, store_data):
+    if not store_data or not store_data.get('ticker'):
+        return dbc.Alert("Ticker not found in store.", color="danger"), dash.no_update, True
 
+    ticker = store_data.get('ticker')
+    
+    # --- NEWS TAB ---
+    if active_tab == "tab-sentiment-deep-dive":
         company_name = store_data.get('company_name')
-        task = get_news_and_sentiment_task.delay(company_name)
+        if not company_name:
+            return dbc.Alert("Company name not found.", color="warning"), dash.no_update, True
         
-        # The loading spinner is returned directly as the tab's content
+        # --- [MODIFICATION 2] ---
+        # เราจะส่ง Task โดยใช้ชื่อของมัน (string) เพื่อไม่ให้ Web App ต้อง import task โดยตรง
+        # 'tasks.get_news_and_sentiment_task' คือ 'ชื่อไฟล์.ชื่อฟังก์ชัน'
+        task = celery.send_task('tasks.get_news_and_sentiment_task', args=[company_name])
+        # --- [END MODIFICATION 2] ---
+
         loading_spinner = html.Div(
             [dbc.Spinner(color="primary", children="Analyzing news sentiment...")],
             className="text-center p-5",
-            id="sentiment-content-target"  # Assign the ID here so the polling callback can find it
+            id="sentiment-content-target"
         )
-        # Return the spinner, the new task ID, and enable the polling interval
-        return loading_spinner, {'task_id': task.id}, False
+        return loading_spinner, {'task_id': task.id}, False # Enable polling
 
+    # --- CHARTS TAB ---
+    elif active_tab == "tab-charts-deep-dive":
+        return dcc.Loading(create_charts_layout(ticker)), dash.no_update, True
+
+    # --- TECHNICALS TAB ---
+    elif active_tab == "tab-technicals-deep-dive":
+        return dcc.Loading(create_technicals_layout(ticker)), dash.no_update, True
+
+    # --- FINANCIALS TAB ---
     elif active_tab == "tab-financials-deep-dive":
-        # Return the layout for the financials tab
         financials_layout = html.Div([
             dbc.Row([
                 dbc.Col(dcc.Dropdown(
@@ -268,86 +339,10 @@ def render_tab_content_and_handle_sentiment_task(active_tab, store_data):
             ], className="mb-4 mt-2"),
             dcc.Loading(html.Div(id="financial-statement-content"))
         ])
-        # No sentiment task needed, so return no_update and disable the interval
         return financials_layout, dash.no_update, True
 
-    else:
-        # For all other tabs (Charts, Technicals), return a generic loading container
-        # The specific callbacks for these tabs will fill the content.
-        other_layout = dcc.Loading(html.Div(id=f"{active_tab}-content-target"))
-        return other_layout, dash.no_update, True
-# --- [REFACTORED CALLBACK END] ---
-
-
-@dash.callback(
-    Output('tab-charts-deep-dive-content-target', 'children'),
-    Input('deep-dive-main-tabs', 'active_tab'),
-    State('deep-dive-ticker-store', 'data')
-)
-def load_charts_tab(active_tab, store_data):
-    if active_tab != 'tab-charts-deep-dive' or not store_data or not store_data.get('ticker'):
-        return dash.no_update
-    
-    ticker = store_data['ticker']
-    data = get_deep_dive_data(ticker)
-    
-    financial_trends = data.get("financial_trends", pd.DataFrame())
-    margin_trends = data.get("margin_trends", pd.DataFrame())
-    
-    fig_trends = make_subplots(specs=[[{"secondary_y": True}]])
-    if not financial_trends.empty:
-        fig_trends.add_trace(go.Bar(x=financial_trends.index, y=financial_trends.get('Revenue'), name='Revenue', marker_color='royalblue'), secondary_y=False)
-        fig_trends.add_trace(go.Scatter(x=financial_trends.index, y=financial_trends.get('Net Income'), name='Net Income', mode='lines+markers', line=dict(color='darkorange')), secondary_y=True)
-    fig_trends.update_layout(title_text='Quarterly Financial Trends', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
-    fig_trends.update_yaxes(title_text="Revenue ($)", secondary_y=False, rangemode='tozero')
-    fig_trends.update_yaxes(title_text="Net Income ($)", secondary_y=True, rangemode='tozero', showgrid=False)
-
-    if not margin_trends.empty:
-        fig_margins = px.line(margin_trends, markers=True, title="Quarterly Profitability Margins")
-        fig_margins.update_layout(yaxis_tickformat=".2%", legend_title_text=None, yaxis_title='Percentage', legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), margin=dict(t=50, b=50))
-        margin_graph = dcc.Graph(figure=fig_margins)
-    else:
-        margin_graph = dbc.Alert("Margin data not available.", color="info")
-
-    return dbc.Row([dbc.Col(dcc.Graph(figure=fig_trends), md=6), dbc.Col(margin_graph, md=6)], className="mt-3")
-
-@dash.callback(
-    Output('tab-technicals-deep-dive-content-target', 'children'),
-    Input('deep-dive-main-tabs', 'active_tab'),
-    State('deep-dive-ticker-store', 'data')
-)
-def load_technicals_tab(active_tab, store_data):
-    if active_tab != 'tab-technicals-deep-dive' or not store_data or not store_data.get('ticker'):
-        return dash.no_update
-        
-    ticker = store_data['ticker']
-    data = get_deep_dive_data(ticker)
-    price_history = data.get("price_history")
-    
-    if price_history is None or price_history.empty:
-        return dbc.Alert("Price history is not available.", color="warning")
-
-    tech_data = get_technical_analysis_data(price_history)
-    
-    df = tech_data['data'].iloc[-365*2:]
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
-    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], mode='lines', name='EMA 20', line=dict(color='orange', width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], mode='lines', name='SMA 50', line=dict(color='blue', width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], mode='lines', name='SMA 200', line=dict(color='purple', width=2)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', name='BB Upper', line=dict(color='gray', width=1, dash='dash')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI'), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=1, row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], mode='lines', name='MACD', line=dict(color='blue')), row=3, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], mode='lines', name='Signal', line=dict(color='red')), row=3, col=1)
-    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', marker_color=np.where(df['MACD_Hist'] > 0, 'green', 'red')), row=3, col=1)
-    fig.update_layout(title_text=f'{ticker} - Technical Analysis', height=800, xaxis_rangeslider_visible=False, legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5))
-    fig.update_yaxes(title_text="Price ($)", row=1, col=1)
-    fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
-    fig.update_yaxes(title_text="MACD", row=3, col=1)
-    return dcc.Graph(figure=fig)
+    # Default case (should not happen)
+    return html.Div(), dash.no_update, True
 
 
 @dash.callback(
@@ -358,24 +353,21 @@ def load_technicals_tab(active_tab, store_data):
     prevent_initial_call=True
 )
 def poll_sentiment_task_status(n, task_data):
+    """Polls the Celery task for the news sentiment results."""
     if not task_data or 'task_id' not in task_data:
-        # This might happen briefly during tab switches, it's safe to ignore.
         return dash.no_update, True
     
     task_id = task_data['task_id']
     task = celery.AsyncResult(task_id)
 
-    # When the task is done, get the result and disable the interval
     if task.state == 'SUCCESS':
         result = task.get()
         return create_sentiment_layout(result), True
     
-    # If the task fails, show an error and disable the interval
     elif task.state in ['FAILURE', 'REVOKED']:
         return dbc.Alert("An error occurred during sentiment analysis.", color="danger"), True
     
-    # If the task is still running, do nothing and keep the interval enabled
-    # The spinner is already being shown by the main tab-rendering callback
+    # Task is still pending, keep spinner and interval running
     return dash.no_update, False
 
 @dash.callback(
@@ -384,6 +376,7 @@ def poll_sentiment_task_status(n, task_data):
     State('deep-dive-ticker-store', 'data')
 )
 def render_financial_statement_table(selected_statement, store_data):
+    """Renders the financial data table for the 'Financials' tab."""
     if not selected_statement or not store_data or not store_data.get('ticker'):
         return dash.no_update
         

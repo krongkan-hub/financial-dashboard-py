@@ -9,6 +9,7 @@ Flask-SQLAlchemy==3.1.1
 Werkzeug==3.1.1
 python-dotenv==1.1.1
 gunicorn==23.0.0
+gevent==24.2.1
 psycopg2-binary
 # Added for Sentiment Analysis Feature
 transformers==4.42.3

@@ -1,3 +1,4 @@
+# krongkan-hub/financial-dashboard-py/financial-dashboard-py-7001da7059918cf23cef631d9e329fe7540d2db7/pages/deep_dive.py
 # pages/deep_dive.py (FINAL FIX - Decoupling Web App from Task Code & Syntax Correction)
 
 import dash
@@ -12,6 +13,7 @@ import json
 import numpy as np
 from datetime import datetime
 import yfinance as yf
+from itertools import groupby
 
 # --- [MODIFICATION 1] ---
 # เราจะ import แค่ celery instance ไม่ใช่ task โดยตรง
@@ -31,10 +33,22 @@ def create_sentiment_layout(sentiment_data):
         return dbc.Alert(f"Error: {error_msg}", color="danger")
 
     summary = sentiment_data.get("summary", {})
-    articles = sentiment_data.get("articles", [])
+    articles_raw = sentiment_data.get("articles", [])
 
-    if not articles:
+    if not articles_raw:
         return dbc.Alert("No recent news articles found.", color="info")
+
+    processed_articles = []
+    for article in articles_raw:
+        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]):
+            continue
+        try:
+            article['published_dt'] = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
+            processed_articles.append(article)
+        except (ValueError, TypeError):
+            continue
+
+    processed_articles.sort(key=lambda x: x['published_dt'], reverse=True)
 
     progress_bar = dbc.Progress(
         [
@@ -46,54 +60,54 @@ def create_sentiment_layout(sentiment_data):
     
     sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
     
-    news_items = []
-    for article in articles[:7]:
-        title = article.get('title')
-        published_at = article.get('publishedAt')
-        description = article.get('description')
-        if not all([title, published_at, description]):
-            continue
-
-        published_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-        published_at_str = f"{published_dt.strftime('%b %d, %Y, %I:%M %p')}"
-        sentiment_label = article.get('sentiment', 'neutral')
+    grouped_layout_items = []
+    for article_date, articles_on_day in groupby(processed_articles[:10], key=lambda x: x['published_dt'].date()):
         
-        news_card = dbc.Card(
-            dbc.CardBody(
-                # นี่คือจุดที่แก้ไขครับ เปลี่ยนจาก style เป็น className
+        grouped_layout_items.append(
+            html.H6(article_date.strftime('%B %d, %Y'), className="text-muted mt-4 mb-3")
+        )
+        
+        for article in articles_on_day:
+            published_at_str = f"{article['published_dt'].strftime('%I:%M %p')} | Source: {article.get('source', {}).get('name')}"
+            sentiment_label = article.get('sentiment', 'neutral')
+            
+            card_content = dbc.CardBody(
                 html.Div(
                     [
                         html.Div(
-                            dbc.Badge(sentiment_label, color=sentiment_color_map.get(sentiment_label, "secondary"), className="p-2 me-2")
+                            dbc.Badge(
+                                sentiment_label, 
+                                color=sentiment_color_map.get(sentiment_label, "secondary"), 
+                                className="p-2 me-3 sentiment-badge-fixed"
+                            ),
+                            className="flex-shrink-0"
                         ),
                         html.Div(
                             [
-                                html.A(
-                                    html.P(title, className="mb-1"),
-                                    href=article.get('url'),
-                                    target="_blank",
-                                    className="news-headline-link"
-                                ),
-                                html.P(
-                                    f"{published_at_str} | Source: {article.get('source', {}).get('name')}",
-                                    className="small text-muted mb-0"
-                                ),
+                                html.P(article.get('title'), className="mb-1 news-headline-text"),
+                                html.P(published_at_str, className="small text-muted mb-0"),
                             ],
                             className="flex-grow-1"
                         ),
                     ],
-                    className="news-item-container"  # <-- บรรทัดนี้คือการแก้ไขที่ถูกต้องครับ
+                    className="news-item-container"
                 )
-            ),
-            className="mb-2 news-item-card"
-        )
-        news_items.append(news_card)
+            )
+            
+            clickable_card = html.A(
+                dbc.Card(card_content, className="mb-2 news-item-card"),
+                href=article.get('url'),
+                target="_blank",
+                className="card-link-wrapper"
+            )
+            
+            grouped_layout_items.append(clickable_card)
 
     return html.Div([
         html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"),
         progress_bar,
         html.Hr(),
-        *news_items
+        *grouped_layout_items
     ])
 
 def create_charts_layout(ticker: str):

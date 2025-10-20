@@ -60,7 +60,7 @@ def create_sentiment_layout(sentiment_data):
         
         news_card = dbc.Card(
             dbc.CardBody(
-                # Use inline style to guarantee the alignment
+                # นี่คือจุดที่แก้ไขครับ เปลี่ยนจาก style เป็น className
                 html.Div(
                     [
                         html.Div(
@@ -82,7 +82,7 @@ def create_sentiment_layout(sentiment_data):
                             className="flex-grow-1"
                         ),
                     ],
-                    style={'display': 'flex', 'align-items': 'flex-start'}
+                    className="news-item-container"  # <-- บรรทัดนี้คือการแก้ไขที่ถูกต้องครับ
                 )
             ),
             className="mb-2 news-item-card"

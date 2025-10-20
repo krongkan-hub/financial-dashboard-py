@@ -9,13 +9,6 @@ from flask_login import LoginManager, UserMixin
 from config import Config
 from celery_worker import celery # <-- 1. Import celery instance ที่เราสร้าง
 
-# --- [MODIFICATION START] ---
-# Get the absolute path of the directory where this file is located
-basedir = os.path.abspath(os.path.dirname(__file__))
-# Define the absolute path to the assets folder
-assets_path = os.path.join(basedir, 'assets')
-# --- [MODIFICATION END] ---
-
 # --- App Initialization ---
 server = Flask(__name__)
 server.config.from_object(Config)
@@ -28,9 +21,7 @@ app = dash.Dash(
     __name__,
     server=server,
     external_stylesheets=[dbc.themes.LUX, dbc.icons.BOOTSTRAP],
-    suppress_callback_exceptions=True,
-    # --- [MODIFICATION] Use the absolute path we defined ---
-    assets_folder=assets_path
+    suppress_callback_exceptions=True
 )
 
 # --- Database & Login Manager Setup ---

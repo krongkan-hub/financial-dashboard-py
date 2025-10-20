@@ -27,14 +27,14 @@ else:
     logging.warning("NEWS_API_KEY not found in config. News fetching will be disabled.")
 
 # Load the sentiment analysis model once when the app starts for performance
-try:
-    sentiment_analyzer = pipeline(
-        "sentiment-analysis",
-        model="mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
-    )
-except Exception as e:
-    sentiment_analyzer = None
-    logging.error(f"Failed to load Hugging Face sentiment model: {e}", exc_info=True)
+# try:
+#     sentiment_analyzer = pipeline(
+#         "sentiment-analysis",
+#         model="mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
+#     )
+# except Exception as e:
+#     sentiment_analyzer = None
+#     logging.error(f"Failed to load Hugging Face sentiment model: {e}", exc_info=True)
 
 
 FIN_KEYS = {

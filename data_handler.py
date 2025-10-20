@@ -29,7 +29,7 @@ else:
 try:
     sentiment_analyzer = pipeline(
         "sentiment-analysis",
-        model="pysentimiento/bert-tiny-sentiment-analysis" # <-- เปลี่ยนเป็นโมเดลขนาดเล็กจิ๋ว
+        model="ProsusAI/finbert" # <-- เปลี่ยนเป็นโมเดลขนาดเล็กจิ๋ว
     )
 except Exception as e:
     sentiment_analyzer = None
@@ -73,8 +73,7 @@ def get_news_and_sentiment(company_name: str) -> dict:
             result = sentiment_analyzer(text_to_analyze[:512])[0]
             
             # แปลงผลลัพธ์จากโมเดลใหม่ (POS, NEU, NEG) ให้เป็นรูปแบบเดิม
-            label_map = {'POS': 'positive', 'NEU': 'neutral', 'NEG': 'negative'}
-            final_label = label_map.get(result['label'], 'neutral')
+            final_label = result['label']
 
             article['sentiment'] = final_label
             article['sentiment_score'] = result['score']

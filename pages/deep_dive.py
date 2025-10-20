@@ -167,8 +167,6 @@ def create_technicals_layout(ticker: str):
 def create_metric_card(title, value, className=""):
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
     card_title_content = [title]
-    if title == "Recommendation":
-        card_title_content.append(html.Span(" (Yahoo)", style={'fontSize': '0.7em', 'color': '#6c757d', 'marginLeft': '4px'}))
     return dbc.Card(dbc.CardBody([
         html.H6(card_title_content, className="metric-card-title"),
         html.P(value, className="metric-card-value"),

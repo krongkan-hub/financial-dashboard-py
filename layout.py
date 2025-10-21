@@ -1,4 +1,4 @@
-# layout.py (Responsive Version)
+# layout.py (Responsive Version with Monte Carlo DCF Modal)
 
 from dash import dcc, html
 import dash_bootstrap_components as dbc
@@ -39,37 +39,17 @@ METRIC_DEFINITIONS = {
         * **Bottom-Right:** Cheap valuation, high quality (e.g., ideal value investments).
     """, mathjax=True),
     "tab-dcf": dcc.Markdown("""
-    **MARGIN OF SAFETY (DCF)**
-    * **Definition:** This chart visualizes the "Margin of Safety," a core principle of value investing. It compares a stock's current market price to its estimated intrinsic value, calculated using a Discounted Cash Flow (DCF) model.
-    * **Components:**
-        * `Current Price` (Blue Dot): The price the stock is currently trading at in the market.
-        * `Intrinsic Value (DCF)` (Orange Diamond): The value of the company calculated by projecting its future cash flows and discounting them back to today's value. You can adjust the assumptions for this calculation using the gear icon.
-        * `Connecting Line`: Represents the gap between the current price and the intrinsic value.
-    * **Formula Overview:**
-    The model calculates the Intrinsic Value per Share through these main steps:
-    1.  **Project Future Cash Flows (FCFF):**
-        $$
-        FCFF_n = \\text{Base FCFF} \\times (1 + \\textbf{Growth Rate})^n
-        $$
-    2.  **Calculate Terminal Value (TV):**
-        $$
-        TV = \\frac{FCFF_{\\text{final}} \\times (1 + \\textbf{Perpetual Growth})}{ \\textbf{WACC} - \\textbf{Perpetual Growth}}
-        $$
-    3.  **Discount Cash Flows and Terminal Value to Present Value (PV):**
-        $$
-        PV = \\sum_{n=1}^{N} \\frac{FCFF_n}{(1 + \\textbf{WACC})^n} + \\frac{TV}{(1 + \\textbf{WACC})^N}
-        $$
-    4.  **Calculate Intrinsic Value:**
-        $$
-        \\text{Intrinsic Value} = \\frac{(\\text{PV} - \\text{Net Debt})}{\\text{Shares Outstanding}}
-        $$
-    * **User-Adjustable Assumptions:**
-        * **Growth Rate:** The anticipated **high-growth, short-term rate** (e.g., for the next 5 years) for the company's expansion phase. This is used in step 1.
-        * **Perpetual Growth:** The assumed **stable, long-term growth rate** for the company forever after the initial high-growth period. This should realistically be a low number, similar to GDP growth. This is used in step 2.
-        * **WACC (Discount Rate):** The rate used to discount all future cash flows back to their present value. A higher WACC implies higher risk and results in a lower intrinsic value. This is used in step 3.
+    **MARGIN OF SAFETY (MONTE CARLO DCF)**
+    * **Definition:** This chart visualizes the distribution of possible intrinsic values for a stock, calculated using a Discounted Cash Flow (DCF) model combined with Monte Carlo simulation. Instead of single-point estimates, this approach uses a range of probable inputs to reflect real-world uncertainty.
+    * **Simulation Process:**
+        1.  **Define Assumption Ranges:** You provide a range (Minimum, Most Likely, Maximum) for key drivers: `Forecast Growth Rate`, `Perpetual Growth Rate`, and `Discount Rate (WACC)`.
+        2.  **Run Simulations:** The model runs thousands of DCF calculations. In each run, it randomly picks a value for each assumption from within your defined ranges, using a triangular distribution.
+        3.  **Generate Distribution:** The output is a histogram showing the frequency of each calculated intrinsic value. This distribution represents the range of probable fair values for the stock.
     * **Interpretation:**
-        * If the **Intrinsic Value is higher than the Current Price** (a green line), a positive "Margin of Safety" exists, suggesting the stock may be undervalued.
-        * If the **Current Price is higher than the Intrinsic Value** (a red line), the margin of safety is negative, suggesting the stock may be overvalued.
+        * **The Histogram:** Shows which intrinsic value outcomes are most likely. A taller bar means a higher probability.
+        * **Mean Value (Red Line):** The average of all simulation outcomes. It serves as a central point of the valuation.
+        * **Current Price (Black Line):** The stock's current market price.
+        * **Probability Analysis:** By comparing the distribution to the current price, you can assess the probability that the stock is undervalued (i.e., the percentage of simulation outcomes where the intrinsic value is higher than the current price).
     """, mathjax=True),
 
     # Valuation Metrics
@@ -80,119 +60,83 @@ METRIC_DEFINITIONS = {
     $$
     P/E\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Earnings per Share (EPS)}}
     $$
-    * **Formula Components:**
-        * `Market Price per Share`: The current market price of a single share.
-        * `Earnings per Share (EPS)`: The company's total profit allocated to each outstanding share of common stock.
-    * **Interpretation:**
-        * A **high P/E** can suggest that a stock's price is high relative to earnings and is possibly overvalued. It may also indicate that investors are expecting high future growth.
-        * A **low P/E** might indicate that a stock is undervalued or that the company is performing well compared to its past trends.
+    * **Interpretation:** A high P/E can suggest a stock is overvalued or that investors expect high future growth. A low P/E might indicate it's undervalued.
     """, mathjax=True),
     "P/B": dcc.Markdown("""
     **P/B (Price-to-Book) Ratio**
-    * **Definition:** Compares a company's market capitalization to its book value. It indicates the value investors place on the company's net assets.
+    * **Definition:** Compares a company's market capitalization to its book value.
     * **Formula:**
     $$
     P/B\\ Ratio = \\frac{\\text{Market Price per Share}}{\\text{Book Value per Share}}
     $$
-    * **Formula Components:**
-        * `Market Price per Share`: The current market price of a single share.
-        * `Book Value per Share`: The net asset value of a company divided by the number of shares outstanding, calculated as (Total Assets - Intangible Assets - Liabilities).
-    * **Interpretation:**
-        * A **P/B ratio under 1.0** is often considered a potential sign of an undervalued stock.
-        * It is particularly useful for valuing companies with significant tangible assets (e.g., banks, industrials) and less useful for service-based companies.
+    * **Interpretation:** A ratio under 1.0 is often considered a sign of an undervalued stock. It is most useful for asset-heavy companies.
     """, mathjax=True),
     "EV/EBITDA": dcc.Markdown("""
     **EV/EBITDA (Enterprise Value-to-EBITDA) Ratio**
-    * **Definition:** A ratio used to compare the total value of a company to its cash earnings less non-cash expenses. It's often considered more comprehensive than P/E as it accounts for debt.
+    * **Definition:** Compares the total value of a company (including debt) to its cash earnings. It is often considered more comprehensive than P/E.
     * **Formula:**
     $$
     EV/EBITDA = \\frac{\\text{Enterprise Value}}{\\text{EBITDA}}
     $$
-    * **Formula Components:**
-        * `Enterprise Value (EV)`: Market Capitalization + Total Debt - Cash and Cash Equivalents.
-        * `EBITDA`: Earnings Before Interest, Taxes, Depreciation, and Amortization.
-    * **Interpretation:**
-        * A **low EV/EBITDA ratio** suggests that a company might be undervalued.
-        * This metric is useful for comparing companies across different industries, especially those with differences in capital structure and tax rates.
+    * **Interpretation:** A low EV/EBITDA ratio suggests that a company might be undervalued.
     """, mathjax=True),
 
     # Growth Metrics
     "Revenue Growth (YoY)": dcc.Markdown("""
     **Revenue Growth (Year-over-Year)**
-    * **Definition:** Measures the percentage increase in a company's revenue over the most recent twelve-month period compared to the prior twelve-month period.
+    * **Definition:** Measures the percentage increase in a company's revenue over the most recent year.
     * **Formula:**
     $$
     YoY\\ Growth = \\Big( \\frac{\\text{Current Period Revenue}}{\\text{Prior Period Revenue}} - 1 \\Big) \\times 100
     $$
-    * **Formula Components:**
-        * `Current Period Revenue`: Revenue from the most recent 12-month period.
-        * `Prior Period Revenue`: Revenue from the 12-month period before the current one.
-    * **Interpretation:** Indicates the pace at which a company's sales are growing. Consistently high growth is a positive sign, but it's important to understand the drivers behind it.
+    * **Interpretation:** Indicates the pace at which a company's sales are growing.
     """, mathjax=True),
     "Revenue CAGR (3Y)": dcc.Markdown("""
     **Revenue CAGR (3-Year)**
-    * **Definition:** The Compound Annual Growth Rate of revenue over a three-year period. It provides a smoothed, annualized growth rate that irons out volatility.
+    * **Definition:** The Compound Annual Growth Rate of revenue over a three-year period, providing a smoothed growth rate.
     * **Formula:**
     $$
     CAGR = \\bigg( \\Big( \\frac{\\text{Ending Value}}{\\text{Beginning Value}} \\Big)^{\\frac{1}{\\text{No. of Years}}} - 1 \\bigg) \\times 100
     $$
-    * **Formula Components:**
-        * `Ending Value`: Revenue from the final year in the period.
-        * `Beginning Value`: Revenue from the starting year in the period.
-        * `No. of Years`: The total number of years in the period (e.g., 3).
-    * **Interpretation:** A more stable indicator of long-term growth trends compared to a single-year growth rate.
+    * **Interpretation:** A more stable indicator of long-term growth trends.
     """, mathjax=True),
     "Net Income Growth (YoY)": dcc.Markdown("""
     **Net Income Growth (Year-over-Year)**
-    * **Definition:** Measures the percentage increase in a company's net profit (after all expenses and taxes) over the past year.
+    * **Definition:** Measures the percentage increase in a company's net profit over the past year.
     * **Formula:**
     $$
     YoY\\ Growth = \\Big( \\frac{\\text{Current Period Net Income}}{\\text{Prior Period Net Income}} - 1 \\Big) \\times 100
     $$
-    * **Formula Components:**
-        * `Current Period Net Income`: Net Income from the most recent 12-month period.
-        * `Prior Period Net Income`: Net Income from the 12-month period before the current one.
-    * **Interpretation:** Shows how effectively a company is translating revenue growth into actual profit for shareholders. It's a critical measure of profitability improvement.
+    * **Interpretation:** Shows how effectively a company is translating revenue into actual profit.
     """, mathjax=True),
 
     # Fundamentals Metrics
     "Operating Margin": dcc.Markdown("""
     **Operating Margin**
-    * **Definition:** Measures how much profit a company makes on a dollar of sales, after paying for variable costs of production but before paying interest or tax.
+    * **Definition:** Measures how much profit a company makes on a dollar of sales from its core operations.
     * **Formula:**
     $$
     Operating\\ Margin = \\frac{\\text{Operating Income}}{\\text{Revenue}} \\times 100
     $$
-    * **Formula Components:**
-        * `Operating Income`: The profit realized from a business's own, core operations.
-        * `Revenue`: The total amount of income generated by the sale of goods or services.
-    * **Interpretation:** A higher operating margin indicates greater efficiency in the company's core business operations. It reflects the profitability of the business before the effects of financing and taxes.
+    * **Interpretation:** A higher operating margin indicates greater efficiency.
     """, mathjax=True),
     "ROE": dcc.Markdown("""
     **ROE (Return on Equity)**
-    * **Definition:** A measure of financial performance calculated by dividing net income by shareholders' equity.
+    * **Definition:** A measure of how effectively a company uses shareholder investments to generate profits.
     * **Formula:**
     $$
     ROE = \\frac{\\text{Net Income}}{\\text{Average Shareholder's Equity}} \\times 100
     $$
-    * **Formula Components:**
-        * `Net Income`: The company's profit after all expenses, including taxes and interest, have been deducted.
-        * `Average Shareholder's Equity`: The average value of shareholder's equity over a period (usually the beginning and ending equity divided by 2).
-    * **Interpretation:** ROE is considered a gauge of a corporation's profitability and how efficiently it generates profits. A consistently high ROE can be a sign of a strong competitive advantage (a "moat").
+    * **Interpretation:** A consistently high ROE can be a sign of a strong competitive advantage.
     """, mathjax=True),
     "D/E Ratio": dcc.Markdown("""
     **D/E (Debt-to-Equity) Ratio**
-    * **Definition:** A ratio used to evaluate a company's financial leverage. It is a measure of the degree to which a company is financing its operations through debt versus wholly-owned funds.
+    * **Definition:** A ratio that evaluates a company's financial leverage.
     * **Formula:**
     $$
     D/E\\ Ratio = \\frac{\\text{Total Debt}}{\\text{Total Shareholder's Equity}}
     $$
-    * **Formula Components:**
-        * `Total Debt`: The sum of all short-term and long-term liabilities.
-        * `Total Shareholder's Equity`: The corporation's owners' residual claim on assets after debts have been paid.
-    * **Interpretation:**
-        * A **high D/E ratio** generally means that a company has been aggressive in financing its growth with debt. This can result in volatile earnings because of the additional interest expense.
-        * A **low D/E ratio** may indicate a more financially stable, conservative company. What is considered "high" or "low" varies by industry.
+    * **Interpretation:** A high D/E ratio can mean aggressive financing with debt, which can increase risk. What is considered "high" varies by industry.
     """, mathjax=True),
     "Cash Conversion": dcc.Markdown("""
     **Cash Conversion**
@@ -201,12 +145,7 @@ METRIC_DEFINITIONS = {
     $$
     Cash\\ Conversion = \\frac{\\text{Operating Cash Flow}}{\\text{Net Income}}
     $$
-    * **Formula Components:**
-        * `Operating Cash Flow (CFO)`: The cash generated from normal business operations.
-        * `Net Income`: The company's profit after all expenses.
-    * **Interpretation:**
-        * A ratio **greater than 1.0** is generally considered strong, as it indicates the company is generating more cash than it reports in accounting profit.
-        * A ratio **consistently below 1.0** could be a red flag, suggesting that reported earnings are not being backed by actual cash.
+    * **Interpretation:** A ratio greater than 1.0 is generally strong, indicating the company generates more cash than its reported profit.
     """, mathjax=True),
 
     # Target/Forecast Metrics
@@ -217,24 +156,16 @@ METRIC_DEFINITIONS = {
     $$
     Target\\ Price = \\text{Current EPS} \\times (1 + \\text{EPS Growth})^{\\text{Years}} \\times \\text{Terminal P/E}
     $$
-    * **Formula Components:**
-        * `Current EPS`: The company's earnings per share for the last twelve months.
-        * `EPS Growth`: Your assumed annual growth rate for EPS.
-        * `Years`: The number of years in your forecast period.
-        * `Terminal P/E`: Your assumed P/E ratio for the company at the end of the forecast period.
-    * **Interpretation:** This is an estimated future value, not a guarantee. Its accuracy is entirely dependent on the validity of the growth and valuation multiple assumptions.
+    * **Interpretation:** This is an estimated future value, not a guarantee. Its accuracy depends on the validity of the assumptions.
     """, mathjax=True),
     "Target Upside": dcc.Markdown("""
     **Target Upside**
-    * **Definition:** The potential percentage return an investor could achieve if the stock reaches its calculated Target Price from its current price.
+    * **Definition:** The potential percentage return if the stock reaches its calculated Target Price.
     * **Formula:**
     $$
     Target\\ Upside = \\Big( \\frac{\\text{Target Price}}{\\text{Current Price}} - 1 \\Big) \\times 100
     $$
-    * **Formula Components:**
-        * `Target Price`: The estimated future stock price from your forecast.
-        * `Current Price`: The current market stock price.
-    * **Interpretation:** It quantifies the potential reward based on your forecast. A higher upside suggests a more attractive investment, assuming the forecast is accurate.
+    * **Interpretation:** It quantifies the potential reward based on your forecast.
     """, mathjax=True),
     "IRR %": dcc.Markdown("""
     **IRR (Internal Rate of Return) %**
@@ -243,11 +174,7 @@ METRIC_DEFINITIONS = {
     $$
     IRR = \\bigg( \\Big( \\frac{\\text{Target Price}}{\\text{Current Price}} \\Big)^{\\frac{1}{\\text{Forecast Years}}} - 1 \\bigg) \\times 100
     $$
-    * **Formula Components:**
-        * `Target Price`: The estimated future stock price from your forecast.
-        * `Current Price`: The current market stock price.
-        * `Forecast Years`: The number of years in your forecast period.
-    * **Interpretation:** IRR represents the annualized rate of return for this specific investment scenario. It's useful for comparing the potential returns of different investment opportunities over different time horizons.
+    * **Interpretation:** Represents the annualized rate of return for the investment scenario, useful for comparing opportunities.
     """, mathjax=True),
 }
 
@@ -304,18 +231,35 @@ def create_forecast_modal():
 def create_dcf_modal():
     return dbc.Modal(
         [
-            dbc.ModalHeader(dbc.ModalTitle("DCF ASSUMPTIONS")),
+            dbc.ModalHeader(dbc.ModalTitle("DCF MONTE CARLO ASSUMPTIONS")),
             dbc.ModalBody([
-                dbc.Label("Forecast Growth Rate (%):"),
-                dbc.Input(id="modal-dcf-forecast-growth-input", type="number", value=5, step=0.5, className="mb-3"),
-                dbc.Label("Perpetual Growth Rate (%):"),
-                dbc.Input(id="modal-dcf-perpetual-growth-input", type="number", value=2.5, step=0.1, className="mb-3"),
-                dbc.Label("Discount Rate (WACC) (%):"),
-                dbc.Input(id="modal-dcf-wacc-input", type="number", value=8.0, step=0.5, className="mb-3"),
-                html.P("The WACC you enter here will override the automatic calculation.", className="text-muted small")
+                dbc.Label("Number of Simulations:", className="fw-bold"),
+                dbc.Input(id="mc-dcf-simulations-input", type="number", value=10000, min=1000, max=50000, step=1000, className="mb-4"),
+
+                dbc.Label("Forecast Growth Rate (%)", className="fw-bold"),
+                dbc.Row([
+                    dbc.Col(dbc.Input(id="mc-dcf-growth-min", type="number", placeholder="Min", value=3)),
+                    dbc.Col(dbc.Input(id="mc-dcf-growth-mode", type="number", placeholder="Most Likely", value=5)),
+                    dbc.Col(dbc.Input(id="mc-dcf-growth-max", type="number", placeholder="Max", value=8)),
+                ], className="mb-4"),
+
+                dbc.Label("Perpetual Growth Rate (%)", className="fw-bold"),
+                dbc.Row([
+                    dbc.Col(dbc.Input(id="mc-dcf-perpetual-min", type="number", placeholder="Min", value=1.5)),
+                    dbc.Col(dbc.Input(id="mc-dcf-perpetual-mode", type="number", placeholder="Most Likely", value=2.5)),
+                    dbc.Col(dbc.Input(id="mc-dcf-perpetual-max", type="number", placeholder="Max", value=3.0)),
+                ], className="mb-4"),
+
+                dbc.Label("Discount Rate (WACC) (%)", className="fw-bold"),
+                dbc.Row([
+                    dbc.Col(dbc.Input(id="mc-dcf-wacc-min", type="number", placeholder="Min", value=7.0)),
+                    dbc.Col(dbc.Input(id="mc-dcf-wacc-mode", type="number", placeholder="Most Likely", value=8.0)),
+                    dbc.Col(dbc.Input(id="mc-dcf-wacc-max", type="number", placeholder="Max", value=10.0)),
+                ]),
+                 html.P("These ranges will be used for the simulation.", className="text-muted small mt-3")
             ]),
             dbc.ModalFooter(
-                dbc.Button("Apply Changes", id="apply-dcf-changes-btn", color="primary")
+                dbc.Button("Run Simulation", id="apply-dcf-changes-btn", color="primary")
             ),
         ],
         id="dcf-assumptions-modal",
@@ -395,7 +339,7 @@ def build_layout():
                             )
                         ],
                         align="center",
-                        className="control-row" # <-- Added a specific class
+                        className="control-row"
                     ),
                     
                     dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
@@ -430,7 +374,7 @@ def build_layout():
                             )
                         ],
                         align="center",
-                        className="control-row mt-3" # <-- Added a specific class
+                        className="control-row mt-3"
                     ),
                     
                     dcc.Loading(html.Div(id="table-pane-content", className="mt-2"))

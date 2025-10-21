@@ -1,4 +1,4 @@
-# data_handler.py (Corrected Final Version)
+# data_handler.py (Corrected Final Version with Monte Carlo DCF)
 
 import pandas as pd
 import yfinance as yf
@@ -9,7 +9,7 @@ import logging
 import warnings
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
-import requests 
+import requests
 import os
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -190,7 +190,7 @@ def get_deep_dive_data(ticker: str) -> dict:
         info = tkr.info
         if not info or info.get('quoteType') != 'EQUITY': return {"error": "Invalid ticker or no data available."}
         
-        result = {"info": info} # <-- [FIX] Restored the full info object to the result
+        result = {"info": info}
         
         income_stmt_quarterly = tkr.quarterly_financials.iloc[:, :16]
         revenue = _pick_row(income_stmt_quarterly, FIN_KEYS['revenue'])
@@ -229,7 +229,6 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perp
         info = ticker_obj.info
         if not info: return {'Ticker': ticker, 'error': 'Could not fetch company info from yfinance.'}
         
-        # ... (rest of the DCF logic is unchanged, it's correct)
         ASSUMED_PERPETUAL_GROWTH, PROJECTION_YEARS, ASSUMED_MARKET_RETURN = perpetual_growth_rate, 5, 0.08
         income_stmt, balance_sheet, cashflow = ticker_obj.financials, ticker_obj.balance_sheet, ticker_obj.cashflow
         if any(df.empty for df in [income_stmt, balance_sheet, cashflow]): return {'Ticker': ticker, 'error': 'Financial statements missing.'}
@@ -266,6 +265,72 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perp
     except Exception as e:
         logging.error(f"Critical DCF failure for {ticker}: {e}", exc_info=True)
         return {'Ticker': ticker, 'error': 'Unexpected error during calculation.'}
+
+@lru_cache(maxsize=32)
+def calculate_monte_carlo_dcf(
+    ticker: str,
+    n_simulations: int,
+    growth_min: float, growth_mode: float, growth_max: float,
+    perpetual_min: float, perpetual_mode: float, perpetual_max: float,
+    wacc_min: float, wacc_mode: float, wacc_max: float
+) -> dict:
+    """
+    Performs a DCF valuation using Monte Carlo simulation on key assumptions.
+    """
+    try:
+        ticker_obj, info = yf.Ticker(ticker), yf.Ticker(ticker).info
+        if not info or not info.get('sharesOutstanding'):
+            return {'error': 'Missing shares outstanding or basic info.'}
+
+        income_stmt, balance_sheet, cashflow = ticker_obj.financials, ticker_obj.balance_sheet, ticker_obj.cashflow
+        last_year_income, last_year_balance, last_year_cashflow = income_stmt.iloc[:, 0], balance_sheet.iloc[:, 0], cashflow.iloc[:, 0]
+
+        ebit = get_financial_data(last_year_income, ['EBIT', 'Ebit'])
+        tax_provision = get_financial_data(last_year_income, ['Tax Provision', 'Income Tax Expense'])
+        pretax_income = get_financial_data(last_year_income, ['Pretax Income', 'Income Before Tax'])
+        d_and_a = get_financial_data(last_year_cashflow, ['Depreciation And Amortization', 'Depreciation'])
+        capex = get_financial_data(last_year_cashflow, ['Capital Expenditure', 'CapEx'])
+        cash_and_equivalents = get_financial_data(last_year_balance, ['Cash And Cash Equivalents', 'Cash'])
+        total_debt = get_financial_data(last_year_balance, ['Total Debt'])
+        shares_outstanding = info.get('sharesOutstanding')
+        current_price = info.get('currentPrice') or info.get('previousClose')
+
+        if any(v is None for v in [ebit, tax_provision, pretax_income, d_and_a, capex, cash_and_equivalents, shares_outstanding, current_price]):
+            return {'error': 'Missing essential data for DCF.'}
+
+        tax_rate = (tax_provision / pretax_income) if pretax_income != 0 else 0.21
+        base_fcff = (ebit * (1 - tax_rate)) + d_and_a - capex
+        net_debt = total_debt - cash_and_equivalents if total_debt is not None else -cash_and_equivalents
+        PROJECTION_YEARS = 5
+
+        sim_growth = np.random.triangular(growth_min / 100.0, growth_mode / 100.0, growth_max / 100.0, n_simulations)
+        sim_perpetual = np.random.triangular(perpetual_min / 100.0, perpetual_mode / 100.0, perpetual_max / 100.0, n_simulations)
+        sim_wacc = np.random.triangular(wacc_min / 100.0, wacc_mode / 100.0, wacc_max / 100.0, n_simulations)
+
+        future_fcffs = base_fcff * (1 + sim_growth) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
+        discounted_fcffs = future_fcffs / (1 + sim_wacc) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
+        final_year_fcff = future_fcffs[-1]
+        terminal_value = (final_year_fcff * (1 + sim_perpetual)) / (sim_wacc - sim_perpetual)
+        discounted_terminal_value = terminal_value / ((1 + sim_wacc) ** PROJECTION_YEARS)
+
+        enterprise_value = np.sum(discounted_fcffs, axis=0) + discounted_terminal_value
+        equity_value = enterprise_value - net_debt
+        simulated_intrinsic_values = equity_value / shares_outstanding
+
+        return {
+            'simulated_values': simulated_intrinsic_values.tolist(),
+            'current_price': current_price,
+            'mean': np.mean(simulated_intrinsic_values),
+            'median': np.median(simulated_intrinsic_values),
+            'p10': np.percentile(simulated_intrinsic_values, 10),
+            'p90': np.percentile(simulated_intrinsic_values, 90),
+            'success': True
+        }
+
+    except Exception as e:
+        logging.error(f"Monte Carlo DCF failed for {ticker}: {e}", exc_info=True)
+        return {'error': str(e)}
+
 
 def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
     if not isinstance(price_history_df, pd.DataFrame) or price_history_df.empty: return {"error": "Price history data is missing."}

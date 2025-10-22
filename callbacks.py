@@ -99,7 +99,7 @@ def _generate_datatable_style_conditionals(tab_config):
 
 def apply_custom_scoring(df):
     if df.empty: return df
-    bins = [0, 1e9, 10e10, 100e10, float('inf')]
+    bins = [0, 1e10, 10e10, 100e10, float('inf')]
     labels = ["Small Cap", "Mid Cap", "Large Cap", "Mega Cap"]
     df['Company Size'] = pd.cut(df['Market Cap'], bins=bins, labels=labels, right=False)
     conditions_volatility = [df['Beta'].isnull(), df['Beta'] < 0.5, df['Beta'] <= 2, df['Beta'] > 2]

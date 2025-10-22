@@ -36,4 +36,4 @@ if __name__ == '__main__':
     with server.app_context():
         db.create_all()
     # Run this file to start the app: python index.py
-    app.run(debug=True)
+    app.run(debug=False)

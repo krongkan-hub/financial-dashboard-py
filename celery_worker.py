@@ -1,15 +1,16 @@
 # celery_worker.py
-
 from celery import Celery
 import os
+from config import Config  # <--- 1. Import Config ของเราเข้ามา
 
-# ใส่ IP ของ WSL ที่หาเจอ
-WSL_REDIS_IP = 'redis://localhost:6379/0'
+# 2. ไม่ต้อง Hardcode WSL_REDIS_IP ที่นี่แล้ว
+#    เราจะใช้ค่าจาก Config object โดยตรง
 
 celery = Celery(
-    'tasks',  # <--- เปลี่ยนจาก '__main__' เป็น 'tasks'
-    broker=os.environ.get('CELERY_BROKER_URL', WSL_REDIS_IP),
-    backend=os.environ.get('CELERY_RESULT_BACKEND', WSL_REDIS_IP)
+    'tasks',
+    # 3. ดึงค่า Broker และ Backend จาก Config object
+    broker=Config.CELERY_BROKER_URL,
+    backend=Config.CELERY_RESULT_BACKEND
 )
 
 celery.conf.update(

@@ -1,4 +1,4 @@
-# pages/deep_dive.py (CHARTS Tab Removed)
+# pages/deep_dive.py (UPDATED - No Celery Version)
 
 import dash
 from dash import dcc, html, dash_table
@@ -13,7 +13,11 @@ from datetime import datetime
 import yfinance as yf
 from itertools import groupby
 
-from celery_worker import celery
+# --- [DELETED] ---
+# from celery_worker import celery (ลบออก)
+
+# --- [MODIFIED] ---
+# เรียก get_news_and_sentiment โดยตรงจาก data_handler
 from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_logo_url, get_news_and_sentiment
 
 # ==============================================================================
@@ -21,6 +25,7 @@ from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_l
 # ==============================================================================
 
 def create_sentiment_layout(sentiment_data):
+    # (ฟังก์ชันนี้เหมือนเดิมทุกประการ)
     if not sentiment_data or sentiment_data.get("error"):
         return dbc.Alert(f"Error: {sentiment_data.get('error', 'Could not retrieve news.')}", color="danger")
     summary, articles_raw = sentiment_data.get("summary", {}), sentiment_data.get("articles", [])
@@ -60,6 +65,7 @@ def create_sentiment_layout(sentiment_data):
     return html.Div([html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"), progress_bar, html.Hr(), *grouped_layout_items])
 
 def create_technicals_layout(ticker: str):
+    # (ฟังก์ชันนี้เหมือนเดิมทุกประการ)
     data = get_deep_dive_data(ticker)
     price_history = data.get("price_history")
     if price_history is None or price_history.empty:
@@ -86,6 +92,7 @@ def create_technicals_layout(ticker: str):
     return dcc.Graph(figure=fig)
 
 def create_metric_card(title, value, className=""):
+    # (ฟังก์ชันนี้เหมือนเดิมทุกประการ)
     if value is None or value == "N/A" or (isinstance(value, str) and "N/A" in value): return None
     return dbc.Card(dbc.CardBody([
         html.H6(title, className="metric-card-title"),
@@ -146,8 +153,9 @@ def create_deep_dive_layout(ticker=None):
                 active_tab="tab-technicals-deep-dive", # <-- Default to Technicals
             )
         ]),
-        dcc.Store(id='sentiment-task-id-store'),
-        dcc.Interval(id='sentiment-task-interval', interval=2*1000, n_intervals=0, disabled=True),
+        # --- [DELETED] ---
+        # ลบ dcc.Store(id='sentiment-task-id-store')
+        # ลบ dcc.Interval(id='sentiment-task-interval')
         dbc.Card(dbc.CardBody(html.Div(id="deep-dive-tab-content")), className="mt-3")
     ])
 
@@ -160,50 +168,47 @@ def create_deep_dive_layout(ticker=None):
 # SECTION 2: Dash Callbacks
 # ==============================================================================
 
+# --- [MODIFIED] ---
+# Callback นี้เปลี่ยนไป ไม่ต้องมี Output ไปที่ Store หรือ Interval
 @dash.callback(
     Output('deep-dive-tab-content', 'children'),
-    Output('sentiment-task-id-store', 'data'),
-    Output('sentiment-task-interval', 'disabled'),
     Input('deep-dive-main-tabs', 'active_tab'),
     State('deep-dive-ticker-store', 'data')
 )
 def render_master_tab_content(active_tab, store_data):
     if not store_data or not store_data.get('ticker'):
-        return dbc.Alert("Ticker not found.", color="danger"), dash.no_update, True
+        return dbc.Alert("Ticker not found.", color="danger")
 
     ticker, company_name = store_data.get('ticker'), store_data.get('company_name')
     
     if active_tab == "tab-sentiment-deep-dive":
-        if not company_name: return dbc.Alert("Company name not found.", color="warning"), dash.no_update, True
-        task = celery.send_task('tasks.get_news_and_sentiment_task', args=[company_name])
-        return html.Div([dbc.Spinner(color="primary")], className="text-center p-5", id="sentiment-content-target"), {'task_id': task.id}, False
+        if not company_name: 
+            return dbc.Alert("Company name not found.", color="warning")
+        
+        # --- [NEW] ---
+        # เรียกฟังก์ชันโดยตรง! (Synchronous)
+        # dcc.Loading จะแสดงผล Spinner ขณะที่รอ
+        def get_and_render_news():
+            sentiment_data = get_news_and_sentiment(company_name)
+            return create_sentiment_layout(sentiment_data)
+
+        return dcc.Loading(html.Div(get_and_render_news()))
+        # --- [END NEW] ---
 
     elif active_tab == "tab-technicals-deep-dive":
-        return dcc.Loading(create_technicals_layout(ticker)), dash.no_update, True
+        return dcc.Loading(create_technicals_layout(ticker))
 
     elif active_tab == "tab-financials-deep-dive":
         return html.Div([
             dbc.Row(dbc.Col(dcc.Dropdown(id='financial-statement-dropdown', options=[{'label': 'Income Statement', 'value': 'income'},{'label': 'Balance Sheet', 'value': 'balance'},{'label': 'Cash Flow', 'value': 'cashflow'},], value='income', clearable=False), width=12, md=4, lg=3), className="mb-4 mt-2"),
             dcc.Loading(html.Div(id="financial-statement-content"))
-        ]), dash.no_update, True
+        ])
 
-    return html.Div(), dash.no_update, True
+    return html.Div()
 
-@dash.callback(
-    Output('sentiment-content-target', 'children', allow_duplicate=True),
-    Output('sentiment-task-interval', 'disabled', allow_duplicate=True),
-    Input('sentiment-task-interval', 'n_intervals'),
-    State('sentiment-task-id-store', 'data'),
-    prevent_initial_call=True
-)
-def poll_sentiment_task_status(n, task_data):
-    if not task_data or 'task_id' not in task_data: return dash.no_update, True
-    task = celery.AsyncResult(task_data['task_id'])
-    if task.state == 'SUCCESS':
-        return create_sentiment_layout(task.get()), True
-    elif task.state in ['FAILURE', 'REVOKED']:
-        return dbc.Alert("Error during sentiment analysis.", color="danger"), True
-    return dash.no_update, False
+# --- [DELETED] ---
+# Callback 'poll_sentiment_task_status' ถูกลบทั้งหมด
+# เพราะเราไม่มี dcc.Interval ที่จะเรียกมันอีกต่อไป
 
 @dash.callback(
     Output('financial-statement-content', 'children'),
@@ -211,6 +216,7 @@ def poll_sentiment_task_status(n, task_data):
     State('deep-dive-ticker-store', 'data')
 )
 def render_financial_statement_table(selected_statement, store_data):
+    # (ฟังก์ชันนี้เหมือนเดิมทุกประการ)
     if not selected_statement or not store_data or not store_data.get('ticker'): return dash.no_update
     data = get_deep_dive_data(store_data['ticker'])
     statements = data.get("financial_statements", {})

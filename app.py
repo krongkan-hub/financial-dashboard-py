@@ -7,7 +7,6 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin
 from config import Config
-from celery_worker import celery # <-- 1. Import celery instance ที่เราสร้าง
 
 # --- App Initialization ---
 server = Flask(__name__)

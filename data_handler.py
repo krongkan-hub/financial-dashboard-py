@@ -1,4 +1,4 @@
-# data_handler.py (Corrected Final Version with Monte Carlo DCF)
+# data_handler.py (UPDATED - No Celery, Batch API Version)
 
 import pandas as pd
 import yfinance as yf
@@ -25,42 +25,102 @@ else:
     newsapi = None
     logging.warning("NEWS_API_KEY not found in config. News fetching will be disabled.")
 
-# --- Hugging Face API Function ---
-def analyze_sentiment_via_api(text_to_analyze: str) -> dict:
+# --- [MODIFIED] Hugging Face API Function (Batch Processing) ---
+def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
+    """
+    วิเคราะห์ Sentiment ของข้อความหลายๆ อันพร้อมกัน (Batch)
+    """
     API_URL = "https://api-inference.huggingface.co/models/mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
     hf_token = os.environ.get('HUGGING_FACE_TOKEN')
-    if not hf_token:
-        logging.warning("HUGGING_FACE_TOKEN not found. Returning neutral sentiment.")
-        return {'label': 'neutral', 'score': 0.0}
-    headers = {"Authorization": f"Bearer {hf_token}"}
-    payload = {"inputs": text_to_analyze[:512]}
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-        result = response.json()
-        if result and isinstance(result, list) and isinstance(result[0], list):
-            best_prediction = max(result[0], key=lambda x: x['score'])
-            return {'label': best_prediction['label'].lower(), 'score': best_prediction['score']}
-    except Exception as e:
-        logging.error(f"API request failed or parsing failed: {e}")
-    return {'label': 'neutral', 'score': 0.0}
+    
+    default_result = {'label': 'neutral', 'score': 0.0}
 
-# --- News Fetching Function ---
+    if not hf_token:
+        logging.warning("HUGGING_FACE_TOKEN not found. Returning neutral sentiment for all.")
+        return [default_result] * len(texts_to_analyze)
+    
+    if not texts_to_analyze:
+        return []
+
+    headers = {"Authorization": f"Bearer {hf_token}"}
+    # ส่ง "inputs" เป็น list ของ Srings
+    # ใช้ "options" เพื่อให้แน่ใจว่าโมเดลโหลดเสร็จก่อน
+    payload = {
+        "inputs": texts_to_analyze,
+        "options": {"wait_for_model": True}
+    }
+    
+    final_results = []
+    
+    try:
+        # เพิ่ม timeout เป็น 25 วินาที เผื่อสำหรับ Batch ใหญ่
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=25) 
+        response.raise_for_status()
+        results_batch = response.json() # ผลลัพธ์จะเป็น List[List[Dict]]
+        
+        # response.json() อาจคืน error dict มาแทน list (เช่น { "error": "Model ... is loading" })
+        if not isinstance(results_batch, list):
+             logging.error(f"API returned an error or is not ready: {results_batch.get('error')}")
+             return [default_result] * len(texts_to_analyze)
+
+        # วนลูปผลลัพธ์ (List[List[Dict]])
+        for result_list in results_batch:
+            if isinstance(result_list, list) and result_list:
+                # เลือกอันที่มี 'score' สูงสุด
+                best_prediction = max(result_list, key=lambda x: x.get('score', 0))
+                final_results.append({
+                    'label': best_prediction.get('label', 'neutral').lower(), 
+                    'score': best_prediction.get('score', 0.0)
+                })
+            else:
+                final_results.append(default_result)
+                
+    except Exception as e:
+        logging.error(f"API batch request failed or parsing failed: {e}")
+        # ถ้าล้มเหลว ให้คืนค่า default ตามจำนวนที่ส่งไป
+        return [default_result] * len(texts_to_analyze)
+    
+    return final_results
+
+# --- [MODIFIED] News Fetching Function (Calls Batch API) ---
 @lru_cache(maxsize=32)
 def get_news_and_sentiment(company_name: str) -> dict:
     if not newsapi: return {"error": "News service is not configured."}
     try:
         to_date, from_date = datetime.now(), datetime.now() - timedelta(days=7)
         all_articles = newsapi.get_everything(q=f'"{company_name}"', language='en', sort_by='relevancy', from_param=from_date.strftime('%Y-%m-%d'), to=to_date.strftime('%Y-%m-%d'), page_size=20)
-        if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0: return {"articles": [], "summary": {}}
-        analyzed_articles, sentiment_scores = [], {'positive': 0, 'neutral': 0, 'negative': 0}
+        
+        if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0: 
+            return {"articles": [], "summary": {}}
+
+        # 1. รวบรวมบทความและข้อความที่จะวิเคราะห์
+        articles_to_process = []
+        texts_to_analyze = []
         for article in all_articles['articles']:
-            if not article.get('description'): continue
-            text_to_analyze = article['title'] + ". " + article['description']
-            result = analyze_sentiment_via_api(text_to_analyze)
-            article['sentiment'], article['sentiment_score'] = result['label'], result['score']
+            if not article.get('description') or not article.get('title'): continue
+            # ตัดข้อความให้สั้นลง (Hugging Face มี limit)
+            text = (article['title'] + ". " + article['description'])[:512]
+            articles_to_process.append(article)
+            texts_to_analyze.append(text)
+
+        if not articles_to_process:
+             return {"articles": [], "summary": {}}
+
+        # 2. ส่งวิเคราะห์ทั้งหมดในครั้งเดียว (Batch)
+        logging.info(f"Sending {len(texts_to_analyze)} articles to batch sentiment analysis...")
+        sentiment_results = analyze_sentiment_batch(texts_to_analyze)
+        logging.info("Batch analysis complete.")
+
+        # 3. นำผลลัพธ์มารวมกลับ
+        analyzed_articles = []
+        sentiment_scores = {'positive': 0, 'neutral': 0, 'negative': 0}
+        
+        for article, result in zip(articles_to_process, sentiment_results):
+            article['sentiment'] = result['label']
+            article['sentiment_score'] = result['score']
             analyzed_articles.append(article)
             sentiment_scores[result['label']] += 1
+            
         total_analyzed = len(analyzed_articles)
         summary = {
             'positive_count': sentiment_scores['positive'], 'neutral_count': sentiment_scores['neutral'], 'negative_count': sentiment_scores['negative'], 'total_count': total_analyzed,
@@ -69,6 +129,7 @@ def get_news_and_sentiment(company_name: str) -> dict:
             'negative_pct': (sentiment_scores['negative'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
         }
         return {"articles": analyzed_articles, "summary": summary}
+        
     except Exception as e:
         logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
         return {"error": str(e)}

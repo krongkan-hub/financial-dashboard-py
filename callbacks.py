@@ -1,4 +1,4 @@
-# callbacks.py (Final Version - Immediately renders DCF graph on load)
+# callbacks.py (Final Version - With Default Tickers on Load)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -29,7 +29,8 @@ from data_handler import (
 )
 from pages import deep_dive
 from constants import (
-    INDEX_TICKER_TO_NAME, SECTOR_TO_INDEX_MAPPING, COLOR_DISCRETE_MAP, SECTORS
+    INDEX_TICKER_TO_NAME, SECTOR_TO_INDEX_MAPPING, COLOR_DISCRETE_MAP, SECTORS,
+    TOP_5_DEFAULT_TICKERS, ALL_TICKERS_SORTED_BY_MC  # <-- [MODIFIED] Import Tickers เริ่มต้น
 )
 from auth import create_register_layout
 
@@ -140,6 +141,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
              return create_navbar()
         return None
 
+    # --- [MODIFIED CALLBACK] ---
+    # Loads user data OR default tickers if user is new/logged out
     @app.callback(
         Output('user-selections-store', 'data'),
         Output('forecast-assumptions-store', 'data'),
@@ -147,27 +150,43 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         Input('url', 'pathname')
     )
     def load_user_data_to_store(pathname):
-        # --- [MODIFICATION] Set default DCF data on initial load ---
+        # Define defaults first
         default_dcf_data = {
             'simulations': 10000, 'growth_min': 3, 'growth_mode': 5, 'growth_max': 8,
             'perpetual_min': 1.5, 'perpetual_mode': 2.5, 'perpetual_max': 3.0,
             'wacc_min': 7.0, 'wacc_mode': 8.0, 'wacc_max': 10.0
         }
         default_forecast_data = {'years': 5, 'growth': 10, 'pe': 20}
-        default_selections_data = {'tickers': [], 'indices': []}
+        
+        # [NEW] Default selections for non-users or new users
+        default_selections_data = {
+            'tickers': TOP_5_DEFAULT_TICKERS, 
+            'indices': ['^GSPC']
+        }
         
         if pathname == '/' and current_user.is_authenticated:
             with server.app_context():
+                # Load user's saved data
                 stocks = UserSelection.query.filter_by(user_id=current_user.id, symbol_type='stock').all()
                 indices = UserSelection.query.filter_by(user_id=current_user.id, symbol_type='index').all()
-                selections_data = {'tickers': [s.symbol for s in stocks], 'indices': [i.symbol for i in indices]}
+                
+                # [NEW] Check if the logged-in user has any saved data
+                if not stocks and not indices:
+                    # If they are logged in but have 0 saved items, give them the default
+                    selections_data = default_selections_data
+                else:
+                    # Otherwise, load their saved data
+                    selections_data = {'tickers': [s.symbol for s in stocks], 'indices': [i.symbol for i in indices]}
 
+                # Load saved assumptions (or use default)
                 assumptions = UserAssumptions.query.filter_by(user_id=current_user.id).first()
                 forecast_data = {'years': assumptions.forecast_years, 'growth': assumptions.eps_growth, 'pe': assumptions.terminal_pe} if assumptions else default_forecast_data
                 
                 return selections_data, forecast_data, default_dcf_data
         
+        # [NEW] If user is not authenticated, return the default set
         return default_selections_data, default_forecast_data, default_dcf_data
+    # --- [END OF MODIFIED CALLBACK] ---
 
     def save_selections_to_db(user_id, symbols, symbol_type):
         with server.app_context():
@@ -176,7 +195,6 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 db.session.add(UserSelection(user_id=user_id, symbol_type=symbol_type, symbol=symbol))
             db.session.commit()
 
-    # ... (All selection callbacks: add/remove ticker/index remain the same) ...
     @app.callback(Output('user-selections-store', 'data', allow_duplicate=True), Input('add-ticker-button', 'n_clicks'), [State('ticker-select-dropdown', 'value'), State('user-selections-store', 'data')], prevent_initial_call=True)
     def add_ticker_to_store(n_clicks, selected_tickers, store_data):
         store_data = store_data or {'tickers': [], 'indices': []}
@@ -233,12 +251,25 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             return html.Span("No indices selected.", className="text-muted fst-italic")
         return [html.Label("Selected Indices:", className="text-muted small")] + [dbc.Badge([INDEX_TICKER_TO_NAME.get(i, i), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': i})], color="light", className="m-1 p-2 text-dark border") for i in indices]
 
+    # --- [REVERTED CALLBACK] ---
+    # This callback now uses the sorted lists from constants.py
+    # (No expensive Market Cap call needed here anymore)
     @app.callback(Output('ticker-select-dropdown', 'options'), [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')])
     def update_ticker_options(selected_sector, store_data):
         if not selected_sector: return []
         selected_tickers = store_data.get('tickers', []) if store_data else []
-        tickers_to_display = sorted(list(set(t for tickers in SECTORS.values() for t in tickers))) if selected_sector == 'All' else sorted(SECTORS.get(selected_sector, []))
+        
+        if selected_sector == 'All':
+            # We still need to sort 'All' alphabetically, but the lists
+            # *within* each sector in constants.py are already sorted by market cap.
+            tickers_to_display = sorted(list(set(t for tickers in SECTORS.values() for t in tickers)))
+        else:
+            # This list is now pre-sorted by Market Cap from constants.py
+            tickers_to_display = SECTORS.get(selected_sector, []) 
+            
         return [{'label': t, 'value': t} for t in tickers_to_display if t not in selected_tickers]
+    # --- [END OF REVERTED CALLBACK] ---
+
 
     @app.callback(Output('index-select-dropdown', 'options'), Input('user-selections-store', 'data'))
     def update_index_options(store_data):
@@ -248,7 +279,6 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         relevant_indices = {idx for sec in active_sectors for idx in SECTOR_TO_INDEX_MAPPING.get(sec, [])} | {'^GSPC', '^NDX'}
         return [{'label': INDEX_TICKER_TO_NAME.get(i, i), 'value': i} for i in sorted(list(relevant_indices)) if i not in selected_indices]
         
-    # ... (All other callbacks for modals, definitions, etc. remain the same) ...
     @app.callback(
         Output('forecast-assumptions-modal', 'is_open'),
         Input('open-forecast-modal-btn', 'n_clicks'),
@@ -384,7 +414,6 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         if not forecast_data: return 5, 10, 20
         return forecast_data.get('years', 5), forecast_data.get('growth', 10), forecast_data.get('pe', 20)
 
-    # --- [MODIFIED] Main graph rendering callback ---
     @app.callback(
         Output('analysis-pane-content', 'children'),
         [Input('analysis-tabs', 'active_tab'),
@@ -455,6 +484,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
             if not all_results: return dbc.Alert("Could not run simulation for any selected stocks.", color="danger")
             
+            # [MODIFIED] Removed height=800
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
 
             for res in all_results:
@@ -470,7 +500,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 fig.add_shape(type='line', x0=row['current_price'], y0=row['Ticker'], x1=row['intrinsic_value'], y1=row['Ticker'],
                               line=dict(color='limegreen' if row['intrinsic_value'] > row['current_price'] else 'tomato', width=3), row=2, col=1)
 
-            fig.update_layout(title_text='Monte Carlo DCF Analysis', height=800, barmode='overlay', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            # [MODIFIED] Removed height=800
+            fig.update_layout(title_text='Monte Carlo DCF Analysis', barmode='overlay', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             fig.update_yaxes(title_text="Frequency", row=1, col=1)
             fig.update_yaxes(title_text="Ticker", row=2, col=1)
             fig.update_xaxes(title_text="Share Price ($)", row=2, col=1)
@@ -479,7 +510,6 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
         return html.P("This is an empty tab!")
 
-    # --- Table rendering callback (unchanged) ---
     @app.callback(
         Output('table-pane-content', 'children'),
         Output('sort-by-dropdown', 'options'),

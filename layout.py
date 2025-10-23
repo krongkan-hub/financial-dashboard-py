@@ -41,8 +41,24 @@ METRIC_DEFINITIONS = {
     "tab-dcf": dcc.Markdown("""
     **MARGIN OF SAFETY (MONTE CARLO DCF)**
     * **Definition:** This chart visualizes the distribution of possible intrinsic values for a stock, calculated using a Discounted Cash Flow (DCF) model combined with Monte Carlo simulation. Instead of single-point estimates, this approach uses a range of probable inputs to reflect real-world uncertainty.
+    
+    * **Core Calculation (Simplified):**
+        1.  **Calculate Free Cash Flow to the Firm (FCFF):**
+            $$
+            FCFF = (EBIT \times (1 - Tax Rate)) + D\&A - CapEx
+            $$
+        2.  **Calculate Terminal Value (TV):** (The value of the company beyond the forecast period)
+            $$
+            TV = \frac{\text{Final Year FCFF} \times (1 + g)}{WACC - g}
+            $$
+            (Where: $g$ = Perpetual Growth Rate, $WACC$ = Discount Rate)
+        3.  **Calculate Intrinsic Value:**
+            $$
+            Value = \frac{\sum(\text{Discounted Future FCFFs}) + \text{Discounted TV} - \text{Net Debt}}{\text{Shares Outstanding}}
+            $$
+
     * **Simulation Process:**
-        1.  **Define Assumption Ranges:** You provide a range (Minimum, Most Likely, Maximum) for key drivers: `Forecast Growth Rate`, `Perpetual Growth Rate`, and `Discount Rate (WACC)`.
+        1.  **Define Assumption Ranges:** You provide a range (Minimum, Most Likely, Maximum) for key drivers: `Forecast Growth Rate (g)`, `Perpetual Growth Rate (g)`, and `Discount Rate (WACC)`.
         2.  **Run Simulations:** The model runs thousands of DCF calculations. In each run, it randomly picks a value for each assumption from within your defined ranges, using a triangular distribution.
         3.  **Generate Distribution:** The output is a histogram showing the frequency of each calculated intrinsic value. This distribution represents the range of probable fair values for the stock.
     * **Interpretation:**

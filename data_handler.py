@@ -27,59 +27,63 @@ else:
 
 # --- [MODIFIED] Hugging Face API Function (Batch Processing) ---
 def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
-    """
-    วิเคราะห์ Sentiment ของข้อความหลายๆ อันพร้อมกัน (Batch)
-    """
     API_URL = "https://api-inference.huggingface.co/models/mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
     hf_token = os.environ.get('HUGGING_FACE_TOKEN')
-    
     default_result = {'label': 'neutral', 'score': 0.0}
 
     if not hf_token:
         logging.warning("HUGGING_FACE_TOKEN not found. Returning neutral sentiment for all.")
         return [default_result] * len(texts_to_analyze)
-    
     if not texts_to_analyze:
         return []
 
     headers = {"Authorization": f"Bearer {hf_token}"}
-    # ส่ง "inputs" เป็น list ของ Srings
-    # ใช้ "options" เพื่อให้แน่ใจว่าโมเดลโหลดเสร็จก่อน
-    payload = {
-        "inputs": texts_to_analyze,
-        "options": {"wait_for_model": True}
-    }
+    payload = {"inputs": texts_to_analyze, "options": {"wait_for_model": True}}
     
     final_results = []
     
     try:
-        # เพิ่ม timeout เป็น 25 วินาที เผื่อสำหรับ Batch ใหญ่
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=25) 
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
-        results_batch = response.json() # ผลลัพธ์จะเป็น List[List[Dict]]
-        
-        # response.json() อาจคืน error dict มาแทน list (เช่น { "error": "Model ... is loading" })
-        if not isinstance(results_batch, list):
-             logging.error(f"API returned an error or is not ready: {results_batch.get('error')}")
-             return [default_result] * len(texts_to_analyze)
+        results_batch = response.json() 
 
-        # วนลูปผลลัพธ์ (List[List[Dict]])
-        for result_list in results_batch:
-            if isinstance(result_list, list) and result_list:
-                # เลือกอันที่มี 'score' สูงสุด
-                best_prediction = max(result_list, key=lambda x: x.get('score', 0))
-                final_results.append({
-                    'label': best_prediction.get('label', 'neutral').lower(), 
-                    'score': best_prediction.get('score', 0.0)
-                })
+        # --- [แก้ไขส่วนนี้] ---
+        # ตรวจสอบว่า response เป็น list และมี element ข้างใน
+        if isinstance(results_batch, list) and len(results_batch) > 0:
+            # API ส่งกลับมาเป็น List ซ้อน List -> เราสนใจ List ชั้นในสุด (index 0)
+            inner_results_list = results_batch[0] 
+            
+            # ตรวจสอบอีกครั้งว่า inner_results_list เป็น list จริงๆ
+            if isinstance(inner_results_list, list):
+                # วนลูปผลลัพธ์ของแต่ละข่าวใน List ชั้นใน
+                for result_for_one_text in inner_results_list:
+                    if isinstance(result_for_one_text, list) and result_for_one_text:
+                        # หา prediction ที่ดีที่สุดสำหรับข่าวนั้นๆ
+                        best_prediction = max(result_for_one_text, key=lambda x: x.get('score', 0))
+                        final_results.append({
+                            'label': best_prediction.get('label', 'neutral').lower(),
+                            'score': best_prediction.get('score', 0.0)
+                        })
+                    else:
+                        # ถ้าผลลัพธ์ของข่าวนี้ไม่ถูกต้อง ให้ใช้ default
+                        final_results.append(default_result)
             else:
-                final_results.append(default_result)
+                # ถ้าโครงสร้าง response ไม่ใช่ List ซ้อน List แบบที่คาดไว้
+                logging.error(f"API response inner structure unexpected: {inner_results_list}")
+                return [default_result] * len(texts_to_analyze)
+        else:
+            # ถ้า response ไม่ใช่ List หรือเป็น List ว่าง
+             logging.error(f"API response outer structure unexpected or empty: {results_batch}")
+             return [default_result] * len(texts_to_analyze)
+        # --- [จบส่วนแก้ไข] ---
                 
     except Exception as e:
         logging.error(f"API batch request failed or parsing failed: {e}")
-        # ถ้าล้มเหลว ให้คืนค่า default ตามจำนวนที่ส่งไป
         return [default_result] * len(texts_to_analyze)
     
+    # สามารถลบ print() นี้ออกได้เมื่อทดสอบเสร็จ
+    # print(f"\nDEBUG: Final Parsed Results (final_results):\n{final_results}\n") 
+
     return final_results
 
 # --- [MODIFIED] News Fetching Function (Calls Batch API) ---

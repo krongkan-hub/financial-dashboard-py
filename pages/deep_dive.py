@@ -25,44 +25,36 @@ from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_l
 # ==============================================================================
 
 def create_sentiment_layout(sentiment_data):
-    # (ฟังก์ชันนี้เหมือนเดิมทุกประการ)
     if not sentiment_data or sentiment_data.get("error"):
-        return dbc.Alert(f"Error: {sentiment_data.get('error', 'Could not retrieve news.')}", color="danger")
+        # โค้ดที่อยู่ภายใต้ if นี้ ต้องย่อหน้าเข้าไป
+        return dbc.Alert(f"Error: {sentiment_data.get('error', 'Could not retrieve news.')}", color="danger") 
+        # --- จบส่วนของ if ---
+
+    # โค้ดต่อจากนี้ (บรรทัดที่ 30) ต้องกลับมาอยู่ที่ระดับเดียวกับ if (ไม่ต้องย่อหน้า)
     summary, articles_raw = sentiment_data.get("summary", {}), sentiment_data.get("articles", [])
-    if not articles_raw: return dbc.Alert("No recent news articles found.", color="info")
-    
+
+    # --- [ลบ print ที่เราเพิ่มไปก่อนหน้าออก] ---
+    # print(f"DEBUG: Received {len(articles_raw)} raw articles from data_handler.")
+
+    if not articles_raw: 
+        return dbc.Alert("No recent news articles found.", color="info")
+
     processed_articles = []
     for article in articles_raw:
-        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]): continue
+        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]): 
+            # print(f"DEBUG: Skipping article due to missing fields: {article.get('title')}") # Optional: uncomment for more detail
+            continue
         try:
             article['published_dt'] = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
             processed_articles.append(article)
-        except (ValueError, TypeError): continue
-    processed_articles.sort(key=lambda x: x['published_dt'], reverse=True)
-    
-    progress_bar = dbc.Progress([
-        dbc.Progress(value=summary.get('positive_pct', 0), color="success", bar=True, label=f"{summary.get('positive_pct', 0):.1f}%"),
-        dbc.Progress(value=summary.get('neutral_pct', 0), color="warning", bar=True, label=f"{summary.get('neutral_pct', 0):.1f}%"),
-        dbc.Progress(value=summary.get('negative_pct', 0), color="danger", bar=True, label=f"{summary.get('negative_pct', 0):.1f}%"),
-    ], style={"height": "25px", "fontSize": "0.85rem"})
-    
-    sentiment_color_map = {"positive": "success", "neutral": "warning", "negative": "danger"}
-    grouped_layout_items = []
-    for article_date, articles_on_day in groupby(processed_articles[:10], key=lambda x: x['published_dt'].date()):
-        grouped_layout_items.append(html.H6(article_date.strftime('%B %d, %Y'), className="text-muted mt-4 mb-3"))
-        for article in articles_on_day:
-            published_at_str = f"{article['published_dt'].strftime('%I:%M %p')} | Source: {article.get('source', {}).get('name')}"
-            sentiment_label = article.get('sentiment', 'neutral')
-            card_content = dbc.CardBody(html.Div([
-                html.Div(dbc.Badge(sentiment_label, color=sentiment_color_map.get(sentiment_label, "secondary"), className="p-2 me-3 sentiment-badge-fixed"), className="flex-shrink-0"),
-                html.Div([
-                    html.P(article.get('title'), className="mb-1 news-headline-text"),
-                    html.P(published_at_str, className="small text-muted mb-0"),
-                ], className="flex-grow-1"),
-            ], className="news-item-container"))
-            grouped_layout_items.append(html.A(dbc.Card(card_content, className="mb-2 news-item-card"), href=article.get('url'), target="_blank", className="card-link-wrapper"))
+        except (ValueError, TypeError): 
+            # print(f"DEBUG: Skipping article due to date parse error: {article.get('title')}") # Optional: uncomment for more detail
+            continue
             
-    return html.Div([html.H5("News Sentiment Analysis (Last 7 Days)", className="card-title"), progress_bar, html.Hr(), *grouped_layout_items])
+    # --- [เพิ่ม print ที่ 2] ---
+    print(f"DEBUG: {len(processed_articles)} articles survived filtering and date parsing.")
+            
+    processed_articles.sort(key=lambda x: x['published_dt'], reverse=True)
 
 def create_technicals_layout(ticker: str):
     # (ฟังก์ชันนี้เหมือนเดิมทุกประการ)

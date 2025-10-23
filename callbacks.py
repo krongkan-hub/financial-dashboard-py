@@ -260,9 +260,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         selected_tickers = store_data.get('tickers', []) if store_data else []
         
         if selected_sector == 'All':
-            # We still need to sort 'All' alphabetically, but the lists
-            # *within* each sector in constants.py are already sorted by market cap.
-            tickers_to_display = sorted(list(set(t for tickers in SECTORS.values() for t in tickers)))
+            # --- [FIX] ใช้ลิสต์ที่เรียงตาม Market Cap จาก constants.py ---
+            tickers_to_display = ALL_TICKERS_SORTED_BY_MC
         else:
             # This list is now pre-sorted by Market Cap from constants.py
             tickers_to_display = SECTORS.get(selected_sector, []) 

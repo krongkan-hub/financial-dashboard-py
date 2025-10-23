@@ -97,3 +97,10 @@
     text-transform: capitalize;
     font-weight: 600;
 }
+
+/* --- [NEW] Hover effect for news headline link --- */
+/* Makes headline text blue and underlined only when the wrapper is hovered */
+.card-link-wrapper:hover .news-headline-text {
+    color: #0d6efd; /* Bootstrap primary link color */
+    text-decoration: underline;
+}

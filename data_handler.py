@@ -1,4 +1,4 @@
-# data_handler.py (UPDATED - No Celery, Batch API Version)
+# data_handler.py (FIXED - Timeout and JSON Parsing)
 
 import pandas as pd
 import yfinance as yf
@@ -25,7 +25,7 @@ else:
     newsapi = None
     logging.warning("NEWS_API_KEY not found in config. News fetching will be disabled.")
 
-# --- [MODIFIED] Hugging Face API Function (Batch Processing) ---
+# --- [MODIFIED] Hugging Face API Function (Timeout & Parsing Fixed) ---
 def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
     API_URL = "https://api-inference.huggingface.co/models/mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
     hf_token = os.environ.get('HUGGING_FACE_TOKEN')
@@ -43,47 +43,54 @@ def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
     final_results = []
     
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        # Increased timeout to 120 seconds
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         results_batch = response.json() 
 
-        # --- [แก้ไขส่วนนี้] ---
-        # ตรวจสอบว่า response เป็น list และมี element ข้างใน
+        # --- [START OF THE REAL FIX] ---
+        # The API returns List[ List[Dict] ] - a list *containing* the actual results list
+        
+        # 1. Check if the outer response is a list and has at least one element
         if isinstance(results_batch, list) and len(results_batch) > 0:
-            # API ส่งกลับมาเป็น List ซ้อน List -> เราสนใจ List ชั้นในสุด (index 0)
-            inner_results_list = results_batch[0] 
             
-            # ตรวจสอบอีกครั้งว่า inner_results_list เป็น list จริงๆ
-            if isinstance(inner_results_list, list):
-                # วนลูปผลลัพธ์ของแต่ละข่าวใน List ชั้นใน
-                for result_for_one_text in inner_results_list:
-                    if isinstance(result_for_one_text, list) and result_for_one_text:
-                        # หา prediction ที่ดีที่สุดสำหรับข่าวนั้นๆ
-                        best_prediction = max(result_for_one_text, key=lambda x: x.get('score', 0))
+            # 2. Extract the *inner list* which contains the results
+            inner_results_list = results_batch[0]
+            
+            # 3. Check if the inner list is valid and its length matches our input
+            if isinstance(inner_results_list, list) and len(inner_results_list) == len(texts_to_analyze):
+                
+                # 4. Loop through the *inner list*
+                # `result_for_one_article` is a dict: {'label': 'pos', 'score': 0.9}
+                # (This is what the log message proved)
+                for result_for_one_article in inner_results_list:
+                    
+                    # 5. [THE FIX] Check if it's a dict and has the 'label' key
+                    if isinstance(result_for_one_article, dict) and 'label' in result_for_one_article:
+                        # It is a dict, so just append it directly
                         final_results.append({
-                            'label': best_prediction.get('label', 'neutral').lower(),
-                            'score': best_prediction.get('score', 0.0)
+                            'label': result_for_one_article.get('label', 'neutral').lower(),
+                            'score': result_for_one_article.get('score', 0.0)
                         })
                     else:
-                        # ถ้าผลลัพธ์ของข่าวนี้ไม่ถูกต้อง ให้ใช้ default
+                        # If it's not a dict, or missing keys (e.g., None)
+                        logging.warning(f"Unexpected inner structure for one article: {result_for_one_article}")
                         final_results.append(default_result)
             else:
-                # ถ้าโครงสร้าง response ไม่ใช่ List ซ้อน List แบบที่คาดไว้
-                logging.error(f"API response inner structure unexpected: {inner_results_list}")
+                # If the inner list is bad or length doesn't match
+                logging.error(f"API response *inner* list validation failed (length mismatch or not a list): {inner_results_list}")
                 return [default_result] * len(texts_to_analyze)
         else:
-            # ถ้า response ไม่ใช่ List หรือเป็น List ว่าง
-             logging.error(f"API response outer structure unexpected or empty: {results_batch}")
-             return [default_result] * len(texts_to_analyze)
-        # --- [จบส่วนแก้ไข] ---
+            # If the outer response is not a list or is empty
+            logging.error(f"API response *outer* structure unexpected or empty: {results_batch}")
+            return [default_result] * len(texts_to_analyze)
+        # --- [END OF THE REAL FIX] ---
                 
     except Exception as e:
-        logging.error(f"API batch request failed or parsing failed: {e}")
+        # This will catch timeouts, HTTP errors, etc.
+        logging.error(f"API batch request failed or parsing failed: {e}", exc_info=True)
         return [default_result] * len(texts_to_analyze)
     
-    # สามารถลบ print() นี้ออกได้เมื่อทดสอบเสร็จ
-    # print(f"\nDEBUG: Final Parsed Results (final_results):\n{final_results}\n") 
-
     return final_results
 
 # --- [MODIFIED] News Fetching Function (Calls Batch API) ---

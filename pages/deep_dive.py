@@ -1,4 +1,4 @@
-# pages/deep_dive.py (UPDATED - No Celery Version)
+# pages/deep_dive.py (FIXED - Typo in fillcolor '1Z')
 
 import dash
 from dash import dcc, html, dash_table
@@ -24,40 +24,117 @@ from data_handler import get_deep_dive_data, get_technical_analysis_data, _get_l
 # SECTION 1: Layout Generating Functions
 # ==============================================================================
 
+# --- [FIXED] This layout matches your UI (Progress Bar) and link style ---
 def create_sentiment_layout(sentiment_data):
     if not sentiment_data or sentiment_data.get("error"):
-        # โค้ดที่อยู่ภายใต้ if นี้ ต้องย่อหน้าเข้าไป
-        return dbc.Alert(f"Error: {sentiment_data.get('error', 'Could not retrieve news.')}", color="danger") 
-        # --- จบส่วนของ if ---
+        return dbc.Alert(f"Error: {sentiment_data.get('error', 'Could not retrieve news.')}", color="danger")
 
-    # โค้ดต่อจากนี้ (บรรทัดที่ 30) ต้องกลับมาอยู่ที่ระดับเดียวกับ if (ไม่ต้องย่อหน้า)
     summary, articles_raw = sentiment_data.get("summary", {}), sentiment_data.get("articles", [])
 
-    # --- [ลบ print ที่เราเพิ่มไปก่อนหน้าออก] ---
-    # print(f"DEBUG: Received {len(articles_raw)} raw articles from data_handler.")
-
-    if not articles_raw: 
+    if not articles_raw:
         return dbc.Alert("No recent news articles found.", color="info")
 
     processed_articles = []
     for article in articles_raw:
-        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]): 
-            # print(f"DEBUG: Skipping article due to missing fields: {article.get('title')}") # Optional: uncomment for more detail
+        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]):
             continue
         try:
             article['published_dt'] = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
             processed_articles.append(article)
-        except (ValueError, TypeError): 
-            # print(f"DEBUG: Skipping article due to date parse error: {article.get('title')}") # Optional: uncomment for more detail
+        except (ValueError, TypeError):
             continue
-            
-    # --- [เพิ่ม print ที่ 2] ---
+
     print(f"DEBUG: {len(processed_articles)} articles survived filtering and date parsing.")
             
     processed_articles.sort(key=lambda x: x['published_dt'], reverse=True)
 
+    # 1. Helper function for colors (Orange for Neutral)
+    def get_sentiment_color_map(sentiment_label):
+        if sentiment_label == 'positive': return "success" # Green
+        if sentiment_label == 'negative': return "danger"  # Red
+        return "warning" # Orange for Neutral (to match your screenshot)
+
+    # 2. Create the stacked Progress Bar
+    total_count = summary.get('total_count', 1) # Avoid division by zero
+    pos_pct = summary.get('positive_pct', 0)
+    neu_pct = summary.get('neutral_pct', 0)
+    neg_pct = summary.get('negative_pct', 0)
+
+    progress_bar = dbc.Progress(
+        [
+            dbc.Progress(value=pos_pct, color="success", bar=True, label=f"{pos_pct:.0f}%" if pos_pct > 10 else ""),
+            dbc.Progress(value=neu_pct, color="warning", bar=True, label=f"{neu_pct:.0f}%" if neu_pct > 10 else ""),
+            dbc.Progress(value=neg_pct, color="danger", bar=True, label=f"{neg_pct:.0f}%" if neg_pct > 10 else ""),
+        ],
+        style={"height": "15px"},
+        className="mb-4"
+    )
+
+    # 3. Group articles by date
+    layout_components = [
+        html.H4("NEWS SENTIMENT ANALYSIS (LAST 7 DAYS)"),
+        progress_bar
+    ]
+    
+    def date_keyfn(article):
+        return article['published_dt'].date()
+
+    grouped_articles = groupby(processed_articles, key=date_keyfn)
+
+    # 4. Create layout for each date group
+    for date, articles in grouped_articles:
+        date_header = html.P(
+            date.strftime("%B %d, %Y").upper(), 
+            className="text-muted small fw-bold mt-4 mb-2"
+        )
+        layout_components.append(date_header)
+        
+        article_layouts = []
+        for article in articles:
+            sentiment_label = article.get('sentiment', 'neutral')
+            color = get_sentiment_color_map(sentiment_label)
+            
+            # This is the inner layout DIV
+            article_layout = html.Div([
+                dbc.Row([
+                    dbc.Col(
+                        dbc.Badge(sentiment_label.capitalize(), color=color, className="me-2"),
+                        width="auto",
+                        className="ps-3 pe-0"
+                    ),
+                    dbc.Col(
+                        # Changed from html.A to html.Span
+                        html.Span(
+                            article['title'], 
+                            className="news-headline-text" # This class is in style.css
+                        )
+                    )
+                ], className="mb-1"),
+                dbc.Row(dbc.Col(
+                    html.Span(
+                        f"{article['published_dt'].strftime('%I:%M %p')} | Source: {article.get('source', {}).get('name', 'N/A')}",
+                        className="text-muted",
+                        style={'fontSize': '0.85rem', 'paddingLeft': '20px'}
+                    ),
+                ))
+            ], className="mb-3")
+            
+            # Wrap the entire DIV in a clickable link (html.A)
+            wrapper_link = html.A(
+                article_layout,
+                href=article['url'],
+                target="_blank",
+                className="card-link-wrapper" # This class removes underline
+            )
+            article_layouts.append(wrapper_link)
+        
+        layout_components.append(html.Div(article_layouts))
+
+    return html.Div(layout_components)
+
+
 def create_technicals_layout(ticker: str):
-    # (ฟังก์ชันนี้เหมือนเดิมทุกประการ)
+    # (ฟังก์ชันนี้เหมือนเดิมทุกประการ... ยกเว้น 1Z)
     data = get_deep_dive_data(ticker)
     price_history = data.get("price_history")
     if price_history is None or price_history.empty:
@@ -70,7 +147,10 @@ def create_technicals_layout(ticker: str):
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], mode='lines', name='SMA 50', line=dict(color='blue', width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], mode='lines', name='SMA 200', line=dict(color='purple', width=2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], mode='lines', name='BB Upper', line=dict(color='gray', width=1, dash='dash')), row=1, col=1)
+    # --- [THE FIX] ---
+    # Changed 'rgba(128,128,1Z,0.1)' to 'rgba(128,128,128,0.1)'
     fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], mode='lines', name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.1)'), row=1, col=1)
+    # --- [END THE FIX] ---
     fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], mode='lines', name='RSI'), row=2, col=1)
     fig.add_hline(y=70, line_dash="dash", line_color="red", line_width=1, row=2, col=1)
     fig.add_hline(y=30, line_dash="dash", line_color="green", line_width=1, row=2, col=1)
@@ -145,10 +225,20 @@ def create_deep_dive_layout(ticker=None):
                 active_tab="tab-technicals-deep-dive", # <-- Default to Technicals
             )
         ]),
-        # --- [DELETED] ---
-        # ลบ dcc.Store(id='sentiment-task-id-store')
-        # ลบ dcc.Interval(id='sentiment-task-interval')
-        dbc.Card(dbc.CardBody(html.Div(id="deep-dive-tab-content")), className="mt-3")
+        
+        # --- [FIXED] Spinner code (without 'children_style') ---
+        dbc.Card(
+            dbc.CardBody(
+                dbc.Spinner(
+                    html.Div(id="deep-dive-tab-content"), # This is the target
+                    color="primary",
+                    spinner_style={"width": "3rem", "height": "3rem"},
+                    delay_show=250, # Only show if loading takes > 0.25s
+                )
+            ), 
+            className="mt-3"
+        )
+        # --- [END SPINNER FIX] ---
     ])
 
     return dbc.Container([
@@ -160,8 +250,7 @@ def create_deep_dive_layout(ticker=None):
 # SECTION 2: Dash Callbacks
 # ==============================================================================
 
-# --- [MODIFIED] ---
-# Callback นี้เปลี่ยนไป ไม่ต้องมี Output ไปที่ Store หรือ Interval
+# --- [FIXED] Removed dcc.Loading wrappers from return statements ---
 @dash.callback(
     Output('deep-dive-tab-content', 'children'),
     Input('deep-dive-main-tabs', 'active_tab'),
@@ -177,30 +266,24 @@ def render_master_tab_content(active_tab, store_data):
         if not company_name: 
             return dbc.Alert("Company name not found.", color="warning")
         
-        # --- [NEW] ---
-        # เรียกฟังก์ชันโดยตรง! (Synchronous)
-        # dcc.Loading จะแสดงผล Spinner ขณะที่รอ
         def get_and_render_news():
             sentiment_data = get_news_and_sentiment(company_name)
             return create_sentiment_layout(sentiment_data)
 
-        return dcc.Loading(html.Div(get_and_render_news()))
-        # --- [END NEW] ---
+        return html.Div(get_and_render_news())
 
     elif active_tab == "tab-technicals-deep-dive":
-        return dcc.Loading(create_technicals_layout(ticker))
+        return create_technicals_layout(ticker)
 
     elif active_tab == "tab-financials-deep-dive":
         return html.Div([
             dbc.Row(dbc.Col(dcc.Dropdown(id='financial-statement-dropdown', options=[{'label': 'Income Statement', 'value': 'income'},{'label': 'Balance Sheet', 'value': 'balance'},{'label': 'Cash Flow', 'value': 'cashflow'},], value='income', clearable=False), width=12, md=4, lg=3), className="mb-4 mt-2"),
+            # Note: We keep this dcc.Loading as it's for the *sub-content*
             dcc.Loading(html.Div(id="financial-statement-content"))
         ])
 
     return html.Div()
 
-# --- [DELETED] ---
-# Callback 'poll_sentiment_task_status' ถูกลบทั้งหมด
-# เพราะเราไม่มี dcc.Interval ที่จะเรียกมันอีกต่อไป
 
 @dash.callback(
     Output('financial-statement-content', 'children'),

@@ -45,17 +45,31 @@ class UserSelection(db.Model):
     symbol_type = db.Column(db.String(10), nullable=False)
     symbol = db.Column(db.String(20), nullable=False)
 
+# --- [MODIFIED] UserAssumptions Model ---
 class UserAssumptions(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+    
     # Forecast Assumptions
     forecast_years = db.Column(db.Integer, default=5)
     eps_growth = db.Column(db.Float, default=10.0)
     terminal_pe = db.Column(db.Float, default=20.0)
-    # DCF Assumptions
-    dcf_forecast_growth = db.Column(db.Float, default=5.0)
-    dcf_perpetual_growth = db.Column(db.Float, default=2.5)
-    dcf_wacc = db.Column(db.Float, default=8.0)
+    
+    # DCF Assumptions (Expanded to store all 10 values)
+    dcf_simulations = db.Column(db.Integer, default=10000)
+    
+    dcf_growth_min = db.Column(db.Float, default=3.0)
+    dcf_growth_mode = db.Column(db.Float, default=5.0) 
+    dcf_growth_max = db.Column(db.Float, default=8.0)
+    
+    dcf_perpetual_min = db.Column(db.Float, default=1.5)
+    dcf_perpetual_mode = db.Column(db.Float, default=2.5) 
+    dcf_perpetual_max = db.Column(db.Float, default=3.0)
+    
+    dcf_wacc_min = db.Column(db.Float, default=7.0)
+    dcf_wacc_mode = db.Column(db.Float, default=8.0) 
+    dcf_wacc_max = db.Column(db.Float, default=10.0)
+# --- [END MODIFIED] ---
 
 
 @login_manager.user_loader

@@ -142,7 +142,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         return None
 
     # --- [MODIFIED CALLBACK] ---
-    # Loads user data OR default tickers if user is new/logged out
+    # Loads user data (including DCF) OR default tickers if user is new/logged out
     @app.callback(
         Output('user-selections-store', 'data'),
         Output('forecast-assumptions-store', 'data'),
@@ -152,7 +152,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
     def load_user_data_to_store(pathname):
         # Define defaults first
         default_dcf_data = {
-            'simulations': 10000, 'growth_min': 3, 'growth_mode': 5, 'growth_max': 8,
+            'simulations': 10000, 'growth_min': 3.0, 'growth_mode': 5.0, 'growth_max': 8.0,
             'perpetual_min': 1.5, 'perpetual_mode': 2.5, 'perpetual_max': 3.0,
             'wacc_min': 7.0, 'wacc_mode': 8.0, 'wacc_max': 10.0
         }
@@ -178,11 +178,35 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                     # Otherwise, load their saved data
                     selections_data = {'tickers': [s.symbol for s in stocks], 'indices': [i.symbol for i in indices]}
 
-                # Load saved assumptions (or use default)
+                # --- [MODIFIED LOGIC FOR LOADING] ---
                 assumptions = UserAssumptions.query.filter_by(user_id=current_user.id).first()
-                forecast_data = {'years': assumptions.forecast_years, 'growth': assumptions.eps_growth, 'pe': assumptions.terminal_pe} if assumptions else default_forecast_data
                 
-                return selections_data, forecast_data, default_dcf_data
+                if assumptions:
+                    # If user has saved data, load it
+                    forecast_data = {
+                        'years': assumptions.forecast_years, 
+                        'growth': assumptions.eps_growth, 
+                        'pe': assumptions.terminal_pe
+                    }
+                    dcf_data = {
+                        'simulations': assumptions.dcf_simulations,
+                        'growth_min': assumptions.dcf_growth_min,
+                        'growth_mode': assumptions.dcf_growth_mode,
+                        'growth_max': assumptions.dcf_growth_max,
+                        'perpetual_min': assumptions.dcf_perpetual_min,
+                        'perpetual_mode': assumptions.dcf_perpetual_mode,
+                        'perpetual_max': assumptions.dcf_perpetual_max,
+                        'wacc_min': assumptions.dcf_wacc_min,
+                        'wacc_mode': assumptions.dcf_wacc_mode,
+                        'wacc_max': assumptions.dcf_wacc_max
+                    }
+                else:
+                    # If no saved data, use defaults
+                    forecast_data = default_forecast_data
+                    dcf_data = default_dcf_data
+                
+                return selections_data, forecast_data, dcf_data
+                # --- [END MODIFIED LOGIC] ---
         
         # [NEW] If user is not authenticated, return the default set
         return default_selections_data, default_forecast_data, default_dcf_data
@@ -371,6 +395,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         if n_clicks: return not is_open
         return is_open
 
+    # --- [MODIFIED CALLBACK] ---
+    # Saves DCF assumptions to the database
     @app.callback(
         Output('dcf-assumptions-store', 'data', allow_duplicate=True),
         Output('dcf-assumptions-modal', 'is_open', allow_duplicate=True),
@@ -388,8 +414,33 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 'perpetual_min': p_min, 'perpetual_mode': p_mode, 'perpetual_max': p_max,
                 'wacc_min': w_min, 'wacc_mode': w_mode, 'wacc_max': w_max,
             }
+            
+            # --- [NEW LOGIC FOR SAVING TO DB] ---
+            if current_user.is_authenticated:
+                with server.app_context():
+                    assumptions = UserAssumptions.query.filter_by(user_id=current_user.id).first()
+                    if not assumptions:
+                        assumptions = UserAssumptions(user_id=current_user.id)
+                        db.session.add(assumptions)
+                    
+                    # Update all 10 fields
+                    assumptions.dcf_simulations = sims
+                    assumptions.dcf_growth_min = g_min
+                    assumptions.dcf_growth_mode = g_mode
+                    assumptions.dcf_growth_max = g_max
+                    assumptions.dcf_perpetual_min = p_min
+                    assumptions.dcf_perpetual_mode = p_mode
+                    assumptions.dcf_perpetual_max = p_max
+                    assumptions.dcf_wacc_min = w_min
+                    assumptions.dcf_wacc_mode = w_mode
+                    assumptions.dcf_wacc_max = w_max
+                    
+                    db.session.commit()
+            # --- [END NEW LOGIC] ---
+            
             return new_data, False
         return dash.no_update, dash.no_update
+    # --- [END OF MODIFIED CALLBACK] ---
 
     @app.callback(
         [Output('mc-dcf-simulations-input', 'value'),
@@ -400,8 +451,10 @@ def register_callbacks(app, METRIC_DEFINITIONS):
     )
     def sync_dcf_modal_inputs(dcf_data):
         if not dcf_data:
-            return 10000, 3, 5, 8, 1.5, 2.5, 3.0, 7.0, 8.0, 10.0
-        return (dcf_data.get('simulations', 10000), dcf_data.get('growth_min', 3), dcf_data.get('growth_mode', 5), dcf_data.get('growth_max', 8),
+            return 10000, 3.0, 5.0, 8.0, 1.5, 2.5, 3.0, 7.0, 8.0, 10.0
+        # Use .get() with defaults matching the default_dcf_data
+        return (dcf_data.get('simulations', 10000), 
+                dcf_data.get('growth_min', 3.0), dcf_data.get('growth_mode', 5.0), dcf_data.get('growth_max', 8.0),
                 dcf_data.get('perpetual_min', 1.5), dcf_data.get('perpetual_mode', 2.5), dcf_data.get('perpetual_max', 3.0),
                 dcf_data.get('wacc_min', 7.0), dcf_data.get('wacc_mode', 8.0), dcf_data.get('wacc_max', 10.0))
 
@@ -473,7 +526,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 result = calculate_monte_carlo_dcf(
                     ticker=ticker,
                     n_simulations=dcf_data.get('simulations', 10000),
-                    growth_min=dcf_data.get('growth_min', 3), growth_mode=dcf_data.get('growth_mode', 5), growth_max=dcf_data.get('growth_max', 8),
+                    growth_min=dcf_data.get('growth_min', 3.0), growth_mode=dcf_data.get('growth_mode', 5.0), growth_max=dcf_data.get('growth_max', 8.0),
                     perpetual_min=dcf_data.get('perpetual_min', 1.5), perpetual_mode=dcf_data.get('perpetual_mode', 2.5), perpetual_max=dcf_data.get('perpetual_max', 3.0),
                     wacc_min=dcf_data.get('wacc_min', 7.0), wacc_mode=dcf_data.get('wacc_mode', 8.0), wacc_max=dcf_data.get('wacc_max', 10.0),
                 )

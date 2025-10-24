@@ -12,3 +12,4 @@ gunicorn==23.0.0
 psycopg2-binary
 newsapi-python==0.2.7
 requests==2.31.0
+Flask-Migrate==4.0.7

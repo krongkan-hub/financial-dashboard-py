@@ -6,6 +6,7 @@ import dash_bootstrap_components as dbc
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin
+from flask_migrate import Migrate
 from config import Config
 
 # --- App Initialization ---
@@ -31,6 +32,11 @@ if not os.path.exists(instance_path):
 db = SQLAlchemy(server)
 login_manager = LoginManager()
 login_manager.init_app(server)
+
+# --- [NEW INITIALIZATION] ---
+# Initialize Flask-Migrate
+migrate = Migrate(server, db) 
+# --- [END NEW INITIALIZATION] ---
 
 # --- Database Models ---
 # It's better to define models here to avoid circular dependencies

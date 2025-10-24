@@ -1,11 +1,11 @@
-# layout.py (Responsive Version with Monte Carlo DCF Modal)
+# layout.py (Responsive Version with Monte Carlo DCF Modal & MathJax Fix)
 
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 from flask_login import current_user
 from constants import SECTORS
 
-# --- Dictionary for Metric Definitions (ไม่เปลี่ยนแปลง) ---
+# --- Dictionary for Metric Definitions (FIXED) ---
 METRIC_DEFINITIONS = {
     # Graph Definitions
     "tab-performance": dcc.Markdown("""
@@ -45,16 +45,16 @@ METRIC_DEFINITIONS = {
     * **Core Calculation (Simplified):**
         1.  **Calculate Free Cash Flow to the Firm (FCFF):**
             $$
-            FCFF = (EBIT \times (1 - Tax Rate)) + D\&A - CapEx
+            FCFF = (EBIT \\times (1 - Tax Rate)) + D\\&A - CapEx
             $$
         2.  **Calculate Terminal Value (TV):** (The value of the company beyond the forecast period)
             $$
-            TV = \frac{\text{Final Year FCFF} \times (1 + g)}{WACC - g}
+            TV = \\frac{\\text{Final Year FCFF} \\times (1 + g)}{WACC - g}
             $$
             (Where: $g$ = Perpetual Growth Rate, $WACC$ = Discount Rate)
         3.  **Calculate Intrinsic Value:**
             $$
-            Value = \frac{\sum(\text{Discounted Future FCFFs}) + \text{Discounted TV} - \text{Net Debt}}{\text{Shares Outstanding}}
+            Value = \\frac{\\sum(\\text{Discounted Future FCFFs}) + \\text{Discounted TV} - \\text{Net Debt}}{\\text{Shares Outstanding}}
             $$
 
     * **Simulation Process:**

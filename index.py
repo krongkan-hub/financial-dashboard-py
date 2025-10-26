@@ -47,7 +47,7 @@ def start_scheduler():
     scheduler.add_job(
         update_company_summaries,
         'cron',
-        hour=8,  # 8:00 UTC (15:00 Bangkok)
+        hour=14,  # 8:00 UTC (21:00 Bangkok)
         minute=0,
         misfire_grace_time=3600, # ถ้าพลาด ให้ลองใหม่ภายใน 1 ชม.
         id='update_summaries_job' # ตั้ง ID ให้ Job
@@ -58,7 +58,7 @@ def start_scheduler():
     scheduler.add_job(
         update_daily_prices,
         'cron',
-        hour=9, # 9:00 UTC (16:00 Bangkok)
+        hour=15, # 9:00 UTC (22:00 Bangkok)
         minute=0,
         misfire_grace_time=3600*3, # ถ้าพลาด ให้ลองใหม่ภายใน 3 ชม.
         id='update_prices_job' # ตั้ง ID ให้ Job

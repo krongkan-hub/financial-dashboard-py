@@ -1,4 +1,5 @@
 # pages/deep_dive.py (Refactored - Step 4 - FIXED TypeError and NameError)
+# (เวอร์ชันสมบูรณ์ - เปลี่ยนไปดึงข้อมูลจาก DB ทั้งหมด)
 
 import dash
 from dash import dcc, html, dash_table
@@ -10,18 +11,20 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 from datetime import datetime, timedelta
-import yfinance as yf
+# import yfinance as yf # (ถูกลบออก - ไม่ได้ใช้ yf.Ticker() ในไฟล์นี้แล้ว)
 from itertools import groupby
-import logging # <-- [FIX #2] Import logging
+import logging 
 
 # --- Imports ---
 from data_handler import (
-    get_deep_dive_data, # ยังคงใช้สำหรับ info และ financials (ชั่วคราว)
+    # get_deep_dive_data, (ถูกลบออก)
     get_technical_analysis_data,
-    _get_logo_url,
-    get_news_and_sentiment
+    # _get_logo_url, (ถูกลบออก)
+    # get_news_and_sentiment (ถูกลบออก)
 )
-from app import db, server, FactDailyPrices # Import DB and Model
+# --- [เพิ่ม Imports ใหม่] ---
+from app import db, server 
+from app import FactDailyPrices, DimCompany, FactCompanySummary, FactFinancialStatements, FactNewsSentiment
 # --- End Imports ---
 
 # ตั้งค่า logging (ถ้าต้องการให้ log แสดงผล)
@@ -44,7 +47,11 @@ def create_sentiment_layout(sentiment_data):
     for article in articles_raw:
         if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]): continue
         try:
-            article['published_dt'] = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
+            # แก้ไข: ถ้า published_dt เป็น datetime object อยู่แล้ว (จาก DB)
+            if isinstance(article['publishedAt'], datetime):
+                 article['published_dt'] = article['publishedAt']
+            else:
+                 article['published_dt'] = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
             processed_articles.append(article)
         except (ValueError, TypeError): continue
     processed_articles.sort(key=lambda x: x['published_dt'], reverse=True)
@@ -67,7 +74,8 @@ def create_sentiment_layout(sentiment_data):
         layout_components.append(html.Div(article_layouts))
     return html.Div(layout_components)
 
-# --- [REFACTORED with FIX #1] create_technicals_layout ---
+# --- [REFACTORED with FIX #1] create_technicals_layout (เหมือนเดิม) ---
+# (ฟังก์ชันนี้ดึงข้อมูลจาก FactDailyPrices อยู่แล้ว)
 def create_technicals_layout(ticker: str):
     try:
         price_history = pd.DataFrame() # Initialize empty
@@ -157,69 +165,215 @@ def create_metric_card(title, value, className=""):
     else: value_str = str(value)
     return dbc.Card(dbc.CardBody([ html.H6(title, className="metric-card-title"), html.P(value_str, className="metric-card-value"), ]), className=f"metric-card h-100 {className}")
 
-# --- create_deep_dive_layout (เหมือนเดิม) ---
+# --- [START OF MODIFICATION] ---
+# --- create_deep_dive_layout (แก้ไขให้ดึงจาก DB) ---
 def create_deep_dive_layout(ticker=None):
-    # ... (โค้ดเหมือนเดิมทุกประการ) ...
     if not ticker: return dbc.Container([html.P("Please provide a ticker.")], className="p-5 text-center")
+    
     try:
-        info = yf.Ticker(ticker).info;
-        if not info or info.get('quoteType') != 'EQUITY': return dbc.Container([html.H2(f"Data Error for {ticker}"), html.P("Invalid ticker or data unavailable via API."), dcc.Link("Go back", href="/")], fluid=True, className="mt-5 text-center")
-        logo_url, company_name = _get_logo_url(info), info.get('longName', ticker); current_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose', 0); previous_close = info.get('previousClose', 1); daily_change = current_price - previous_close; daily_change_pct = (daily_change / previous_close) * 100 if previous_close else 0
-        def format_large_number(n):
-            if pd.isna(n) or n is None: return "N/A"
-            if abs(n) >= 1e12: return f'${n/1e12:,.2f}T'
-            if abs(n) >= 1e9: return f'${n/1e9:,.2f}B'
-            if abs(n) >= 1e6: return f'${n/1e6:,.2f}M'
-            return f'${n:,.2f}'
+        with server.app_context():
+            # 1. Query ข้อมูลบริษัท (DimCompany) และข้อมูลสรุปล่าสุด (FactCompanySummary)
+            company_data = db.session.query(
+                DimCompany.company_name, DimCompany.logo_url, DimCompany.sector,
+                FactCompanySummary.price, FactCompanySummary.market_cap,
+                FactCompanySummary.analyst_target_price, FactCompanySummary.pe_ratio,
+                FactCompanySummary.forward_pe, FactCompanySummary.long_business_summary,
+                FactCompanySummary.beta # <--- เพิ่ม Beta สำหรับ Card (ถ้าต้องการ)
+                # ... (เพิ่ม metric อื่นๆ ที่ต้องการแสดงใน Card) ...
+            ).join(
+                FactCompanySummary, DimCompany.ticker == FactCompanySummary.ticker
+            ).filter(
+                DimCompany.ticker == ticker
+            ).order_by(
+                FactCompanySummary.date_updated.desc() # เอาข้อมูลล่าสุด
+            ).first()
+
+            if not company_data:
+                return dbc.Container([html.H2(f"Data Error for {ticker}"), html.P("Data not found in warehouse."), dcc.Link("Go back", href="/")], fluid=True, className="mt-5 text-center")
+
+            # 2. Query ราคาปิดเมื่อวาน (จาก FactDailyPrices)
+            # (เรียงจากมากไปน้อย, เอาอันที่ 2 (offset(1)) เพราะอันแรก (offset(0)) คือราคาของ "วันนี้" ที่ Job 1 ดึงมา)
+            price_history_query = db.session.query(FactDailyPrices.close) \
+                                      .filter(FactDailyPrices.ticker == ticker) \
+                                      .order_by(FactDailyPrices.date.desc()) \
+                                      .limit(2) # ดึง 2 อันล่าสุด
+            
+            price_history = price_history_query.all()
+            
+            current_price = company_data.price
+            
+            # หา Previous Close
+            if len(price_history) == 2:
+                # [0] คือราคาล่าสุด (อาจจะยังไม่ปิด) [1] คือราคาปิดวันก่อนหน้า
+                previous_close = price_history[1][0] 
+            elif len(price_history) == 1:
+                # ถ้ามีแค่ราคาเดียว ใช้ราคานั้นเป็น pre-close (กรณีข้อมูลไม่ครบ)
+                previous_close = price_history[0][0]
+            else:
+                previous_close = current_price # Fallback
+
+            daily_change = current_price - previous_close
+            daily_change_pct = (daily_change / previous_close) * 100 if previous_close else 0
+            
+            logo_url = company_data.logo_url
+            company_name = company_data.company_name
+            business_summary = company_data.long_business_summary
+            key_stats = company_data # key_stats คือผลลัพธ์จาก query
+
     except Exception as e:
-         logging.error(f"Failed to fetch initial info for {ticker} via yfinance: {e}")
-         return dbc.Container([html.H2(f"API Error for {ticker}"), html.P(f"Could not fetch initial data from yfinance. Reason: {e}"), dcc.Link("Go back", href="/")], fluid=True, className="mt-5 text-center")
-    marquee = dbc.Row([ dbc.Col(html.Img(src=logo_url or '/assets/placeholder_logo.png', className="company-logo"), width="auto", align="center"), dbc.Col([html.H1(company_name, className="company-name mb-0"), html.P(f"{info.get('exchange', '')}: {ticker}", className="text-muted small")], width=True, align="center"), dbc.Col(html.Div([html.H2(f"${current_price:,.2f}", className="price-display mb-0"), html.P(f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f} ({'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%)", className=f"price-change {'price-positive' if daily_change >= 0 else 'price-negative'}")], className="text-end"), width="auto", align="center") ], align="center", className="marquee-header g-3")
-    key_stats = info
-    cards_to_show = [ create_metric_card("Market Cap", key_stats.get('marketCap')), create_metric_card("Analyst Target", key_stats.get('targetMeanPrice')), create_metric_card("Recommendation", key_stats.get('recommendationKey', 'N/A').replace('_', ' ').title()), create_metric_card("P/E Ratio", key_stats.get('trailingPE')), create_metric_card("Forward P/E", key_stats.get('forwardPE')), create_metric_card("Dividend Yield %", key_stats.get('dividendYield')), create_metric_card("PEG Ratio", key_stats.get('pegRatio')), ]
-    at_a_glance = html.Div([ dbc.Row([dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show if card is not None], className="g-3"), dbc.Card(dbc.CardBody([html.H5("Business Summary", className="card-title"), html.P(info.get('longBusinessSummary', 'Not available.'), className="small")])) if info.get('longBusinessSummary') else "" ])
+         logging.error(f"Failed to fetch data from DB for {ticker}: {e}", exc_info=True)
+         return dbc.Container([html.H2(f"Database Error for {ticker}"), html.P(f"Could not fetch data from warehouse. Reason: {e}"), dcc.Link("Go back", href="/")], fluid=True, className="mt-5 text-center")
+    
+    # --- (ส่วนที่เหลือเหมือนเดิม) ---
+    marquee = dbc.Row([ dbc.Col(html.Img(src=logo_url or '/assets/placeholder_logo.png', className="company-logo"), width="auto", align="center"), dbc.Col([html.H1(company_name, className="company-name mb-0"), html.P(f"Ticker: {ticker}", className="text-muted small")], width=True, align="center"), dbc.Col(html.Div([html.H2(f"${current_price:,.2f}", className="price-display mb-0"), html.P(f"{'+' if daily_change >= 0 else ''}{daily_change:,.2f} ({'+' if daily_change_pct >= 0 else ''}{daily_change_pct:.2f}%)", className=f"price-change {'price-positive' if daily_change >= 0 else 'price-negative'}")], className="text-end"), width="auto", align="center") ], align="center", className="marquee-header g-3")
+    
+    # สร้าง Cards (ต้องแก้ .get() เป็น .attribute)
+    cards_to_show = [ 
+        create_metric_card("Market Cap", key_stats.market_cap), 
+        create_metric_card("Analyst Target", key_stats.analyst_target_price), 
+        create_metric_card("P/E Ratio", key_stats.pe_ratio), 
+        create_metric_card("Forward P/E", key_stats.forward_pe),
+        create_metric_card("Beta", key_stats.beta)
+    ]
+    
+    at_a_glance = html.Div([ dbc.Row([dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show if card is not None], className="g-3"), dbc.Card(dbc.CardBody([html.H5("Business Summary", className="card-title"), html.P(business_summary or 'Not available.', className="small")])) if business_summary else "" ])
     analysis_workspace = html.Div([ html.Div(className="custom-tabs-container mt-4", children=[ dbc.Tabs([ dbc.Tab(label="TECHNICALS", tab_id="tab-technicals-deep-dive", label_class_name="fw-bold"), dbc.Tab(label="FINANCIALS", tab_id="tab-financials-deep-dive", label_class_name="fw-bold"), dbc.Tab(label="NEWS", tab_id="tab-sentiment-deep-dive", label_class_name="fw-bold"), ], id="deep-dive-main-tabs", active_tab="tab-technicals-deep-dive", ) ]), dbc.Card(dbc.CardBody(dbc.Spinner(html.Div(id="deep-dive-tab-content"), color="primary", spinner_style={"width": "3rem", "height": "3rem"}, delay_show=250)), className="mt-3") ])
-    return dbc.Container([ dcc.Store(id='deep-dive-ticker-store', data={'ticker': ticker, 'company_name': company_name}), marquee, html.Hr(), at_a_glance, analysis_workspace, ], fluid=True, className="p-4 main-content-container")
+    
+    return dbc.Container([ 
+        dcc.Store(id='deep-dive-ticker-store', data={'ticker': ticker, 'company_name': company_name}), 
+        marquee, html.Hr(), at_a_glance, analysis_workspace, 
+    ], fluid=True, className="p-4 main-content-container")
+# --- [END OF MODIFICATION] ---
+
 
 # ==============================================================================
 # SECTION 2: Dash Callbacks (render_master_tab_content, render_financial_statement_table เหมือนเดิม)
 # ==============================================================================
 
-# --- Callback หลักสำหรับเปลี่ยน Tab Content (เหมือนเดิม) ---
+# --- [START OF MODIFICATION] ---
+# --- Callback หลักสำหรับเปลี่ยน Tab Content (แก้ไข News Tab) ---
 @dash.callback(
     Output('deep-dive-tab-content', 'children'),
     Input('deep-dive-main-tabs', 'active_tab'),
     State('deep-dive-ticker-store', 'data')
 )
 def render_master_tab_content(active_tab, store_data):
-    # ... (โค้ดเหมือนเดิมทุกประการ) ...
     if not store_data or not store_data.get('ticker'): return dbc.Alert("Ticker not found in store.", color="danger")
     ticker, company_name = store_data.get('ticker'), store_data.get('company_name')
+    
     if active_tab == "tab-sentiment-deep-dive":
-        if not company_name: return dbc.Alert("Company name not found for news.", color="warning")
-        sentiment_data = get_news_and_sentiment(company_name); return create_sentiment_layout(sentiment_data)
+        # --- [แก้ไข] ---
+        # (ลบ get_news_and_sentiment(company_name))
+        with server.app_context():
+            # ดึงข่าว 20 ล่าสุดจาก DB
+            articles_from_db = db.session.query(FactNewsSentiment) \
+                                     .filter(FactNewsSentiment.ticker == ticker) \
+                                     .order_by(FactNewsSentiment.published_at.desc()) \
+                                     .limit(20).all()
+
+        if not articles_from_db:
+            return dbc.Alert("No recent news articles found in database.", color="info")
+
+        # แปลงข้อมูลกลับไปเป็น format ที่ create_sentiment_layout คาดหวัง
+        articles_list = []
+        for article in articles_from_db:
+            articles_list.append({
+                'title': article.title,
+                'publishedAt': article.published_at, # <--- ส่งเป็น datetime object
+                'description': article.description,
+                'url': article.article_url,
+                'source': {'name': article.source_name},
+                'sentiment': article.sentiment_label,
+                'sentiment_score': article.sentiment_score
+            })
+        
+        # คำนวณ Summary
+        labels = [a['sentiment'] for a in articles_list if a['sentiment']]
+        total_count = len(labels)
+        summary = {
+            'total_count': total_count,
+            'positive_count': labels.count('positive'),
+            'neutral_count': labels.count('neutral'),
+            'negative_count': labels.count('negative'),
+            'positive_pct': (labels.count('positive') / total_count) * 100 if total_count > 0 else 0,
+            'neutral_pct': (labels.count('neutral') / total_count) * 100 if total_count > 0 else 0,
+            'negative_pct': (labels.count('negative') / total_count) * 100 if total_count > 0 else 0,
+        }
+        
+        sentiment_data = {"articles": articles_list, "summary": summary}
+        return create_sentiment_layout(sentiment_data)
+        # --- [จบการแก้ไข] ---
+
     elif active_tab == "tab-technicals-deep-dive":
-        return create_technicals_layout(ticker) # Now calls the fixed function
+        return create_technicals_layout(ticker) # (อันนี้ดึงจาก DB อยู่แล้ว)
+    
     elif active_tab == "tab-financials-deep-dive":
         return html.Div([ dbc.Row(dbc.Col(dcc.Dropdown(id='financial-statement-dropdown', options=[{'label': 'Income Statement', 'value': 'income'},{'label': 'Balance Sheet', 'value': 'balance'},{'label': 'Cash Flow', 'value': 'cashflow'},], value='income', clearable=False), width=12, md=4, lg=3), className="mb-4 mt-2"), dcc.Loading(html.Div(id="financial-statement-content")) ])
+    
     return html.Div(f"Tab content for {active_tab}") # Fallback
+# --- [END OF MODIFICATION] ---
 
 
-# --- Callback สำหรับ Render ตาราง Financial Statement (เหมือนเดิม) ---
+# --- [START OF MODIFICATION] ---
+# --- Callback สำหรับ Render ตาราง Financial Statement (แก้ไขให้ดึงจาก DB) ---
 @dash.callback(
     Output('financial-statement-content', 'children'),
     Input('financial-statement-dropdown', 'value'),
     State('deep-dive-ticker-store', 'data')
 )
 def render_financial_statement_table(selected_statement, store_data):
-    # ... (โค้ดเหมือนเดิมทุกประการ) ...
     if not selected_statement or not store_data or not store_data.get('ticker'): return dash.no_update
     ticker = store_data['ticker']
+    
     try:
-        data = get_deep_dive_data(ticker); statements = data.get("financial_statements", {}); df = statements.get(selected_statement)
+        # --- [แก้ไข] ---
+        # (ลบ get_deep_dive_data(ticker))
+        with server.app_context():
+            # Query งบการเงินแบบ Long Format จาก DB
+            query = db.session.query(FactFinancialStatements.report_date, 
+                                     FactFinancialStatements.metric_name, 
+                                     FactFinancialStatements.metric_value) \
+                              .filter(FactFinancialStatements.ticker == ticker,
+                                      FactFinancialStatements.statement_type == selected_statement) \
+                              .order_by(FactFinancialStatements.report_date.desc()) \
+                              .limit(16 * 100) # (ดึงเผื่อไว้หลายๆ metric * 16 ไตรมาส)
+            
+            df_long = pd.read_sql(query.statement, db.session.bind)
+
+        if df_long.empty:
+            return dbc.Alert(f"Quarterly {selected_statement} data not available in DB for {ticker}.", color="warning")
+
+        # Pivot ข้อมูลกลับเป็นตาราง (Wide format) เพื่อแสดงผล
+        df = df_long.pivot(index='metric_name', columns='report_date', values='metric_value')
+        
+        # เรียง Columns (วันที่) จากใหม่ไปเก่า
+        df = df[sorted(df.columns, reverse=True)]
+        
+        # เลือกมาแค่ 16 ไตรมาสล่าสุด (ถ้ามีเยอะเกิน)
+        df = df.iloc[:, :16]
+        
+        # --- [จบการแก้ไข] ---
+
+        # (ส่วนที่เหลือเหมือนเดิม)
         if df is None or df.empty: return dbc.Alert(f"Quarterly {selected_statement.replace('_', ' ').title()} data not available via API for {ticker}.", color="warning")
-        df.columns = [col.strftime('%Y-%m-%d') if isinstance(col, pd.Timestamp) else str(col) for col in df.columns]; df_formatted = df.copy()
-        for col in df_formatted.columns: numeric_col = pd.to_numeric(df_formatted[col], errors='coerce'); df_formatted[col] = numeric_col.apply(lambda x: f"{x/1e6:,.1f}M" if pd.notna(x) else "-")
-        df_reset = df_formatted.reset_index().rename(columns={'index': 'Metric'})
-        return dash_table.DataTable( data=df_reset.to_dict('records'), columns=[{"name": col, "id": col} for col in df_reset.columns], style_header={'backgroundColor': 'transparent','border': '0px','borderBottom': '2px solid #dee2e6','textTransform': 'uppercase','fontWeight': '600'}, style_cell={'textAlign': 'right','padding': '14px','border': '0px','borderBottom': '1px solid #f0f0f0','fontFamily': 'inherit','fontSize': '0.9rem'}, style_cell_conditional=[{'if': {'column_id': 'Metric'},'textAlign': 'left','fontWeight': '600','width': '35%'}], page_size=len(df_reset) )
-    except Exception as e: logging.error(f"Error rendering financial statement '{selected_statement}' for {ticker}: {e}", exc_info=True); return dbc.Alert(f"Could not display financial statement: {e}", color="danger")
+        
+        df.columns = [col.strftime('%Y-%m-%d') if isinstance(col, (pd.Timestamp, datetime)) else str(col) for col in df.columns]
+        df_formatted = df.copy()
+        for col in df_formatted.columns: 
+            numeric_col = pd.to_numeric(df_formatted[col], errors='coerce')
+            df_formatted[col] = numeric_col.apply(lambda x: f"{x/1e6:,.1f}M" if pd.notna(x) else "-")
+        
+        df_reset = df_formatted.reset_index().rename(columns={'metric_name': 'Metric'})
+        
+        return dash_table.DataTable( 
+            data=df_reset.to_dict('records'), 
+            columns=[{"name": col, "id": col} for col in df_reset.columns], 
+            style_header={'backgroundColor': 'transparent','border': '0px','borderBottom': '2px solid #dee2e6','textTransform': 'uppercase','fontWeight': '600'}, 
+            style_cell={'textAlign': 'right','padding': '14px','border': '0px','borderBottom': '1px solid #f0f0f0','fontFamily': 'inherit','fontSize': '0.9rem'}, 
+            style_cell_conditional=[{'if': {'column_id': 'Metric'},'textAlign': 'left','fontWeight': '600','width': '35%'}], 
+            page_size=len(df_reset) 
+        )
+    except Exception as e: 
+        logging.error(f"Error rendering financial statement '{selected_statement}' for {ticker}: {e}", exc_info=True)
+        return dbc.Alert(f"Could not display financial statement: {e}", color="danger")
+# --- [END OF MODIFICATION] ---

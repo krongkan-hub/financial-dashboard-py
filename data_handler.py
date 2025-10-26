@@ -1,4 +1,4 @@
-# data_handler.py (FIXED - Timeout and JSON Parsing)
+# data_handler.py (FIXED - Rate Limiting & Optimized)
 
 import pandas as pd
 import yfinance as yf
@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import requests
 import os
+import time # Import time for delays
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -18,14 +19,14 @@ warnings.filterwarnings("ignore", category=UserWarning)
 from config import Config
 from newsapi import NewsApiClient
 
-# --- Initialize NewsAPI ---
+# --- Initialize NewsAPI (เหมือนเดิม) ---
 if Config.NEWS_API_KEY:
     newsapi = NewsApiClient(api_key=Config.NEWS_API_KEY)
 else:
     newsapi = None
     logging.warning("NEWS_API_KEY not found in config. News fetching will be disabled.")
 
-# --- [MODIFIED] Hugging Face API Function (Timeout & Parsing Fixed) ---
+# --- Hugging Face API Function (เหมือนเดิม) ---
 def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
     API_URL = "https://api-inference.huggingface.co/models/mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
     hf_token = os.environ.get('HUGGING_FACE_TOKEN')
@@ -43,57 +44,42 @@ def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
     final_results = []
     
     try:
-        # Increased timeout to 120 seconds
         response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         results_batch = response.json() 
 
-        # --- [START OF THE REAL FIX] ---
-        # The API returns List[ List[Dict] ] - a list *containing* the actual results list
-        
-        # 1. Check if the outer response is a list and has at least one element
         if isinstance(results_batch, list) and len(results_batch) > 0:
-            
-            # 2. Extract the *inner list* which contains the results
             inner_results_list = results_batch[0]
-            
-            # 3. Check if the inner list is valid and its length matches our input
             if isinstance(inner_results_list, list) and len(inner_results_list) == len(texts_to_analyze):
-                
-                # 4. Loop through the *inner list*
-                # `result_for_one_article` is a dict: {'label': 'pos', 'score': 0.9}
-                # (This is what the log message proved)
                 for result_for_one_article in inner_results_list:
-                    
-                    # 5. [THE FIX] Check if it's a dict and has the 'label' key
                     if isinstance(result_for_one_article, dict) and 'label' in result_for_one_article:
-                        # It is a dict, so just append it directly
                         final_results.append({
                             'label': result_for_one_article.get('label', 'neutral').lower(),
                             'score': result_for_one_article.get('score', 0.0)
                         })
                     else:
-                        # If it's not a dict, or missing keys (e.g., None)
                         logging.warning(f"Unexpected inner structure for one article: {result_for_one_article}")
                         final_results.append(default_result)
             else:
-                # If the inner list is bad or length doesn't match
                 logging.error(f"API response *inner* list validation failed (length mismatch or not a list): {inner_results_list}")
                 return [default_result] * len(texts_to_analyze)
         else:
-            # If the outer response is not a list or is empty
             logging.error(f"API response *outer* structure unexpected or empty: {results_batch}")
             return [default_result] * len(texts_to_analyze)
-        # --- [END OF THE REAL FIX] ---
                 
+    except requests.exceptions.Timeout:
+        logging.error("API request timed out after 120 seconds.", exc_info=False)
+        return [default_result] * len(texts_to_analyze)
+    except requests.exceptions.RequestException as req_e:
+        logging.error(f"API request failed: {req_e}", exc_info=True)
+        return [default_result] * len(texts_to_analyze)
     except Exception as e:
-        # This will catch timeouts, HTTP errors, etc.
         logging.error(f"API batch request failed or parsing failed: {e}", exc_info=True)
         return [default_result] * len(texts_to_analyze)
     
     return final_results
 
-# --- [MODIFIED] News Fetching Function (Calls Batch API) ---
+# --- News Fetching Function (เหมือนเดิม) ---
 @lru_cache(maxsize=32)
 def get_news_and_sentiment(company_name: str) -> dict:
     if not newsapi: return {"error": "News service is not configured."}
@@ -104,12 +90,10 @@ def get_news_and_sentiment(company_name: str) -> dict:
         if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0: 
             return {"articles": [], "summary": {}}
 
-        # 1. รวบรวมบทความและข้อความที่จะวิเคราะห์
         articles_to_process = []
         texts_to_analyze = []
         for article in all_articles['articles']:
             if not article.get('description') or not article.get('title'): continue
-            # ตัดข้อความให้สั้นลง (Hugging Face มี limit)
             text = (article['title'] + ". " + article['description'])[:512]
             articles_to_process.append(article)
             texts_to_analyze.append(text)
@@ -117,12 +101,10 @@ def get_news_and_sentiment(company_name: str) -> dict:
         if not articles_to_process:
              return {"articles": [], "summary": {}}
 
-        # 2. ส่งวิเคราะห์ทั้งหมดในครั้งเดียว (Batch)
         logging.info(f"Sending {len(texts_to_analyze)} articles to batch sentiment analysis...")
         sentiment_results = analyze_sentiment_batch(texts_to_analyze)
         logging.info("Batch analysis complete.")
 
-        # 3. นำผลลัพธ์มารวมกลับ
         analyzed_articles = []
         sentiment_scores = {'positive': 0, 'neutral': 0, 'negative': 0}
         
@@ -145,7 +127,7 @@ def get_news_and_sentiment(company_name: str) -> dict:
         logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
         return {"error": str(e)}
 
-# --- Helper Functions & Constants ---
+# --- Helper Functions & Constants (เหมือนเดิม) ---
 FIN_KEYS = {"revenue": ["Total Revenue", "Revenues", "Revenue"],"cost_of_revenue": ["Cost Of Revenue", "Cost of Revenue", "Cost Of Goods Sold"],"gross_profit": ["Gross Profit"],"op_income": ["Operating Income", "Operating Income or Loss", "Ebit", "Earnings Before Interest and Taxes"],"net_income": ["Net Income", "Net Income From Continuing Ops", "Net Income Applicable To Common Shares"],}
 CF_KEYS = { "cfo": ["Total Cash From Operating Activities", "Operating Cash Flow"], "capex": ["Capital Expenditures"] }
 
@@ -167,20 +149,15 @@ def _cagr(series: pd.Series, years: int) -> float:
     num_years = (series.index[-1].year - series.index[0].year) if pd.api.types.is_datetime64_any_dtype(series.index) else len(series) - 1
     if num_years <= 0: return np.nan
     start_val, end_val = series.iloc[0], series.iloc[-1]
-    # --- [START EDIT] ---
-    if pd.notna(start_val) and pd.notna(end_val) and start_val > 0: # Ensure start_val is positive
+    if pd.notna(start_val) and pd.notna(end_val) and start_val > 0: 
         try:
-            # Calculate CAGR safely
             result = (end_val / start_val)**(1.0 / num_years) - 1.0
-            # Check if result is complex (e.g., negative base with fractional power)
             if isinstance(result, complex):
-                return np.nan # Return NaN if result is complex
-            return float(result) # Ensure it's a float
+                return np.nan 
+            return float(result) 
         except (ValueError, TypeError, ZeroDivisionError, OverflowError):
-            # Catch potential math errors
             return np.nan
-    # --- [END EDIT] ---
-    return np.nan # Return NaN if conditions aren't met
+    return np.nan 
 
 def get_financial_data(statement_series, possible_keys):
     if statement_series is None: return None
@@ -229,77 +206,148 @@ def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
         logging.error(f"Error in calculate_drawdown for {tickers}: {e}")
         return pd.DataFrame()
 
+# --- [MODIFIED] get_competitor_data (added time.sleep, company_name, sector) ---
 @lru_cache(maxsize=10)
 def get_competitor_data(tickers: tuple) -> pd.DataFrame:
+    """
+    ดึงข้อมูลสรุปสำหรับ ETL Job 1
+    เพิ่ม: Company Name, Sector และ Time Delay
+    """
     all_data = []
-    for ticker in tickers:
+    total = len(tickers)
+    logging.info(f"Starting to fetch competitor data for {total} tickers...")
+    
+    for i, ticker in enumerate(tickers):
         try:
             tkr = yf.Ticker(ticker)
-            info = tkr.info
-            if not info or info.get('quoteType') != 'EQUITY': continue
-            logo_url, revenue_series = _get_logo_url(info), get_revenue_series(ticker)
-            cagr_3y = _cagr(revenue_series, 3) if not revenue_series.empty else np.nan
-            cfo_series, ni_series = _pick_row(tkr.cashflow, CF_KEYS['cfo']), _pick_row(tkr.financials, FIN_KEYS['net_income'])
+            info = tkr.info # Fetch info once
+            if not info or info.get('quoteType') != 'EQUITY': 
+                logging.warning(f"({i+1}/{total}) Skipping {ticker}: Invalid ticker or no data.")
+                continue # Skip to the next ticker if info is bad
+
+            logging.info(f"({i+1}/{total}) Fetching data for {ticker}...")
+
+            logo_url = _get_logo_url(info)
+            # Use financials/cashflow from the same tkr object to reduce API calls
+            fin, cf = tkr.financials, tkr.cashflow
+            
+            revenue_series = _pick_row(fin, FIN_KEYS["revenue"]) if fin is not None and not fin.empty else pd.Series(dtype=float)
+            if revenue_series is not None and not revenue_series.empty: 
+                revenue_series.index = pd.to_datetime(revenue_series.index)
+                revenue_series = revenue_series.sort_index()
+            cagr_3y = _cagr(revenue_series, 3) if revenue_series is not None and not revenue_series.empty else np.nan
+            
+            cfo_series = _pick_row(cf, CF_KEYS['cfo']) if cf is not None and not cf.empty else None
+            ni_series = _pick_row(fin, FIN_KEYS['net_income']) if fin is not None and not fin.empty else None
+            
             cash_conversion = np.nan
             if cfo_series is not None and ni_series is not None and not cfo_series.empty and not ni_series.empty:
-                latest_cfo, latest_ni = cfo_series.iloc[0], ni_series.iloc[0]
-                if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0: cash_conversion = latest_cfo / latest_ni
-            all_data.append({
-                "Ticker": ticker, "logo_url": logo_url, "Price": info.get('currentPrice') or info.get('previousClose'),
-                "Market Cap": info.get("marketCap"), "Beta": info.get("beta"), "P/E": info.get('trailingPE'), "P/B": info.get('priceToBook'),
-                "EV/EBITDA": info.get('enterpriseToEbitda'), "Revenue Growth (YoY)": info.get('revenueGrowth'), "Revenue CAGR (3Y)": cagr_3y,
-                "Net Income Growth (YoY)": info.get('earningsGrowth'), "ROE": info.get('returnOnEquity'),
+                # Ensure indices are aligned if possible, or use latest available period
+                aligned_cfo = cfo_series.reindex(ni_series.index, method='ffill').dropna()
+                aligned_ni = ni_series.reindex(cfo_series.index, method='ffill').dropna()
+                common_index = aligned_cfo.index.intersection(aligned_ni.index)
+                if not common_index.empty:
+                    latest_common_date = common_index.max()
+                    latest_cfo = aligned_cfo.get(latest_common_date)
+                    latest_ni = aligned_ni.get(latest_common_date)
+                    if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0: 
+                        cash_conversion = latest_cfo / latest_ni
+                elif not cfo_series.empty and not ni_series.empty: # Fallback if no common index
+                    latest_cfo, latest_ni = cfo_series.iloc[0], ni_series.iloc[0]
+                    if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0: 
+                        cash_conversion = latest_cfo / latest_ni
+
+
+            data_dict = {
+                "Ticker": ticker, 
+                "company_name": info.get('longName'), # <--- Added for DimCompany
+                "sector": info.get('sector'), # <--- Added for DimCompany
+                "logo_url": logo_url, 
+                "Price": info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose'),
+                "Market Cap": info.get("marketCap"), 
+                "Beta": info.get("beta"), 
+                "P/E": info.get('trailingPE'), 
+                "P/B": info.get('priceToBook'),
+                "EV/EBITDA": info.get('enterpriseToEbitda'), 
+                "Revenue Growth (YoY)": info.get('revenueGrowth'), 
+                "Revenue CAGR (3Y)": cagr_3y,
+                "Net Income Growth (YoY)": info.get('earningsGrowth'), 
+                "ROE": info.get('returnOnEquity'),
                 "D/E Ratio": info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') is not None else np.nan,
-                "Operating Margin": info.get('operatingMargins'), "Cash Conversion": cash_conversion
-            })
-        except Exception as e: logging.error(f"An error occurred processing summary for {ticker}: {e}")
+                "Operating Margin": info.get('operatingMargins'), 
+                "Cash Conversion": cash_conversion,
+                # --- [ข้อมูลใหม่ที่เพิ่มเข้ามา] ---
+                "EBITDA Margin": info.get('ebitdaMargins'),
+                "Trailing EPS": info.get('trailingEps'),
+                "Forward P/E": info.get('forwardPE'),
+                "Analyst Target Price": info.get('targetMeanPrice'),
+                "Long Business Summary": info.get('longBusinessSummary')
+            }
+            all_data.append(data_dict)
+
+            # --- [FIX 4] เพิ่มการหน่วงเวลา ---
+            time.sleep(0.5) # Wait 0.5 second between tickers
+
+        except Exception as e: 
+            # Log the specific error for the ticker but continue the loop
+            logging.error(f"({i+1}/{total}) An error occurred processing summary for {ticker}: {e}")
+            # Optional: Add a longer sleep if a specific error (like rate limit) occurs
+            # if "RateLimitException" in str(e): # Example check (adjust based on actual error)
+            #    logging.warning(f"Rate limit hit for {ticker}. Sleeping for 60 seconds...")
+            #    time.sleep(60)
+            time.sleep(1) # General short sleep on error before trying next ticker
+            continue # Continue to the next ticker
+
+    logging.info(f"Finished fetching competitor data. Got data for {len(all_data)} out of {total} tickers.")
     return pd.DataFrame(all_data)
+# --- [END OF MODIFICATION] ---
+
 
 @lru_cache(maxsize=10)
 def get_scatter_data(tickers: tuple) -> pd.DataFrame:
+    # (ฟังก์ชันนี้ไม่จำเป็นต้องแก้ เพราะจะถูกเลิกใช้ใน callbacks.py)
     scatter_data = []
     for ticker in tickers:
         try:
             info = yf.Ticker(ticker).info
             if not info: continue
             scatter_data.append({'Ticker': ticker, 'EV/EBITDA': info.get('enterpriseToEbitda'), 'EBITDA Margin': info.get('ebitdaMargins')})
-        except Exception as e: logging.warning(f"Could not fetch scatter data for {ticker}: {e}")
+            time.sleep(0.2) # Added small delay
+        except Exception as e:
+             logging.warning(f"Could not fetch scatter data for {ticker}: {e}")
+             time.sleep(5) # Longer delay on error
     return pd.DataFrame(scatter_data).dropna()
 
 @lru_cache(maxsize=32)
 def get_deep_dive_data(ticker: str) -> dict:
+    """
+    (แก้ไข: ลด API Calls ที่ไม่จำเป็นสำหรับ ETL Job 3)
+    ดึงเฉพาะข้อมูลที่จำเป็นสำหรับ Job 3 (Financials) และ Job DCF
+    """
     try:
         tkr = yf.Ticker(ticker)
-        info = tkr.info
+        # Fetch data needed for Financials and potentially DCF
+        info = tkr.info # Still needed for DCF potentially
         if not info or info.get('quoteType') != 'EQUITY': return {"error": "Invalid ticker or no data available."}
         
-        result = {"info": info}
+        # Only fetch financials if needed (ETL Job 3 will call this)
+        # Let's keep fetching them for now as DCF might need them too,
+        # but be aware this is an area for potential optimization if DCF is also moved to DB.
+        qf = tkr.quarterly_financials
+        qbs = tkr.quarterly_balance_sheet
+        qcf = tkr.quarterly_cashflow
         
-        income_stmt_quarterly = tkr.quarterly_financials.iloc[:, :16]
-        revenue = _pick_row(income_stmt_quarterly, FIN_KEYS['revenue'])
-        net_income = _pick_row(income_stmt_quarterly, FIN_KEYS['net_income'])
+        result = {"info": info} # Keep info for DCF or other uses
         
-        financial_trends = pd.DataFrame({'Revenue': revenue, 'Net Income': net_income}).dropna(how='all')
-        if not financial_trends.empty:
-            financial_trends.index = pd.to_datetime(financial_trends.index).to_period('Q').strftime('%Y-Q%q')
-        result["financial_trends"] = financial_trends.sort_index()
-
-        margin_trends = pd.DataFrame(index=financial_trends.index)
-        if revenue is not None and not revenue.empty:
-            revenue_safe = revenue.replace(0, np.nan)
-            gross_profit = _pick_row(income_stmt_quarterly, FIN_KEYS['gross_profit'])
-            op_income = _pick_row(income_stmt_quarterly, FIN_KEYS['op_income'])
-            if gross_profit is not None: margin_trends['Gross Margin'] = gross_profit / revenue_safe
-            if op_income is not None: margin_trends['Operating Margin'] = op_income / revenue_safe
-            if net_income is not None: margin_trends['Net Margin'] = net_income / revenue_safe
-        result["margin_trends"] = margin_trends.sort_index().dropna(how='all')
-
         result["financial_statements"] = {
-            "income": tkr.quarterly_financials.iloc[:,:16].dropna(how='all', axis=1),
-            "balance": tkr.quarterly_balance_sheet.iloc[:,:16].dropna(how='all', axis=1),
-            "cashflow": tkr.quarterly_cashflow.iloc[:,:16].dropna(how='all', axis=1)
+            "income": qf.iloc[:,:16].dropna(how='all', axis=1) if qf is not None else pd.DataFrame(),
+            "balance": qbs.iloc[:,:16].dropna(how='all', axis=1) if qbs is not None else pd.DataFrame(),
+            "cashflow": qcf.iloc[:,:16].dropna(how='all', axis=1) if qcf is not None else pd.DataFrame()
         }
-        result["price_history"] = tkr.history(period="5y")
+
+        # Removed price history, margin trends, financial trends as they are derived/stored elsewhere now
+        # result["price_history"] = tkr.history(period="5y") # Removed
+
         return result
     except Exception as e:
         logging.error(f"Critical failure in get_deep_dive_data for {ticker}: {e}", exc_info=True)
@@ -307,6 +355,8 @@ def get_deep_dive_data(ticker: str) -> dict:
 
 @lru_cache(maxsize=32)
 def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perpetual_growth_rate: float, wacc_override: Optional[float]) -> dict:
+    # (ฟังก์ชันนี้ยังคงเหมือนเดิม - ใช้ yfinance สด)
+    # ... (โค้ดเดิม) ...
     try:
         ticker_obj = yf.Ticker(ticker)
         info = ticker_obj.info
@@ -349,6 +399,7 @@ def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perp
         logging.error(f"Critical DCF failure for {ticker}: {e}", exc_info=True)
         return {'Ticker': ticker, 'error': 'Unexpected error during calculation.'}
 
+
 @lru_cache(maxsize=32)
 def calculate_monte_carlo_dcf(
     ticker: str,
@@ -358,7 +409,7 @@ def calculate_monte_carlo_dcf(
     wacc_min: float, wacc_mode: float, wacc_max: float
 ) -> dict:
     """
-    Performs a DCF valuation using Monte Carlo simulation on key assumptions.
+    (ฟังก์ชันนี้ยังคงเหมือนเดิม - ใช้ yfinance สด)
     """
     try:
         ticker_obj, info = yf.Ticker(ticker), yf.Ticker(ticker).info
@@ -390,24 +441,52 @@ def calculate_monte_carlo_dcf(
         sim_perpetual = np.random.triangular(perpetual_min / 100.0, perpetual_mode / 100.0, perpetual_max / 100.0, n_simulations)
         sim_wacc = np.random.triangular(wacc_min / 100.0, wacc_mode / 100.0, wacc_max / 100.0, n_simulations)
 
+        # Handle cases where sim_wacc might be <= sim_perpetual
+        valid_sim = sim_wacc > sim_perpetual
+        if not np.any(valid_sim):
+            return {'error': 'Invalid WACC/Perpetual Growth ranges resulting in WACC <= g for all simulations.'}
+
+        # Filter out invalid simulations before calculations
+        sim_growth = sim_growth[valid_sim]
+        sim_perpetual = sim_perpetual[valid_sim]
+        sim_wacc = sim_wacc[valid_sim]
+        
+        if len(sim_wacc) == 0: # Check again after filtering
+             return {'error': 'No valid simulations after filtering WACC > g.'}
+        
+        n_valid_simulations = len(sim_wacc) # Update simulation count
+
         future_fcffs = base_fcff * (1 + sim_growth) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
         discounted_fcffs = future_fcffs / (1 + sim_wacc) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
         final_year_fcff = future_fcffs[-1]
+        
+        # Calculate terminal value only for valid simulations
         terminal_value = (final_year_fcff * (1 + sim_perpetual)) / (sim_wacc - sim_perpetual)
+        
+        # Ensure terminal value is not negative (or handle appropriately)
+        terminal_value[terminal_value < 0] = 0 
+        
         discounted_terminal_value = terminal_value / ((1 + sim_wacc) ** PROJECTION_YEARS)
 
         enterprise_value = np.sum(discounted_fcffs, axis=0) + discounted_terminal_value
         equity_value = enterprise_value - net_debt
         simulated_intrinsic_values = equity_value / shares_outstanding
 
+        # Filter out potential non-finite values before calculating statistics
+        finite_values = simulated_intrinsic_values[np.isfinite(simulated_intrinsic_values)]
+        if len(finite_values) == 0:
+             return {'error': 'All simulations resulted in non-finite intrinsic values.'}
+
+
         return {
-            'simulated_values': simulated_intrinsic_values.tolist(),
+            'simulated_values': finite_values.tolist(),
             'current_price': current_price,
-            'mean': np.mean(simulated_intrinsic_values),
-            'median': np.median(simulated_intrinsic_values),
-            'p10': np.percentile(simulated_intrinsic_values, 10),
-            'p90': np.percentile(simulated_intrinsic_values, 90),
-            'success': True
+            'mean': np.mean(finite_values),
+            'median': np.median(finite_values),
+            'p10': np.percentile(finite_values, 10),
+            'p90': np.percentile(finite_values, 90),
+            'success': True,
+            'num_valid_simulations': len(finite_values) # Add info about valid simulations
         }
 
     except Exception as e:
@@ -416,28 +495,42 @@ def calculate_monte_carlo_dcf(
 
 
 def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
+    """
+    (ฟังก์ชันนี้ไม่ถูกแก้ไข - คำนวณ Indicators จาก DataFrame ที่ส่งเข้ามา)
+    """
     if not isinstance(price_history_df, pd.DataFrame) or price_history_df.empty: return {"error": "Price history data is missing."}
     df = price_history_df.copy()
-    df['SMA50'] = df['Close'].rolling(window=50).mean()
-    df['SMA200'] = df['Close'].rolling(window=200).mean()
-    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    df['BB_Mid'] = df['Close'].rolling(window=20).mean()
-    df['BB_Std'] = df['Close'].rolling(window=20).std()
-    df['BB_Upper'] = df['BB_Mid'] + (df['BB_Std'] * 2)
-    df['BB_Lower'] = df['BB_Mid'] - (df['BB_Std'] * 2)
-    delta = df['Close'].diff(1)
-    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    ema12, ema26 = df['Close'].ewm(span=12, adjust=False).mean(), df['Close'].ewm(span=26, adjust=False).mean()
-    df['MACD'] = ema12 - ema26
-    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
-    return {"data": df}
+    try:
+        df['SMA50'] = df['Close'].rolling(window=50).mean()
+        df['SMA200'] = df['Close'].rolling(window=200).mean()
+        df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+        df['BB_Mid'] = df['Close'].rolling(window=20).mean()
+        df['BB_Std'] = df['Close'].rolling(window=20).std()
+        df['BB_Upper'] = df['BB_Mid'] + (df['BB_Std'] * 2)
+        df['BB_Lower'] = df['BB_Mid'] - (df['BB_Std'] * 2)
+        delta = df['Close'].diff(1)
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        # Handle potential division by zero in RSI calculation
+        rs = gain / loss.replace(0, np.nan) # Replace 0 loss with NaN to avoid division error
+        df['RSI'] = 100 - (100 / (1 + rs))
+        df['RSI'] = df['RSI'].fillna(50) # Fill NaN RSI values (e.g., at the start or if loss is consistently 0)
+        ema12, ema26 = df['Close'].ewm(span=12, adjust=False).mean(), df['Close'].ewm(span=26, adjust=False).mean()
+        df['MACD'] = ema12 - ema26
+        df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+        df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+        return {"data": df.dropna(subset=['SMA50', 'SMA200', 'EMA20', 'BB_Upper', 'BB_Lower', 'RSI', 'MACD', 'MACD_Signal', 'MACD_Hist'])} # Drop rows where indicators couldn't be calculated initially
+    except Exception as e:
+        logging.error(f"Error calculating technical indicators: {e}", exc_info=True)
+        return {"error": f"Calculation error: {e}"}
+
 
 @lru_cache(maxsize=32)
 def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_growth_rate: float, terminal_pe: float) -> dict:
+    """
+    (ฟังก์ชันนี้จะถูกเลิกใช้ใน callbacks.py และย้าย Logic ไปคำนวณจาก DB)
+    (แต่ยังคงไว้ก่อน เผื่อมีการเรียกใช้จากที่อื่น หรือเพื่อเปรียบเทียบ)
+    """
     try:
         info = yf.Ticker(ticker).info
         if not info:

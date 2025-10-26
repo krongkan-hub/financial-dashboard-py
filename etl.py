@@ -7,7 +7,7 @@ import numpy as np
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices # Import model ราคา
-from data_handler import get_competitor_data # ยังใช้ Job 1
+from data_handler import get_competitor_data, _get_logo_url # ยังใช้ Job 1
 from constants import ALL_TICKERS_SORTED_BY_MC
 
 # Import สำหรับ UPSERT (เลือกใช้ตาม DB ที่ Deploy จริง)
@@ -71,7 +71,7 @@ def update_company_summaries():
                 try:
                     ticker_info = yf.Ticker(row['Ticker']).info
                     company_name = ticker_info.get('longName')
-                    logo_url = ticker_info.get('logo_url') 
+                    logo_url = _get_logo_url(ticker_info) # <--- [FIXED] ใช้ฟังก์ชัน helper
                     sector = ticker_info.get('sector')
                 except Exception:
                     company_name = None; logo_url = None; sector = None

@@ -42,11 +42,10 @@ def start_scheduler():
     logging.info("Initializing APScheduler...")
 
     # --- Job 1: Update Company Summaries ---
-    # ทำทุกวัน เวลาตี 1 UTC (8 โมงเช้าไทย)
     scheduler.add_job(
         update_company_summaries,
         'cron',
-        hour=1,
+        hour=8,
         minute=0,
         misfire_grace_time=3600, # ถ้าพลาด ให้ลองใหม่ภายใน 1 ชม.
         id='update_summaries_job' # ตั้ง ID ให้ Job
@@ -60,7 +59,7 @@ def start_scheduler():
         update_daily_prices,
         'cron',
         # day_of_week='sat', # ทำเฉพาะวันเสาร์
-        hour=2,            # ตี 2 UTC (9 โมงเช้าไทย) - ให้ทำงานหลัง Job 1
+        hour=9,
         minute=0,
         misfire_grace_time=3600*3, # ถ้าพลาด ให้ลองใหม่ภายใน 3 ชม.
         id='update_prices_job' # ตั้ง ID ให้ Job

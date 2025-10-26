@@ -1,4 +1,4 @@
-# etl.py (เวอร์ชันสมบูรณ์ - มี Job 1 และ Job 2)
+# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Job 1 ใช้ Batch UPSERT)
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -38,6 +38,11 @@ def update_company_summaries():
     ETL Job 1: ดึงข้อมูลสรุปบริษัททั้งหมด
     (ข้อมูลจาก get_competitor_data)
     """
+    # --- [NEW] Check if sql_insert is available ---
+    if sql_insert is None:
+        logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
+        return
+
     with server.app_context():
         logging.info("Starting ETL Job: [update_company_summaries]...")
         try:
@@ -51,52 +56,94 @@ def update_company_summaries():
             return
 
         today = datetime.utcnow().date()
-        processed_count = 0
+        
+        # --- [START OF REFACTOR] ---
+        # 1. รวบรวมข้อมูลใส่ List ก่อน (แทนการ merge ใน loop)
+        dim_company_data = []
+        fact_summary_data = []
+
         for _, row in df.iterrows():
+            if pd.isna(row.get('Ticker')):
+                continue
+                
             try:
-                # --- Load/Update DimCompany ---
-                # ดึงข้อมูลบริษัทจาก API ของ yfinance โดยตรง (อาจจะซ้ำซ้อนกับ get_competitor_data แต่เพื่อความครบถ้วน)
+                # --- ดึงข้อมูล DimCompany ---
                 try:
                     ticker_info = yf.Ticker(row['Ticker']).info
                     company_name = ticker_info.get('longName')
-                    logo_url = ticker_info.get('logo_url') # อาจจะไม่มี
+                    logo_url = ticker_info.get('logo_url') 
                     sector = ticker_info.get('sector')
                 except Exception:
-                    company_name = None
-                    logo_url = None
-                    sector = None
+                    company_name = None; logo_url = None; sector = None
                     logging.warning(f"Could not fetch full info for {row['Ticker']} for DimCompany.")
 
-                company_info = DimCompany(
-                    ticker=row['Ticker'],
-                    company_name=company_name,
-                    logo_url=logo_url,
-                    sector=sector
-                )
-                db.session.merge(company_info)
-
-                # --- Load/Update FactCompanySummary ---
-                summary = FactCompanySummary(
-                    ticker=row['Ticker'], date_updated=today,
-                    price=row.get('Price'), market_cap=row.get('Market Cap'), beta=row.get('Beta'),
-                    pe_ratio=row.get('P/E'), pb_ratio=row.get('P/B'), ev_ebitda=row.get('EV/EBITDA'),
-                    revenue_growth_yoy=row.get('Revenue Growth (YoY)'), revenue_cagr_3y=row.get('Revenue CAGR (3Y)'),
-                    net_income_growth_yoy=row.get('Net Income Growth (YoY)'), roe=row.get('ROE'),
-                    de_ratio=row.get('D/E Ratio'), operating_margin=row.get('Operating Margin'),
-                    cash_conversion=row.get('Cash Conversion')
-                )
-                db.session.merge(summary)
-                processed_count += 1
+                dim_company_data.append({
+                    'ticker': row['Ticker'],
+                    'company_name': company_name,
+                    'logo_url': logo_url,
+                    'sector': sector
+                })
+                
+                # --- เตรียมข้อมูล FactCompanySummary ---
+                fact_summary_data.append({
+                    'ticker': row['Ticker'], 'date_updated': today,
+                    'price': row.get('Price'), 'market_cap': row.get('Market Cap'), 'beta': row.get('Beta'),
+                    'pe_ratio': row.get('P/E'), 'pb_ratio': row.get('P/B'), 'ev_ebitda': row.get('EV/EBITDA'),
+                    'revenue_growth_yoy': row.get('Revenue Growth (YoY)'), 'revenue_cagr_3y': row.get('Revenue CAGR (3Y)'),
+                    'net_income_growth_yoy': row.get('Net Income Growth (YoY)'), 'roe': row.get('ROE'),
+                    'de_ratio': row.get('D/E Ratio'), 'operating_margin': row.get('Operating Margin'),
+                    'cash_conversion': row.get('Cash Conversion')
+                })
+            
             except Exception as e:
-                logging.error(f"ETL Job: Failed to merge summary data for ticker {row.get('Ticker')}: {e}")
-                db.session.rollback()
-                continue
+                logging.error(f"ETL Job: Failed to process row data for ticker {row.get('Ticker')}: {e}")
+                continue # ข้าม Ticker นี้ไป แต่ทำตัวอื่นต่อ
+
+        # 2. สั่ง Batch UPSERT (เหมือน Job 2)
         try:
+            # --- UPSERT DimCompany ---
+            if dim_company_data:
+                stmt_dim = sql_insert(DimCompany).values(dim_company_data)
+                dim_set_ = {
+                    'company_name': stmt_dim.excluded.company_name,
+                    'logo_url': stmt_dim.excluded.logo_url,
+                    'sector': stmt_dim.excluded.sector
+                }
+                if db_dialect == 'postgresql':
+                    on_conflict_dim = stmt_dim.on_conflict_do_update(constraint='dim_company_pkey', set_=dim_set_)
+                elif db_dialect == 'sqlite':
+                    on_conflict_dim = stmt_dim.on_conflict_do_update(index_elements=['ticker'], set_=dim_set_)
+                
+                db.session.execute(on_conflict_dim)
+                logging.info(f"ETL Job: Batch UPSERTED {len(dim_company_data)} rows to DimCompany.")
+
+            # --- UPSERT FactCompanySummary ---
+            if fact_summary_data:
+                stmt_fact = sql_insert(FactCompanySummary).values(fact_summary_data)
+                constraint_name = '_ticker_date_uc' # ชื่อที่เราตั้งใน Model
+                
+                # ดึงชื่อคอลัมน์ทั้งหมดในตาราง FactCompanySummary (ยกเว้น keys)
+                all_cols = {c.name for c in FactCompanySummary.__table__.columns if c.name not in ['id', 'ticker', 'date_updated']}
+                fact_set_ = {col: getattr(stmt_fact.excluded, col) for col in all_cols}
+
+                if db_dialect == 'postgresql':
+                    on_conflict_fact = stmt_fact.on_conflict_do_update(constraint=constraint_name, set_=fact_set_)
+                elif db_dialect == 'sqlite':
+                    on_conflict_fact = stmt_fact.on_conflict_do_update(index_elements=['ticker', 'date_updated'], set_=fact_set_)
+                
+                db.session.execute(on_conflict_fact)
+                logging.info(f"ETL Job: Batch UPSERTED {len(fact_summary_data)} rows to FactCompanySummary.")
+
+            # --- Commit Transaction ---
             db.session.commit()
-            logging.info(f"ETL Job: [update_company_summaries]... COMPLETED. Processed {processed_count} tickers.")
+            logging.info(f"ETL Job: [update_company_summaries]... COMPLETED. Processed {len(fact_summary_data)} tickers.")
+
         except Exception as e:
-            logging.error(f"ETL Job: Failed during final commit for summaries: {e}", exc_info=True)
+            logging.error(f"ETL Job: Failed during final batch UPSERT: {e}", exc_info=True)
             db.session.rollback()
+            
+    # --- [END OF REFACTOR] ---
+
 
 def update_daily_prices(days_back=5*365): # ดึงย้อนหลัง 5 ปีโดย default
     """
@@ -108,7 +155,7 @@ def update_daily_prices(days_back=5*365): # ดึงย้อนหลัง 5 
 
     with server.app_context():
         logging.info(f"Starting ETL Job: [update_daily_prices] for {days_back} days back...")
-        # ดึง Ticker ทั้งหมดจาก DimCompany ที่ Job 1 อาจจะเพิ่งเพิ่มเข้าไป
+        # ดึง Ticker ทั้งหมดจาก DimCompany ที่ Job 1 เพิ่งเพิ่มเข้าไป
         try:
             tickers_to_update = db.session.query(DimCompany.ticker).all()
             tickers_list = [t[0] for t in tickers_to_update]
@@ -175,31 +222,27 @@ def update_daily_prices(days_back=5*365): # ดึงย้อนหลัง 5 
                 # สร้าง statement สำหรับ UPSERT
                 stmt = sql_insert(FactDailyPrices).values(data_to_upsert)
                 constraint_name = '_ticker_price_date_uc' # ชื่อที่เราตั้งใน Model
+                
+                price_set_ = {
+                    'open': stmt.excluded.open,
+                    'high': stmt.excluded.high,
+                    'low': stmt.excluded.low,
+                    'close': stmt.excluded.close,
+                    'volume': stmt.excluded.volume
+                }
 
                 if db_dialect == 'postgresql':
                     # PostgreSQL ON CONFLICT DO UPDATE
                     on_conflict_stmt = stmt.on_conflict_do_update(
                         constraint=constraint_name,
-                        set_={
-                            'open': stmt.excluded.open,
-                            'high': stmt.excluded.high,
-                            'low': stmt.excluded.low,
-                            'close': stmt.excluded.close,
-                            'volume': stmt.excluded.volume
-                        }
+                        set_=price_set_
                     )
                 elif db_dialect == 'sqlite':
                      # SQLite ON CONFLICT DO UPDATE (Syntax ใหม่กว่า)
                      # หมายเหตุ: อาจต้องการ SQLite version 3.24+
                     on_conflict_stmt = stmt.on_conflict_do_update(
                          index_elements=['ticker', 'date'], # ระบุคอลัมน์ใน unique constraint
-                         set_={
-                             'open': stmt.excluded.open,
-                             'high': stmt.excluded.high,
-                             'low': stmt.excluded.low,
-                             'close': stmt.excluded.close,
-                             'volume': stmt.excluded.volume
-                         }
+                         set_=price_set_
                      )
                 else:
                     logging.error("ETL Job: Unsupported DB dialect for UPSERT.")
@@ -210,15 +253,22 @@ def update_daily_prices(days_back=5*365): # ดึงย้อนหลัง 5 
                 for i in range(0, len(data_to_upsert), chunk_size):
                     chunk = data_to_upsert[i:i + chunk_size]
                     stmt_chunk = sql_insert(FactDailyPrices).values(chunk)
+                    
+                    price_set_chunk_ = {
+                        'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high,
+                        'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close,
+                        'volume': stmt_chunk.excluded.volume
+                    }
+
                     if db_dialect == 'postgresql':
-                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(constraint=constraint_name, set_={'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high, 'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close, 'volume': stmt_chunk.excluded.volume})
+                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(constraint=constraint_name, set_=price_set_chunk_)
                     elif db_dialect == 'sqlite':
-                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(index_elements=['ticker', 'date'], set_={'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high, 'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close, 'volume': stmt_chunk.excluded.volume})
+                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(index_elements=['ticker', 'date'], set_=price_set_chunk_)
                     else: break # Should not happen
 
                     db.session.execute(on_conflict_chunk)
-                    logging.info(f"ETL Job: Executed UPSERT chunk {i // chunk_size + 1}...")
-
+                    # logging.info(f"ETL Job: Executed UPSERT chunk {i // chunk_size + 1}...") # Comment out
+                
                 db.session.commit()
                 logging.info(f"ETL Job: [update_daily_prices]... COMPLETED. Successfully processed UPSERT for {num_rows} rows potential.")
 

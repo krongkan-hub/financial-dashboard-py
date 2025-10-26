@@ -167,9 +167,20 @@ def _cagr(series: pd.Series, years: int) -> float:
     num_years = (series.index[-1].year - series.index[0].year) if pd.api.types.is_datetime64_any_dtype(series.index) else len(series) - 1
     if num_years <= 0: return np.nan
     start_val, end_val = series.iloc[0], series.iloc[-1]
-    if pd.notna(start_val) and pd.notna(end_val) and start_val > 0:
-        return (end_val / start_val)**(1.0 / num_years) - 1.0
-    return np.nan
+    # --- [START EDIT] ---
+    if pd.notna(start_val) and pd.notna(end_val) and start_val > 0: # Ensure start_val is positive
+        try:
+            # Calculate CAGR safely
+            result = (end_val / start_val)**(1.0 / num_years) - 1.0
+            # Check if result is complex (e.g., negative base with fractional power)
+            if isinstance(result, complex):
+                return np.nan # Return NaN if result is complex
+            return float(result) # Ensure it's a float
+        except (ValueError, TypeError, ZeroDivisionError, OverflowError):
+            # Catch potential math errors
+            return np.nan
+    # --- [END EDIT] ---
+    return np.nan # Return NaN if conditions aren't met
 
 def get_financial_data(statement_series, possible_keys):
     if statement_series is None: return None

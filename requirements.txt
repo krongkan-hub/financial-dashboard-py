@@ -14,3 +14,4 @@ newsapi-python==0.2.7
 requests==2.31.0
 Flask-Migrate==4.0.7
 apscheduler==3.10.4
+pytz==2024.1

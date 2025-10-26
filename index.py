@@ -4,6 +4,7 @@ from dash import dcc, html
 from flask import redirect
 from flask_login import logout_user
 import logging # เพิ่ม logging
+import os
 
 # Import core objects from app.py
 from app import app, server, db, User

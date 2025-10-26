@@ -45,27 +45,23 @@ def start_scheduler():
     scheduler.add_job(
         update_company_summaries,
         'cron',
-        hour=8,
+        hour=8,  # 8:00 UTC = 15:00 Bangkok
         minute=0,
         misfire_grace_time=3600, # ถ้าพลาด ให้ลองใหม่ภายใน 1 ชม.
         id='update_summaries_job' # ตั้ง ID ให้ Job
     )
-    logging.info("Scheduled job: update_company_summaries (Daily @ 01:00 UTC)")
+    logging.info("Scheduled job: update_company_summaries (Daily @ 08:00 UTC / 15:00 Bangkok)")
 
     # --- Job 2: Update Daily Prices ---
-    # ทำทุกวันเสาร์ เวลาตี 3 UTC (10 โมงเช้าไทย)
-    # (หรือจะเปลี่ยนเป็น 'cron', hour=2 เพื่อให้ทำงานทุกวันก็ได้ ถ้าต้องการข้อมูลราคาอัปเดตทุกวัน)
     scheduler.add_job(
         update_daily_prices,
         'cron',
-        # day_of_week='sat', # ทำเฉพาะวันเสาร์
-        hour=9,
+        hour=9, # 9:00 UTC = 16:00 Bangkok - ให้ทำงานหลัง Job 1
         minute=0,
         misfire_grace_time=3600*3, # ถ้าพลาด ให้ลองใหม่ภายใน 3 ชม.
         id='update_prices_job' # ตั้ง ID ให้ Job
     )
-    # logging.info("Scheduled job: update_daily_prices (Weekly on Sat @ 03:00 UTC)")
-    logging.info("Scheduled job: update_daily_prices (Daily @ 02:00 UTC)")
+    logging.info("Scheduled job: update_daily_prices (Daily @ 09:00 UTC / 16:00 Bangkok)")
 
 
     # --- Start Scheduler ---
@@ -76,13 +72,13 @@ def start_scheduler():
          logging.error(f"Failed to start APScheduler: {e}", exc_info=True)
 # --- [END MODIFIED] ---
 
-
-# --- Run App ---
-if __name__ == '__main__':
-    # ไม่ต้องใช้ db.create_all() แล้ว
-    # Start the scheduler when the app starts
+# --- [ย้ายมาตรงนี้] Start the scheduler when the module is imported ---
+# Ensure it runs only once, especially in development with auto-reloading
+if os.environ.get('WERKZEUG_RUN_MAIN') != 'true': # Check added for local dev server
     start_scheduler()
 
+# --- Run App (For Local Development Only) ---
+if __name__ == '__main__':
     # Run the Flask development server (for local testing)
-    # For production (like Render), Gunicorn runs this via 'index:server' in Procfile
-    app.run(debug=False) # debug=False สำคัญมากสำหรับ APScheduler
+    # Gunicorn runs 'server' object directly in production
+    app.run(debug=False, use_reloader=False) # Add use_reloader=False

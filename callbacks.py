@@ -152,7 +152,7 @@ def apply_custom_scoring(df):
     return df
 
 # ==================================================================
-# Callback Registration (ส่วนใหญ่เหมือนเดิม ยกเว้น render_table_content)
+# Callback Registration
 # ==================================================================
 def register_callbacks(app, METRIC_DEFINITIONS):
 
@@ -351,7 +351,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         if not forecast_data: return 5, 10, 20
         return forecast_data.get('years', 5), forecast_data.get('growth', 10), forecast_data.get('pe', 20)
 
-    # --- [START OF GRAPH REFACTOR] ---
+    # --- [START OF GRAPH REFACTOR - FIXED pd.read_sql] ---
     @app.callback( 
         Output('analysis-pane-content', 'children'), 
         [Input('analysis-tabs', 'active_tab'), 
@@ -375,7 +375,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                     query = db.session.query(FactDailyPrices.date, FactDailyPrices.ticker, FactDailyPrices.close) \
                                       .filter(FactDailyPrices.ticker.in_(all_symbols),
                                               FactDailyPrices.date >= start_of_year)
-                    raw_data = pd.read_sql(query.statement, db.session.bind)
+                    # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
+                    raw_data = pd.read_sql(query.statement, db.engine)
                 
                 if raw_data.empty: raise ValueError("No price data found in DB for YTD.")
                 
@@ -394,7 +395,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                     query = db.session.query(FactDailyPrices.date, FactDailyPrices.ticker, FactDailyPrices.close) \
                                       .filter(FactDailyPrices.ticker.in_(all_symbols),
                                               FactDailyPrices.date >= one_year_ago)
-                    raw_data = pd.read_sql(query.statement, db.session.bind)
+                    # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
+                    raw_data = pd.read_sql(query.statement, db.engine)
 
                 if raw_data.empty: raise ValueError("No price data found in DB for 1-Year Drawdown.")
 
@@ -428,7 +430,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                         (FactCompanySummary.ticker == latest_date_sq.c.ticker) &
                         (FactCompanySummary.date_updated == latest_date_sq.c.max_date)
                     )
-                    df_scatter = pd.read_sql(query.statement, db.session.bind)
+                    # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
+                    df_scatter = pd.read_sql(query.statement, db.engine)
                     df_scatter.rename(columns={'ticker': 'Ticker', 'ev_ebitda': 'EV/EBITDA', 'ebitda_margin': 'EBITDA Margin'}, inplace=True)
 
                 if df_scatter.empty: return dbc.Alert("Could not fetch scatter data from DB.", color="warning")
@@ -469,12 +472,14 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             return html.P("This is an empty tab!")
         
         except Exception as e:
-            logging.error(f"Error rendering graph content for tab {active_tab}: {e}", exc_info=True)
-            return dbc.Alert(f"An error occurred while rendering '{TABS_CONFIG.get(active_tab, {}).get('tab_name', 'Graph')}': {e}", color="danger")
+            # แก้ไข Log เพื่อให้บอกว่าเกิด Error ในแท็บไหน (โดยใช้ TABS_CONFIG)
+            tab_name = TABS_CONFIG.get(active_tab, {}).get('tab_name', 'Graph')
+            logging.error(f"Error rendering graph content for tab {tab_name} ({active_tab}): {e}", exc_info=True)
+            return dbc.Alert(f"An error occurred while rendering '{tab_name}': {type(e).__name__} - {e}", color="danger")
     # --- [END OF GRAPH REFACTOR] ---
 
 
-    # --- [START OF TABLE REFACTOR] ---
+    # --- [START OF TABLE REFACTOR - FIXED pd.read_sql] ---
     @app.callback(
         Output('table-pane-content', 'children'),
         Output('sort-by-dropdown', 'options'),
@@ -527,7 +532,23 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                         data_list.append(data_dict)
                     df_full = pd.DataFrame(data_list)
                 else:
-                     logging.warning(f"No data found in DB for tickers: {tickers}")
+                     # Fallback: ถ้า Query.all() ไม่ได้ผลลัพธ์
+                     # ลองใช้ pd.read_sql กับ query.statement โดยตรง 
+                     # (เพื่อรองรับการใช้งานที่ db.session.query อาจไม่ได้ return tuple ที่คาดหวัง)
+                     try:
+                        # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
+                        df_full = pd.read_sql(query.statement, db.engine)
+                        # ต้องตั้งชื่อคอลัมน์เองตามที่ Query เลือกไว้
+                        # (FactCompanySummary.* + DimCompany.logo_url)
+                        summary_cols = [c.name for c in FactCompanySummary.__table__.columns]
+                        new_cols = summary_cols + ['logo_url']
+                        if not df_full.empty:
+                            df_full.columns = new_cols
+                            df_full['market_cap_raw'] = df_full['market_cap']
+                     except Exception as sql_err:
+                         logging.warning(f"Failed direct read_sql fallback: {sql_err}")
+
+
             # --- [END QUERY] ---
 
             if df_full.empty:
@@ -630,8 +651,9 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             ), dropdown_options, sort_by_column
 
         except Exception as e:
-            logging.error(f"Error rendering table content for tab {active_tab}: {e}", exc_info=True)
+            tab_name = TABS_CONFIG.get(active_tab, {}).get('tab_name', 'Table')
+            logging.error(f"Error rendering table content for tab {tab_name} ({active_tab}): {e}", exc_info=True)
             # แสดง Error ที่เจาะจงมากขึ้น ถ้าเป็นไปได้
-            error_msg = f"An unexpected error occurred: {type(e).__name__} - {e}"
+            error_msg = f"An unexpected error occurred while loading table data: {type(e).__name__} - {e}"
             return dbc.Alert(error_msg, color="danger", className="mt-3"), [], None
     # --- [END OF TABLE REFACTOR] ---

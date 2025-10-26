@@ -1,4 +1,4 @@
-# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Rate Limiting with Retry & Progress)
+# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Rate Limiting with Retry & Progress & Batch UPSERT)
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -7,6 +7,7 @@ import numpy as np
 import time # Import time for delays
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
+# ตรวจสอบว่า FactDailyPrices ถูก Import ถูกต้อง
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
 from data_handler import get_competitor_data, get_deep_dive_data, get_news_and_sentiment
 from constants import ALL_TICKERS_SORTED_BY_MC
@@ -101,7 +102,8 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     logging.info(f"--- Finished {job_name} in {elapsed_total_job:.2f} seconds ---")
     logging.info(f"Successfully processed: {processed_count}/{total_items}")
     if skipped_items:
-        logging.warning(f"Skipped tickers due to errors: {skipped_tickers}")
+        # แก้ไขชื่อตัวแปรให้ถูกต้อง
+        logging.warning(f"Skipped tickers due to errors: {skipped_items}") 
     return skipped_items
 
 
@@ -179,10 +181,11 @@ def update_company_summaries():
     process_tickers_with_retry(job_name, list(tickers_tuple), process_single_ticker_summary, initial_delay=0.7, max_retries=3)
 
 
-# --- Job 2: Update Daily Prices (Unchanged, less likely to hit rate limits) ---
+# --- Job 2: Update Daily Prices (FIXED: Batch UPSERT) ---
 def update_daily_prices(days_back=5*365):
     """
     ETL Job 2: ดึงข้อมูลราคาย้อนหลังและ UPSERT ลง FactDailyPrices
+    (แก้ไข: เปลี่ยนไปใช้ Batch UPSERT เพื่อหลีกเลี่ยง 'too many SQL variables')
     """
     if sql_insert is None:
         logging.error("ETL Job: [update_daily_prices] cannot run because insert statement is not available.")
@@ -190,6 +193,8 @@ def update_daily_prices(days_back=5*365):
 
     with server.app_context():
         logging.info(f"Starting ETL Job: [update_daily_prices] for {days_back} days back...")
+        
+        # 1. Query Tickers from DimCompany
         try:
             tickers_to_update = db.session.query(DimCompany.ticker).all()
             tickers_list = [t[0] for t in tickers_to_update]
@@ -203,8 +208,9 @@ def update_daily_prices(days_back=5*365):
 
         end_date = datetime.utcnow().date()
         start_date = end_date - timedelta(days=days_back)
+        prices_df = pd.DataFrame()
 
-        prices_df = pd.DataFrame() # Initialize empty
+        # 2. Download Price History
         try:
             logging.info(f"ETL Job: Downloading price history for {len(tickers_list)} tickers from {start_date} to {end_date}...")
             # yfinance download handles multiple tickers efficiently
@@ -215,17 +221,19 @@ def update_daily_prices(days_back=5*365):
                 logging.warning("ETL Job: yf.download returned empty DataFrame for prices.")
                 return
 
-            # Data Processing
+            # 3. Data Processing (Convert from Wide/MultiIndex to Long Format)
             if isinstance(prices_df.columns, pd.MultiIndex) and len(tickers_list) > 1:
                 # Handle MultiIndex for multiple tickers
                 prices_df = prices_df.stack(level=1).rename_axis(['Date', 'Ticker']).reset_index()
-            elif not prices_df.empty: # Handle single ticker case or already processed format
+            elif not prices_df.empty: 
+                 # Handle single ticker case or already processed format
                  prices_df = prices_df.rename_axis(['Date']).reset_index()
                  if 'Ticker' not in prices_df.columns and len(tickers_list) == 1:
                      prices_df['Ticker'] = tickers_list[0]
-            else: # Empty DataFrame remains empty
+            else: 
                  pass
 
+            # 4. Cleanup and Format
             prices_df.rename(columns={
                 'Date': 'date', 'Ticker': 'ticker', 'Open': 'open',
                 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'
@@ -235,83 +243,76 @@ def update_daily_prices(days_back=5*365):
                 prices_df['date'] = pd.to_datetime(prices_df['date']).dt.date
             else:
                  logging.warning("ETL Job: 'date' column not found after processing yfinance download.")
-                 return # Cannot proceed without date
+                 return
 
             if 'volume' in prices_df.columns:
                 prices_df['volume'] = pd.to_numeric(prices_df['volume'], errors='coerce').fillna(0).astype(np.int64)
             else:
                 prices_df['volume'] = 0 # Add volume column if missing
 
-            # Ensure all required columns exist before dropping NA
             required_cols = ['date', 'ticker', 'open', 'high', 'low', 'close', 'volume']
             for col in required_cols:
                 if col not in prices_df.columns:
-                     prices_df[col] = np.nan # Add missing columns with NaN
+                     prices_df[col] = np.nan
 
-            prices_df = prices_df[required_cols] # Ensure column order
-            prices_df.dropna(subset=['close', 'ticker', 'date'], inplace=True) # Ensure essential columns are not null
+            prices_df = prices_df[required_cols]
+            prices_df.dropna(subset=['close', 'ticker', 'date'], inplace=True)
+            
+            data_to_upsert = prices_df.to_dict(orient='records')
+            num_rows = len(data_to_upsert)
 
 
         except Exception as e:
             logging.error(f"ETL Job: Failed during yf.download or processing for prices: {e}", exc_info=True)
             return
 
-        # --- UPSERT ข้อมูลลง DB ---
-        if not prices_df.empty:
-            num_rows = len(prices_df)
+        # 5. --- UPSERT ข้อมูลลง DB (Chunking Logic) ---
+        if data_to_upsert:
             logging.info(f"ETL Job: Attempting to UPSERT {num_rows} price rows using {db_dialect} dialect...")
-            data_to_upsert = prices_df.to_dict(orient='records')
-
-            if not data_to_upsert:
-                 logging.warning("ETL Job: No price data to UPSERT after processing.")
-                 return
-
-            try:
-                stmt = sql_insert(FactDailyPrices).values(data_to_upsert)
-                constraint_name = '_ticker_price_date_uc' 
+            
+            # ลดขนาด chunk ให้เหลือ 1000 เพื่อความปลอดภัยในการแทรกข้อมูลจำนวนมาก
+            chunk_size = 1000 
+            constraint_name = '_ticker_price_date_uc'
+            
+            # --- Start Chunking Loop ---
+            for i in range(0, num_rows, chunk_size):
+                chunk = data_to_upsert[i:i + chunk_size]
                 
-                price_set_ = {
-                    'open': stmt.excluded.open, 'high': stmt.excluded.high,
-                    'low': stmt.excluded.low, 'close': stmt.excluded.close,
-                    'volume': stmt.excluded.volume
+                # สร้าง statement ใหม่สำหรับแต่ละ chunk
+                stmt_chunk = sql_insert(FactDailyPrices).values(chunk)
+                
+                price_set_chunk_ = {
+                    'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high,
+                    'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close,
+                    'volume': stmt_chunk.excluded.volume
                 }
 
-                if db_dialect == 'postgresql':
-                    on_conflict_stmt = stmt.on_conflict_do_update(constraint=constraint_name, set_=price_set_)
-                elif db_dialect == 'sqlite':
-                    on_conflict_stmt = stmt.on_conflict_do_update(index_elements=['ticker', 'date'], set_=price_set_)
-                else:
-                    logging.error("ETL Job: Unsupported DB dialect for UPSERT.")
-                    return
-
-                # Execute in chunks (improves performance for large datasets)
-                chunk_size = 5000 
-                for i in range(0, len(data_to_upsert), chunk_size):
-                    chunk = data_to_upsert[i:i + chunk_size]
-                    # Create a new statement for each chunk to avoid parameter issues
-                    stmt_chunk = sql_insert(FactDailyPrices).values(chunk)
-                    price_set_chunk_ = {
-                        'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high,
-                        'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close,
-                        'volume': stmt_chunk.excluded.volume
-                    }
+                try:
                     if db_dialect == 'postgresql':
                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(constraint=constraint_name, set_=price_set_chunk_)
                     elif db_dialect == 'sqlite':
                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(index_elements=['ticker', 'date'], set_=price_set_chunk_)
-                    else: break 
-                    db.session.execute(on_conflict_chunk)
-                    # Optional: Log chunk progress
-                    # logging.info(f"ETL Job: UPSERTED chunk {i // chunk_size + 1}...")
-                
-                db.session.commit()
-                logging.info(f"ETL Job: [update_daily_prices]... COMPLETED. Successfully processed UPSERT for {num_rows} rows potential.")
+                    else:
+                        logging.error("ETL Job: Unsupported DB dialect for UPSERT in chunking loop.")
+                        break 
 
-            except Exception as e:
-                logging.error(f"ETL Job: Failed during database UPSERT for prices: {e}", exc_info=True)
-                db.session.rollback()
+                    db.session.execute(on_conflict_chunk)
+                    # Commit ทุก chunk เพื่อลดภาระของ transaction
+                    db.session.commit() 
+                    logging.info(f"ETL Job: Successfully UPSERTED chunk {i // chunk_size + 1}/{(num_rows // chunk_size) + 1} ({len(chunk)} rows).")
+
+                except Exception as e:
+                    logging.error(f"ETL Job: Failed during database UPSERT for chunk {i // chunk_size + 1}: {e}", exc_info=True)
+                    db.session.rollback()
+                    # Continue to the next chunk despite the error
+                    
+            logging.info(f"ETL Job: [update_daily_prices]... COMPLETED. Successfully processed UPSERT for {num_rows} rows potential.")
+
         else:
              logging.warning("ETL Job: No price data prepared for UPSERT.")
+
+# --- [END OF FIXED JOB 2] ---
+
 
 # --- [START OF NEW JOB 3 - Updated with Helper] ---
 def update_financial_statements():
@@ -335,7 +336,6 @@ def update_financial_statements():
     def process_single_ticker_financials(ticker):
         try:
             # 1. ดึงข้อมูล (ใช้ cache จาก data_handler)
-            # Make sure get_deep_dive_data includes a slight delay if not cached
             data = get_deep_dive_data(ticker)
             if 'error' in data or 'financial_statements' not in data:
                 logging.warning(f"[{job_name}] No financial statement data found via get_deep_dive_data for {ticker}.")
@@ -357,41 +357,68 @@ def update_financial_statements():
                 # แปลงจาก Wide -> Long format
                 # Ensure columns are Datetime objects if needed, else handle potential errors
                 try:
-                    df.columns = pd.to_datetime(df.columns)
-                except (ValueError, TypeError) as date_err:
-                     logging.warning(f"[{job_name}] Could not convert columns to datetime for {ticker}, {statement_type}: {date_err}. Skipping this statement.")
+                    # Convert column names (which are dates) to datetime objects
+                    # Need to handle potential non-date column names if yfinance changes its structure
+                    date_columns = [col for col in df.columns if isinstance(col, (datetime, pd.Timestamp)) or pd.api.types.is_datetime64_any_dtype(col)]
+                    non_date_columns = [col for col in df.columns if col not in date_columns]
+                    
+                    # Convert string column names to datetime, ignoring errors
+                    new_date_cols = pd.to_datetime(date_columns, errors='coerce').dropna()
+                    
+                    # Rebuild columns with original non-date columns + new date columns
+                    df.columns = non_date_columns + new_date_cols.tolist()
+                except Exception as date_err:
+                     logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_type}: {date_err}. Skipping this statement.")
                      continue # Skip this statement type if columns aren't dates
 
-                df_long = df.reset_index().melt(id_vars='metric_name', var_name='report_date', value_name='metric_value')
+                # Drop columns that failed date conversion (i.e., NaT) - assuming they were string dates
+                # NOTE: The original logic here was complex, simplified to ensure correct columns are selected
+                df_to_melt = df.select_dtypes(include=[np.number, 'datetime', 'object']).reset_index()
+                
+                df_long = df_to_melt.melt(id_vars='metric_name', var_name='report_date', value_name='metric_value')
                 
                 # 4. เพิ่มคอลัมน์ที่จำเป็นสำหรับ DB
                 df_long['ticker'] = ticker
                 df_long['statement_type'] = statement_type
+                # Convert report_date back to date objects
                 df_long['report_date'] = pd.to_datetime(df_long['report_date']).dt.date
                 df_long.dropna(subset=['metric_value'], inplace=True) # ไม่เก็บค่า Metric ที่เป็น NaT/None
                 
                 # Convert potential Pandas dtypes to standard Python types for SQLAlchemy
-                df_long['metric_value'] = df_long['metric_value'].astype(float) # Ensure float
+                df_long['metric_value'] = pd.to_numeric(df_long['metric_value'], errors='coerce').astype(float) # Ensure float
                 
+                # Clean metric_name to prevent DB errors (strip whitespace)
+                df_long['metric_name'] = df_long['metric_name'].astype(str).str.strip()
+
+
                 all_statements_data.extend(df_long.to_dict('records'))
 
             # 5. UPSERT ข้อมูล (ทำภายใน process_single_ticker_financials)
             if all_statements_data:
                 with server.app_context():
-                    stmt = sql_insert(FactFinancialStatements).values(all_statements_data)
-                    set_ = {'metric_value': stmt.excluded.metric_value}
+                    # ใช้ chunking เพื่อป้องกันปัญหา SQL variables
+                    chunk_size = 1000 
                     constraint_name = '_ticker_date_statement_metric_uc'
                     
-                    if db_dialect == 'postgresql':
-                        on_conflict_stmt = stmt.on_conflict_do_update(constraint=constraint_name, set_=set_)
-                    elif db_dialect == 'sqlite':
-                        on_conflict_stmt = stmt.on_conflict_do_update(index_elements=['ticker', 'report_date', 'statement_type', 'metric_name'], set_=set_)
-                    else:
-                         raise Exception("Unsupported DB dialect for UPSERT.") # Raise error here
-                    
-                    db.session.execute(on_conflict_stmt)
-                    db.session.commit()
-            # No logging here, it's handled by the helper function on success
+                    for i in range(0, len(all_statements_data), chunk_size):
+                        chunk = all_statements_data[i:i + chunk_size]
+                        
+                        stmt = sql_insert(FactFinancialStatements).values(chunk)
+                        set_ = {'metric_value': stmt.excluded.metric_value}
+                        
+                        try:
+                            if db_dialect == 'postgresql':
+                                on_conflict_stmt = stmt.on_conflict_do_update(constraint=constraint_name, set_=set_)
+                            elif db_dialect == 'sqlite':
+                                on_conflict_stmt = stmt.on_conflict_do_update(index_elements=['ticker', 'report_date', 'statement_type', 'metric_name'], set_=set_)
+                            else:
+                                raise Exception("Unsupported DB dialect for UPSERT.")
+                            
+                            db.session.execute(on_conflict_stmt)
+                            db.session.commit()
+                        except Exception as chunk_e:
+                            logging.error(f"[{job_name}] Error inserting financial chunk for {ticker}: {chunk_e}")
+                            db.session.rollback()
 
         except Exception as inner_e:
             logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
@@ -400,7 +427,7 @@ def update_financial_statements():
             raise inner_e # โยนให้ Helper จัดการ Retry
 
     # เรียกใช้ Helper Function
-    process_tickers_with_retry(job_name, tickers_list, process_single_ticker_financials, initial_delay=0.8, max_retries=2) # Slightly longer delay maybe needed
+    process_tickers_with_retry(job_name, tickers_list, process_single_ticker_financials, initial_delay=0.8, max_retries=2) 
 
 # --- [END OF NEW JOB 3] ---
 
@@ -436,8 +463,6 @@ def update_news_sentiment():
 
         try:
             # 1. ดึงข่าวและวิเคราะห์ (ใช้ cache จาก data_handler)
-            # Consider adding a small delay *before* the API call if needed
-            # time.sleep(0.1) # Small delay before NewsAPI/HF calls
             data = get_news_and_sentiment(company_name)
             if 'error' in data or 'articles' not in data or not data['articles']:
                 logging.warning(f"[{job_name}] No news articles found or error fetching for {company_name} ({ticker}). Error: {data.get('error')}")
@@ -488,22 +513,31 @@ def update_news_sentiment():
             # 3. UPSERT ข้อมูล (Insert or Ignore based on article_url)
             if articles_data:
                 with server.app_context():
-                    stmt = sql_insert(FactNewsSentiment).values(articles_data)
+                    # ใช้ chunking เพื่อป้องกันปัญหา SQL variables
+                    chunk_size = 500
                     
-                    # ON CONFLICT DO NOTHING based on the unique constraint on article_url
-                    if db_dialect == 'postgresql':
-                        # Assumes a unique constraint named 'fact_news_sentiment_article_url_key' exists
-                        # You might need to create this constraint manually or via migration:
-                        # ALTER TABLE fact_news_sentiment ADD CONSTRAINT fact_news_sentiment_article_url_key UNIQUE (article_url);
-                        on_conflict_stmt = stmt.on_conflict_do_nothing(constraint='fact_news_sentiment_article_url_key')
-                    elif db_dialect == 'sqlite':
-                         # SQLite requires specifying the indexed column for ON CONFLICT
-                        on_conflict_stmt = stmt.on_conflict_do_nothing(index_elements=['article_url'])
-                    else:
-                        raise Exception("Unsupported DB dialect for UPSERT with DO NOTHING.")
+                    for i in range(0, len(articles_data), chunk_size):
+                        chunk = articles_data[i:i + chunk_size]
+                        
+                        stmt = sql_insert(FactNewsSentiment).values(chunk)
+                        
+                        # ON CONFLICT DO NOTHING based on the unique constraint on article_url
+                        try:
+                            if db_dialect == 'postgresql':
+                                # Assumes a unique constraint named 'fact_news_sentiment_article_url_key' exists
+                                on_conflict_stmt = stmt.on_conflict_do_nothing(constraint='fact_news_sentiment_article_url_key')
+                            elif db_dialect == 'sqlite':
+                                 # SQLite requires specifying the indexed column for ON CONFLICT
+                                on_conflict_stmt = stmt.on_conflict_do_nothing(index_elements=['article_url'])
+                            else:
+                                raise Exception("Unsupported DB dialect for UPSERT with DO NOTHING.")
 
-                    db.session.execute(on_conflict_stmt)
-                    db.session.commit()
+                            db.session.execute(on_conflict_stmt)
+                        except Exception as chunk_e:
+                            logging.error(f"[{job_name}] Error inserting news chunk for {ticker}: {chunk_e}")
+                            db.session.rollback()
+                        
+                    db.session.commit() # Commit once after all chunks
             # No specific logging here, success is logged by the helper
 
             return True # บอกว่าสำเร็จ

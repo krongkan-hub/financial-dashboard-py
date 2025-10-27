@@ -1,4 +1,4 @@
-# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Rate Limiting with Retry & Progress & Batch UPSERT & OOM FIX)
+# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Job 2 Error)
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -203,25 +203,36 @@ def process_single_ticker_prices(data_tuple):
 
     try:
         # 1. Download Price History for ONE Ticker
-        prices_df = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
+        # --- [จุดที่แก้ไข: ห่อ ticker ด้วย list [] เพื่อแก้ Error ใน Job 2] ---
+        prices_df = yf.download([ticker], start=start_date, end=end_date, auto_adjust=True, progress=False) 
+        # --- [จบการแก้ไข] ---
 
         if prices_df.empty:
             logging.warning(f"[{job_name}] yf.download returned empty for {ticker}. Skipping DB insert.")
             return
 
-        # 2. Data Processing (already in Wide format for single ticker, just need cleanup)
-        prices_df = prices_df.rename_axis(['Date']).reset_index()
+        # 2. Data Processing (เนื่องจากส่ง list [ticker] เข้าไป ผลลัพธ์จะเป็น MultiIndex)
+        if isinstance(prices_df.columns, pd.MultiIndex):
+            # Flatten columns: ('Close', 'NFLX') -> 'NFLX'
+            prices_df.columns = prices_df.columns.get_level_values(0) 
+            prices_df = prices_df.rename_axis(['Date']).reset_index()
+            prices_df.rename(columns={
+                'Date': 'date', 'Open': 'open', 'High': 'high', 
+                'Low': 'low', 'Close': 'close', 'Volume': 'volume'
+            }, inplace=True)
+        else:
+             prices_df = prices_df.rename_axis(['Date']).reset_index()
+             prices_df.rename(columns={
+                'Date': 'date', 'Open': 'open', 'High': 'high', 
+                'Low': 'low', 'Close': 'close', 'Volume': 'volume'
+             }, inplace=True)
+
 
         # 3. Cleanup and Format
-        prices_df.rename(columns={
-            'Date': 'date', 'Open': 'open', 'High': 'high', 
-            'Low': 'low', 'Close': 'close', 'Volume': 'volume'
-        }, inplace=True)
-        
         prices_df['ticker'] = ticker # Add ticker column
         prices_df['date'] = pd.to_datetime(prices_df['date']).dt.date
 
-        # Convert to native Python types for UPSERT (as in old code)
+        # Convert to native Python types for UPSERT
         prices_df['volume'] = pd.to_numeric(prices_df['volume'], errors='coerce').fillna(0).apply(lambda x: int(x) if pd.notna(x) else None)
         prices_df['open'] = pd.to_numeric(prices_df['open'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)
         prices_df['high'] = pd.to_numeric(prices_df['high'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)

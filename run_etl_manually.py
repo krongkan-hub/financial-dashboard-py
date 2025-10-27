@@ -6,7 +6,7 @@ from app import server
 # Import job ทั้งสองตัว
 from etl import update_company_summaries, update_daily_prices 
 # --- [NEW IMPORT] ---
-from constants import ALL_TICKERS_SORTED_BY_MC
+from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME
 # --- [END NEW IMPORT] ---
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,29 +18,42 @@ if __name__ == "__main__":
     with server.app_context():
         
         # --- Job 1: Update Company Summaries (COMMENTED OUT) ---
-        # เนื่องจาก Job 1 (DimCompany และ FactCompanySummary) เสร็จสมบูรณ์แล้ว จึง Comment ออก
         logging.info("--- Starting Manual Run: Job 1 (update_company_summaries) ---")
         start_time_job1 = time.time()
         try:
+            # ใช้ ALL_TICKERS_SORTED_BY_MC เพื่อให้ Job 1 อัปเดตข้อมูล Dim และ FactCompanySummary
             update_company_summaries(ALL_TICKERS_SORTED_BY_MC) 
             elapsed_job1 = time.time() - start_time_job1
             logging.info(f"--- Finished Manual Run: Job 1 (update_company_summaries) in {elapsed_job1:.2f} seconds ---")
         except Exception as e:
             elapsed_job1 = time.time() - start_time_job1
             logging.error(f"--- Manual Run FAILED: Job 1 (update_company_summaries) after {elapsed_job1:.2f} seconds: {e} ---", exc_info=True)
-        # --- [END COMMENTED OUT] ---
+        # --- [END Job 1] ---
 
         # --- Run Job 2 (Price Update) ---
         logging.info("--- Starting Manual Run: Job 2 (update_daily_prices) ---")
         start_time_job2 = time.time()
         try:
-            # รัน Job 2 จะเริ่มต้นจาก Ticker แรกใน DimCompany และใช้ UPSERT ดำเนินการต่อ
+            # รัน Job 2 เพื่อดึงข้อมูลราคาย้อนหลัง 5 ปี
             update_daily_prices(days_back=5*365) 
             elapsed_job2 = time.time() - start_time_job2
             logging.info(f"--- Finished Manual Run: Job 2 (update_daily_prices) in {elapsed_job2:.2f} seconds ---")
         except Exception as e:
             elapsed_job2 = time.time() - start_time_job2
             logging.error(f"--- Manual Run FAILED: Job 2 (update_daily_prices) after {elapsed_job2:.2f} seconds: {e} ---", exc_info=True)
+            
+        # --- [NEW] Run Job 3 (Financial Statements)
+        logging.info("--- Starting Manual Run: Job 3 (update_financial_statements) ---")
+        start_time_job3 = time.time()
+        try:
+            # รัน Job 3 ซึ่งจะดึงข้อมูลงบการเงินและใช้ Skip logic ที่เพิ่งเพิ่ม
+            update_financial_statements() 
+            elapsed_job3 = time.time() - start_time_job3
+            logging.info(f"--- Finished Manual Run: Job 3 (update_financial_statements) in {elapsed_job3:.2f} seconds ---")
+        except Exception as e:
+            elapsed_job3 = time.time() - start_time_job3
+            logging.error(f"--- Manual Run FAILED: Job 3 (update_financial_statements) after {elapsed_job3:.2f} seconds: {e} ---", exc_info=True)
+        # --- [END Job 3] ---
             
     elapsed_total = time.time() - start_time_total
     logging.info(f"--- Finished ALL Manual ETL jobs in {elapsed_total:.2f} seconds ---")

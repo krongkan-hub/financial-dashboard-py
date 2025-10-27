@@ -429,27 +429,67 @@ def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[st
 # --- [END MODIFIED] ---
 
 
-# --- Job 3: update_financial_statements (Unchanged) ---
-def update_financial_statements():
+# --- Job 3: update_financial_statements (MODIFIED for daily skip logic and consistent signature) ---
+def update_financial_statements(tickers_list_override: Optional[List[str]] = None):
     """
     ETL Job 3: ดึงข้อมูลงบการเงินรายไตรมาส (จาก get_deep_dive_data)
-    และแปลงเป็น Long Format เก็บลง FactFinancialStatements
+    และแปลงเป็น Long Format เก็บลง FactFinancialStatements พร้อม Daily Skip Logic
     """
     if sql_insert is None:
         logging.error("ETL Job: [update_financial_statements] cannot run because insert statement is not available.")
         return
 
     job_name = "Job 3: Update Financials"
-    tickers_list = []
+    today = datetime.utcnow().date() # <<< ADDED for consistency
+
+    # 1. Query Tickers or use Override List (Consistent with Job 1 & 2)
     with server.app_context():
         try:
-            tickers_list = [t[0] for t in db.session.query(DimCompany.ticker).all()]
+            if tickers_list_override is not None and len(tickers_list_override) > 0:
+                tickers_to_process = tickers_list_override
+            else:
+                # Query all tickers that exist in DimCompany
+                tickers_to_process = [t[0] for t in db.session.query(DimCompany.ticker).all()]
         except Exception as e:
             logging.error(f"[{job_name}] Failed to query tickers from DimCompany: {e}", exc_info=True)
             return
 
+        if not tickers_to_process:
+            logging.warning("ETL Job: No companies found in DimCompany. Skipping job.")
+            return
+
+        # 2. Query Max Update Date (using FactCompanySummary as a proxy for daily ETL run)
+        # We use FactCompanySummary.date_updated as a marker that all daily jobs were run for this ticker.
+        max_date_results = db.session.query(
+            FactCompanySummary.ticker,
+            func.max(FactCompanySummary.date_updated)
+        ).filter(
+            FactCompanySummary.ticker.in_(tickers_to_process)
+        ).group_by(FactCompanySummary.ticker).all()
+        max_dates = {ticker: max_date for ticker, max_date in max_date_results}
+        
+    # 3. Prepare list of tickers to actually process (applying skip logic)
+    tickers_to_fetch = []
+    for ticker in tickers_to_process:
+        latest_summary_date = max_dates.get(ticker)
+        
+        # We assume if the latest summary was updated today, Job 3 ran effectively today.
+        if latest_summary_date == today:
+             logging.info(f"[{job_name}] Skipping {ticker}: FactCompanySummary was updated today ({latest_summary_date}). Assuming Job 3 ran recently.")
+             continue
+             
+        tickers_to_fetch.append(ticker)
+
+    if not tickers_to_fetch:
+         logging.info(f"ETL Job: [{job_name}] All {len(tickers_to_process)} tickers are already up-to-date for today. Nothing to fetch.")
+         return
+
+    logging.info(f"ETL Job: Fetching financial statements for {len(tickers_to_fetch)}/{len(tickers_to_process)} tickers.")
+
+
     def process_single_ticker_financials(ticker):
         try:
+            # Note: The actual data fetching happens here
             data = get_deep_dive_data(ticker)
             if 'error' in data or 'financial_statements' not in data:
                 logging.warning(f"[{job_name}] No financial statement data found via get_deep_dive_data for {ticker}.")
@@ -519,6 +559,10 @@ def update_financial_statements():
                             db.session.rollback()
                         
                     db.session.commit() 
+            
+            # --- [ADD] Delay after successful API call
+            time.sleep(0.8)
+
             return True 
 
         except Exception as inner_e:
@@ -527,7 +571,10 @@ def update_financial_statements():
                 db.session.rollback()
             raise inner_e 
 
-    process_tickers_with_retry(job_name, tickers_list, process_single_ticker_financials, initial_delay=0.8, max_retries=2) 
+    # Use the helper function with the filtered list
+    process_tickers_with_retry(job_name, tickers_to_fetch, process_single_ticker_financials, initial_delay=0.8, max_retries=2) 
+    
+    logging.info(f"ETL Job: [{job_name}]... COMPLETED with skip logic.")
 
 
 # --- Job 4: update_news_sentiment (Unchanged) ---

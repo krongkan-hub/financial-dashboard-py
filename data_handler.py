@@ -353,7 +353,6 @@ def get_deep_dive_data(ticker: str) -> dict:
         logging.error(f"Critical failure in get_deep_dive_data for {ticker}: {e}", exc_info=True)
         return {"error": str(e)}
 
-@lru_cache(maxsize=32)
 def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
     # ... (โค้ดเดิม) ...
     if not isinstance(price_history_df, pd.DataFrame) or price_history_df.empty: return {"error": "Price history data is missing."}

@@ -110,14 +110,17 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     return skipped_items
 
 
-# --- Job 1: Update Company Summaries (Unchanged) ---
-def update_company_summaries():
+# --- Job 1: Update Company Summaries (Modified to accept list override) ---
+def update_company_summaries(tickers_list_override=None):
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
         return
 
     job_name = "Job 1: Update Summaries"
-    tickers_tuple = tuple(ALL_TICKERS_SORTED_BY_MC)
+    # --- [MODIFICATION] Use override list or default list ---
+    tickers_to_process = tickers_list_override if tickers_list_override is not None else ALL_TICKERS_SORTED_BY_MC
+    tickers_tuple = tuple(tickers_to_process)
+    # --- [END MODIFICATION] ---
     today = datetime.utcnow().date()
 
     def process_single_ticker_summary(ticker):

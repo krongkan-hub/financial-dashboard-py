@@ -1,4 +1,4 @@
-# data_handler.py (FIXED - Rate Limiting & Optimized)
+# data_handler.py (FINAL - DCF uses DB, TTM Tax Rate, and Dynamic WACC Calculation)
 
 import pandas as pd
 import yfinance as yf
@@ -12,12 +12,21 @@ from urllib.parse import urlparse
 import requests
 import os
 import time # Import time for delays
+# --- [NEW IMPORTS FOR DB DCF] ---
+from app import db, server, FactFinancialStatements, FactCompanySummary, DimCompany
+from sqlalchemy import func, distinct, text
+# --- [END NEW IMPORTS] ---
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 warnings.filterwarnings("ignore", category=UserWarning)
 
 from config import Config
 from newsapi import NewsApiClient
+
+# --- [WACC CONSTANTS] ---
+ASSUMED_MARKET_RETURN = 0.08  # 8.0% Market Risk Premium assumption
+ASSUMED_RISK_FREE_RATE = 0.04 # 4.0% Risk-Free Rate assumption (simulated for simplicity)
+# --- [END WACC CONSTANTS] ---
 
 # --- Initialize NewsAPI (เหมือนเดิม) ---
 if Config.NEWS_API_KEY:
@@ -28,6 +37,7 @@ else:
 
 # --- Hugging Face API Function (เหมือนเดิม) ---
 def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
+    # ... (โค้ดเดิม) ...
     API_URL = "https://api-inference.huggingface.co/models/mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
     hf_token = os.environ.get('HUGGING_FACE_TOKEN')
     default_result = {'label': 'neutral', 'score': 0.0}
@@ -82,6 +92,7 @@ def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
 # --- News Fetching Function (เหมือนเดิม) ---
 @lru_cache(maxsize=32)
 def get_news_and_sentiment(company_name: str) -> dict:
+    # ... (โค้ดเดิม) ...
     if not newsapi: return {"error": "News service is not configured."}
     try:
         to_date, from_date = datetime.now(), datetime.now() - timedelta(days=7)
@@ -179,7 +190,7 @@ def _get_logo_url(info: dict) -> Optional[str]:
             except Exception: logo_url = None
     return logo_url
 
-# --- Core Data Fetching Functions ---
+# --- Core Data Fetching Functions (เหมือนเดิม) ---
 @lru_cache(maxsize=32)
 def get_revenue_series(ticker: str) -> pd.Series:
     try:
@@ -206,13 +217,9 @@ def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
         logging.error(f"Error in calculate_drawdown for {tickers}: {e}")
         return pd.DataFrame()
 
-# --- [MODIFIED] get_competitor_data (added time.sleep, company_name, sector) ---
+# --- [MODIFIED] get_competitor_data (เหมือนเดิม) ---
 @lru_cache(maxsize=10)
 def get_competitor_data(tickers: tuple) -> pd.DataFrame:
-    """
-    ดึงข้อมูลสรุปสำหรับ ETL Job 1
-    เพิ่ม: Company Name, Sector และ Time Delay
-    """
     all_data = []
     total = len(tickers)
     logging.info(f"Starting to fetch competitor data for {total} tickers...")
@@ -291,10 +298,6 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
         except Exception as e: 
             # Log the specific error for the ticker but continue the loop
             logging.error(f"({i+1}/{total}) An error occurred processing summary for {ticker}: {e}")
-            # Optional: Add a longer sleep if a specific error (like rate limit) occurs
-            # if "RateLimitException" in str(e): # Example check (adjust based on actual error)
-            #    logging.warning(f"Rate limit hit for {ticker}. Sleeping for 60 seconds...")
-            #    time.sleep(60)
             time.sleep(1) # General short sleep on error before trying next ticker
             continue # Continue to the next ticker
 
@@ -305,7 +308,7 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
 
 @lru_cache(maxsize=10)
 def get_scatter_data(tickers: tuple) -> pd.DataFrame:
-    # (ฟังก์ชันนี้ไม่จำเป็นต้องแก้ เพราะจะถูกเลิกใช้ใน callbacks.py)
+    # ... (โค้ดเดิม) ...
     scatter_data = []
     for ticker in tickers:
         try:
@@ -320,10 +323,7 @@ def get_scatter_data(tickers: tuple) -> pd.DataFrame:
 
 @lru_cache(maxsize=32)
 def get_deep_dive_data(ticker: str) -> dict:
-    """
-    (แก้ไข: ลด API Calls ที่ไม่จำเป็นสำหรับ ETL Job 3)
-    ดึงเฉพาะข้อมูลที่จำเป็นสำหรับ Job 3 (Financials) และ Job DCF
-    """
+    # ... (โค้ดเดิม) ...
     try:
         tkr = yf.Ticker(ticker)
         # Fetch data needed for Financials and potentially DCF
@@ -354,150 +354,8 @@ def get_deep_dive_data(ticker: str) -> dict:
         return {"error": str(e)}
 
 @lru_cache(maxsize=32)
-def calculate_dcf_intrinsic_value(ticker: str, forecast_growth_rate: float, perpetual_growth_rate: float, wacc_override: Optional[float]) -> dict:
-    # (ฟังก์ชันนี้ยังคงเหมือนเดิม - ใช้ yfinance สด)
-    # ... (โค้ดเดิม) ...
-    try:
-        ticker_obj = yf.Ticker(ticker)
-        info = ticker_obj.info
-        if not info: return {'Ticker': ticker, 'error': 'Could not fetch company info from yfinance.'}
-        
-        ASSUMED_PERPETUAL_GROWTH, PROJECTION_YEARS, ASSUMED_MARKET_RETURN = perpetual_growth_rate, 5, 0.08
-        income_stmt, balance_sheet, cashflow = ticker_obj.financials, ticker_obj.balance_sheet, ticker_obj.cashflow
-        if any(df.empty for df in [income_stmt, balance_sheet, cashflow]): return {'Ticker': ticker, 'error': 'Financial statements missing.'}
-        last_year_income, last_year_balance, last_year_cashflow = income_stmt.iloc[:, 0], balance_sheet.iloc[:, 0], cashflow.iloc[:, 0]
-        ebit, tax_provision, pretax_income = get_financial_data(last_year_income, ['EBIT', 'Ebit']), get_financial_data(last_year_income, ['Tax Provision', 'Income Tax Expense']), get_financial_data(last_year_income, ['Pretax Income', 'Income Before Tax'])
-        d_and_a, capex = get_financial_data(last_year_cashflow, ['Depreciation And Amortization', 'Depreciation']), get_financial_data(last_year_cashflow, ['Capital Expenditure', 'CapEx'])
-        cash, total_debt = get_financial_data(last_year_balance, ['Cash And Cash Equivalents', 'Cash']), get_financial_data(last_year_balance, ['Total Debt'])
-        interest_expense = get_financial_data(last_year_income, ['Interest Expense', 'Interest Expense Net'])
-        market_cap, beta, shares_outstanding, current_price = info.get('marketCap'), info.get('beta'), info.get('sharesOutstanding'), info.get('currentPrice') or info.get('previousClose')
-        required = [ebit, tax_provision, pretax_income, d_and_a, capex, cash, shares_outstanding, current_price]
-        if any(v is None for v in required): return {'Ticker': ticker, 'error': 'Missing essential data for DCF.'}
-        tax_rate = (tax_provision / pretax_income) if pretax_income and pretax_income != 0 else 0.21
-        base_fcff = (ebit * (1 - tax_rate)) + d_and_a - capex
-        wacc = wacc_override
-        if wacc is None:
-            if any(v is None for v in [beta, market_cap, total_debt, interest_expense]): return {'Ticker': ticker, 'error': 'Missing data for WACC calc.'}
-            cost_of_debt_rd = (interest_expense / total_debt) if total_debt != 0 else 0.05
-            tnx_history = yf.Ticker('^TNX').history(period='1d')
-            risk_free_rate = (tnx_history['Close'].iloc[0] / 100) if not tnx_history.empty else 0.04
-            cost_of_equity_re = risk_free_rate + beta * (ASSUMED_MARKET_RETURN - risk_free_rate)
-            total_capital = market_cap + total_debt
-            if total_capital == 0: return {'Ticker': ticker, 'error': 'Total capital is zero.'}
-            wacc = ((market_cap / total_capital) * cost_of_equity_re) + ((total_debt / total_capital) * cost_of_debt_rd * (1 - tax_rate))
-        if wacc <= ASSUMED_PERPETUAL_GROWTH: return {'Ticker': ticker, 'error': f'WACC ({wacc:.2%}) <= perpetual growth.'}
-        future_fcffs = [base_fcff * ((1 + forecast_growth_rate) ** year) for year in range(1, PROJECTION_YEARS + 1)]
-        discounted_fcffs = [fcff / ((1 + wacc) ** (year + 1)) for year, fcff in enumerate(future_fcffs)]
-        terminal_value = (future_fcffs[-1] * (1 + ASSUMED_PERPETUAL_GROWTH)) / (wacc - ASSUMED_PERPETUAL_GROWTH)
-        discounted_terminal_value = terminal_value / ((1 + wacc) ** PROJECTION_YEARS)
-        enterprise_value = sum(discounted_fcffs) + discounted_terminal_value
-        net_debt = (total_debt or 0) - cash
-        equity_value = enterprise_value - net_debt
-        intrinsic_value_per_share = equity_value / shares_outstanding
-        return {'Ticker': ticker, 'intrinsic_value': intrinsic_value_per_share, 'current_price': current_price, 'wacc': wacc}
-    except Exception as e:
-        logging.error(f"Critical DCF failure for {ticker}: {e}", exc_info=True)
-        return {'Ticker': ticker, 'error': 'Unexpected error during calculation.'}
-
-
-@lru_cache(maxsize=32)
-def calculate_monte_carlo_dcf(
-    ticker: str,
-    n_simulations: int,
-    growth_min: float, growth_mode: float, growth_max: float,
-    perpetual_min: float, perpetual_mode: float, perpetual_max: float,
-    wacc_min: float, wacc_mode: float, wacc_max: float
-) -> dict:
-    """
-    (ฟังก์ชันนี้ยังคงเหมือนเดิม - ใช้ yfinance สด)
-    """
-    try:
-        ticker_obj, info = yf.Ticker(ticker), yf.Ticker(ticker).info
-        if not info or not info.get('sharesOutstanding'):
-            return {'error': 'Missing shares outstanding or basic info.'}
-
-        income_stmt, balance_sheet, cashflow = ticker_obj.financials, ticker_obj.balance_sheet, ticker_obj.cashflow
-        last_year_income, last_year_balance, last_year_cashflow = income_stmt.iloc[:, 0], balance_sheet.iloc[:, 0], cashflow.iloc[:, 0]
-
-        ebit = get_financial_data(last_year_income, ['EBIT', 'Ebit'])
-        tax_provision = get_financial_data(last_year_income, ['Tax Provision', 'Income Tax Expense'])
-        pretax_income = get_financial_data(last_year_income, ['Pretax Income', 'Income Before Tax'])
-        d_and_a = get_financial_data(last_year_cashflow, ['Depreciation And Amortization', 'Depreciation'])
-        capex = get_financial_data(last_year_cashflow, ['Capital Expenditure', 'CapEx'])
-        cash_and_equivalents = get_financial_data(last_year_balance, ['Cash And Cash Equivalents', 'Cash'])
-        total_debt = get_financial_data(last_year_balance, ['Total Debt'])
-        shares_outstanding = info.get('sharesOutstanding')
-        current_price = info.get('currentPrice') or info.get('previousClose')
-
-        if any(v is None for v in [ebit, tax_provision, pretax_income, d_and_a, capex, cash_and_equivalents, shares_outstanding, current_price]):
-            return {'error': 'Missing essential data for DCF.'}
-
-        tax_rate = (tax_provision / pretax_income) if pretax_income != 0 else 0.21
-        base_fcff = (ebit * (1 - tax_rate)) + d_and_a - capex
-        net_debt = total_debt - cash_and_equivalents if total_debt is not None else -cash_and_equivalents
-        PROJECTION_YEARS = 5
-
-        sim_growth = np.random.triangular(growth_min / 100.0, growth_mode / 100.0, growth_max / 100.0, n_simulations)
-        sim_perpetual = np.random.triangular(perpetual_min / 100.0, perpetual_mode / 100.0, perpetual_max / 100.0, n_simulations)
-        sim_wacc = np.random.triangular(wacc_min / 100.0, wacc_mode / 100.0, wacc_max / 100.0, n_simulations)
-
-        # Handle cases where sim_wacc might be <= sim_perpetual
-        valid_sim = sim_wacc > sim_perpetual
-        if not np.any(valid_sim):
-            return {'error': 'Invalid WACC/Perpetual Growth ranges resulting in WACC <= g for all simulations.'}
-
-        # Filter out invalid simulations before calculations
-        sim_growth = sim_growth[valid_sim]
-        sim_perpetual = sim_perpetual[valid_sim]
-        sim_wacc = sim_wacc[valid_sim]
-        
-        if len(sim_wacc) == 0: # Check again after filtering
-             return {'error': 'No valid simulations after filtering WACC > g.'}
-        
-        n_valid_simulations = len(sim_wacc) # Update simulation count
-
-        future_fcffs = base_fcff * (1 + sim_growth) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
-        discounted_fcffs = future_fcffs / (1 + sim_wacc) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
-        final_year_fcff = future_fcffs[-1]
-        
-        # Calculate terminal value only for valid simulations
-        terminal_value = (final_year_fcff * (1 + sim_perpetual)) / (sim_wacc - sim_perpetual)
-        
-        # Ensure terminal value is not negative (or handle appropriately)
-        terminal_value[terminal_value < 0] = 0 
-        
-        discounted_terminal_value = terminal_value / ((1 + sim_wacc) ** PROJECTION_YEARS)
-
-        enterprise_value = np.sum(discounted_fcffs, axis=0) + discounted_terminal_value
-        equity_value = enterprise_value - net_debt
-        simulated_intrinsic_values = equity_value / shares_outstanding
-
-        # Filter out potential non-finite values before calculating statistics
-        finite_values = simulated_intrinsic_values[np.isfinite(simulated_intrinsic_values)]
-        if len(finite_values) == 0:
-             return {'error': 'All simulations resulted in non-finite intrinsic values.'}
-
-
-        return {
-            'simulated_values': finite_values.tolist(),
-            'current_price': current_price,
-            'mean': np.mean(finite_values),
-            'median': np.median(finite_values),
-            'p10': np.percentile(finite_values, 10),
-            'p90': np.percentile(finite_values, 90),
-            'success': True,
-            'num_valid_simulations': len(finite_values) # Add info about valid simulations
-        }
-
-    except Exception as e:
-        logging.error(f"Monte Carlo DCF failed for {ticker}: {e}", exc_info=True)
-        return {'error': str(e)}
-
-
 def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
-    """
-    (ฟังก์ชันนี้ไม่ถูกแก้ไข - คำนวณ Indicators จาก DataFrame ที่ส่งเข้ามา)
-    """
+    # ... (โค้ดเดิม) ...
     if not isinstance(price_history_df, pd.DataFrame) or price_history_df.empty: return {"error": "Price history data is missing."}
     df = price_history_df.copy()
     try:
@@ -527,10 +385,7 @@ def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
 
 @lru_cache(maxsize=32)
 def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_growth_rate: float, terminal_pe: float) -> dict:
-    """
-    (ฟังก์ชันนี้จะถูกเลิกใช้ใน callbacks.py และย้าย Logic ไปคำนวณจาก DB)
-    (แต่ยังคงไว้ก่อน เผื่อมีการเรียกใช้จากที่อื่น หรือเพื่อเปรียบเทียบ)
-    """
+    # ... (โค้ดเดิม) ...
     try:
         info = yf.Ticker(ticker).info
         if not info:
@@ -547,3 +402,225 @@ def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_grow
     except Exception as e:
         logging.error(f"Exit multiple valuation failed for {ticker}: {e}")
         return {'error': 'Calculation failed unexpectedly.'}
+
+
+# --- [NEW HELPER FUNCTION FOR DCF BASE DATA FROM DB] ---
+def _get_dcf_base_data_from_db(ticker: str) -> dict:
+    """
+    Queries the database (FactFinancialStatements & FactCompanySummary) 
+    to get the necessary base financial data for DCF analysis, including TTM metrics.
+    FCFF = EBIT * (1 - TTM Tax Rate) + D&A - CapEx
+    Also calculates WACC (WACC_calc) using Beta and Debt from DB.
+    """
+    with server.app_context():
+        # 1. Find 4 latest unique report dates for the ticker
+        latest_reports_query = db.session.query(
+            distinct(FactFinancialStatements.report_date).label('report_date')
+        ).filter(
+            FactFinancialStatements.ticker == ticker,
+            FactFinancialStatements.statement_type.in_(['income', 'cashflow'])
+        ).order_by(
+            FactFinancialStatements.report_date.desc()
+        ).limit(4).subquery()
+        
+        # 2. Query TTM metrics (SUM over 4 quarters)
+        required_ttm_metrics = [
+            'EBIT', 
+            'Depreciation And Amortization', 
+            'Capital Expenditure',
+            'Income Tax Expense',        
+            'Income Before Tax',         
+            'Interest Expense'           # <<< ADDED
+        ]
+        
+        ttm_data = db.session.query(
+            FactFinancialStatements.metric_name,
+            func.sum(FactFinancialStatements.metric_value).label('ttm_value')
+        ).filter(
+            FactFinancialStatements.ticker == ticker,
+            FactFinancialStatements.report_date.in_(latest_reports_query),
+            FactFinancialStatements.metric_name.in_(required_ttm_metrics)
+        ).group_by(FactFinancialStatements.metric_name).all()
+        
+        ttm_dict = {name: (value if value is not None else 0.0) for name, value in ttm_data}
+
+        # Check for required TTM metrics (FCFF components)
+        if not all(m in ttm_dict for m in ['EBIT', 'Depreciation And Amortization', 'Capital Expenditure']):
+             return {'error': 'Missing essential TTM financial data (EBIT, D&A, CapEx).', 'success': False}
+
+        # 3. Calculate TTM Tax Rate (Dynamic)
+        ttm_tax = ttm_dict.get('Income Tax Expense', 0.0)
+        ttm_pretax = ttm_dict.get('Income Before Tax', 0.0)
+        
+        # Use Dynamic TTM Rate, fallback to 21%
+        tax_rate = (ttm_tax / ttm_pretax) if ttm_pretax and ttm_pretax != 0 else 0.21
+        # Ensure tax rate is within a reasonable range (e.g., 0% to 50%)
+        tax_rate = max(0.0, min(0.5, tax_rate))
+        
+        # 4. Query latest Balance Sheet items (Cash, Debt)
+        latest_bs_date = db.session.query(
+            func.max(FactFinancialStatements.report_date)
+        ).filter(
+            FactFinancialStatements.ticker == ticker,
+            FactFinancialStatements.statement_type == 'balance'
+        ).scalar()
+        
+        bs_data = db.session.query(
+            FactFinancialStatements.metric_name,
+            FactFinancialStatements.metric_value
+        ).filter(
+            FactFinancialStatements.ticker == ticker,
+            FactFinancialStatements.statement_type == 'balance',
+            FactFinancialStatements.report_date == latest_bs_date,
+            FactFinancialStatements.metric_name.in_(['Cash And Cash Equivalents', 'Total Debt'])
+        ).all()
+        
+        bs_dict = {name: (value if value is not None else 0.0) for name, value in bs_data}
+        
+        # 5. Query latest price/market cap/beta from FactCompanySummary
+        latest_summary = db.session.query(
+            FactCompanySummary.price,
+            FactCompanySummary.market_cap,
+            FactCompanySummary.beta                     # <<< ADDED
+        ).filter(
+            FactCompanySummary.ticker == ticker
+        ).order_by(FactCompanySummary.date_updated.desc()).first()
+
+        if not latest_summary or latest_summary.price is None or latest_summary.market_cap is None or latest_summary.price == 0:
+            return {'error': 'Missing latest summary data (Price, Market Cap).', 'success': False}
+
+        price = latest_summary.price
+        market_cap = latest_summary.market_cap
+        beta = latest_summary.beta # <<< GET BETA
+        
+        # 6. Calculate Shares Outstanding (Market Cap / Price)
+        shares_outstanding = market_cap / price
+        
+        if shares_outstanding == 0:
+            return {'error': 'Could not calculate Shares Outstanding (Market Cap/Price is zero).', 'success': False}
+
+        # 7. Calculate WACC (Dynamic Logic Restored)
+        wacc_calc = None
+        total_debt = bs_dict.get('Total Debt', 0.0)
+        interest_expense = ttm_dict.get('Interest Expense', 0.0) # TTM Interest Expense
+        total_capital = market_cap + total_debt
+
+        if beta is not None and total_debt >= 0 and total_capital > 0:
+             # Cost of Debt (Rd) - Uses TTM Interest Expense, falls back to R_f if no debt/interest or interest=0
+            cost_of_debt_rd = (interest_expense / total_debt) if total_debt != 0 and interest_expense is not None and interest_expense != 0 else ASSUMED_RISK_FREE_RATE
+            
+             # Cost of Equity (Re)
+            cost_of_equity_re = ASSUMED_RISK_FREE_RATE + beta * (ASSUMED_MARKET_RETURN - ASSUMED_RISK_FREE_RATE)
+            
+             # WACC Formula
+            wacc_calc = (
+                (market_cap / total_capital) * cost_of_equity_re
+            ) + (
+                (total_debt / total_capital) * cost_of_debt_rd * (1 - tax_rate)
+            )
+
+        # 8. Final Data Dict & Base FCFF Calculation
+        dcf_base = {
+            'success': True,
+            'current_price': price,
+            'shares_outstanding': shares_outstanding,
+            'ebit_ttm': ttm_dict['EBIT'],
+            'tax_rate': tax_rate, # <<< Dynamic TTM Rate
+            'd_and_a_ttm': ttm_dict['Depreciation And Amortization'],
+            'capex_ttm': ttm_dict['Capital Expenditure'],
+            'cash': bs_dict.get('Cash And Cash Equivalents', 0.0),
+            'total_debt': total_debt,
+            'wacc_calculated': wacc_calc # <<< ADDED (for optional display/info)
+        }
+        
+        dcf_base['net_debt'] = dcf_base['total_debt'] - bs_dict.get('Cash And Cash Equivalents', 0.0)
+        dcf_base['base_fcff'] = (dcf_base['ebit_ttm'] * (1 - dcf_base['tax_rate'])) + dcf_base['d_and_a_ttm'] - dcf_base['capex_ttm']
+        
+        if dcf_base['base_fcff'] == 0:
+             return {'error': 'Base FCFF is zero after calculation. Cannot run simulation.', 'success': False}
+        
+        return dcf_base
+# --- [END NEW HELPER FUNCTION] ---
+
+
+# --- [MODIFIED] calculate_monte_carlo_dcf ---
+@lru_cache(maxsize=32)
+def calculate_monte_carlo_dcf(
+    ticker: str,
+    n_simulations: int,
+    growth_min: float, growth_mode: float, growth_max: float,
+    perpetual_min: float, perpetual_mode: float, perpetual_max: float,
+    wacc_min: float, wacc_mode: float, wacc_max: float
+) -> dict:
+    """
+    (MODIFIED: Fetches base data from DB for DCF calculation, WACC range still used for simulation)
+    """
+    try:
+        # --- [MODIFICATION: Fetch base data from DB] ---
+        dcf_data = _get_dcf_base_data_from_db(ticker)
+        
+        if not dcf_data.get('success'):
+            # Propagate detailed error message
+            return {'error': dcf_data.get('error', 'Missing essential data for DCF from DB.')}
+
+        # Unpack base data
+        base_fcff = dcf_data['base_fcff']
+        net_debt = dcf_data['net_debt']
+        shares_outstanding = dcf_data['shares_outstanding']
+        current_price = dcf_data['current_price']
+        # --- [END MODIFICATION] ---
+        
+        PROJECTION_YEARS = 5
+
+        # --- Monte Carlo Simulation Logic (เหมือนเดิม) ---
+        sim_growth = np.random.triangular(growth_min / 100.0, growth_mode / 100.0, growth_max / 100.0, n_simulations)
+        sim_perpetual = np.random.triangular(perpetual_min / 100.0, perpetual_mode / 100.0, perpetual_max / 100.0, n_simulations)
+        sim_wacc = np.random.triangular(wacc_min / 100.0, wacc_mode / 100.0, wacc_max / 100.0, n_simulations)
+
+        # Handle cases where sim_wacc might be <= sim_perpetual
+        valid_sim = sim_wacc > sim_perpetual
+        if not np.any(valid_sim):
+            return {'error': 'Invalid WACC/Perpetual Growth ranges resulting in WACC <= g for all simulations.'}
+
+        # Filter out invalid simulations before calculations
+        sim_growth = sim_growth[valid_sim]
+        sim_perpetual = sim_perpetual[valid_sim]
+        sim_wacc = sim_wacc[valid_sim]
+        
+        if len(sim_wacc) == 0:
+             return {'error': 'No valid simulations after filtering WACC > g.'}
+        
+        n_valid_simulations = len(sim_wacc)
+
+        # DCF Calculation
+        future_fcffs = base_fcff * (1 + sim_growth) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
+        discounted_fcffs = future_fcffs / (1 + sim_wacc) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
+        final_year_fcff = future_fcffs[-1]
+        
+        terminal_value = (final_year_fcff * (1 + sim_perpetual)) / (sim_wacc - sim_perpetual)
+        terminal_value[terminal_value < 0] = 0 
+        discounted_terminal_value = terminal_value / ((1 + sim_wacc) ** PROJECTION_YEARS)
+
+        enterprise_value = np.sum(discounted_fcffs, axis=0) + discounted_terminal_value
+        equity_value = enterprise_value - net_debt
+        simulated_intrinsic_values = equity_value / shares_outstanding
+
+        finite_values = simulated_intrinsic_values[np.isfinite(simulated_intrinsic_values)]
+        if len(finite_values) == 0:
+             return {'error': 'All simulations resulted in non-finite intrinsic values.'}
+
+        return {
+            'simulated_values': finite_values.tolist(),
+            'current_price': current_price,
+            'mean': np.mean(finite_values),
+            'median': np.median(finite_values),
+            'p10': np.percentile(finite_values, 10),
+            'p90': np.percentile(finite_values, 90),
+            'success': True,
+            'num_valid_simulations': len(finite_values)
+        }
+
+    except Exception as e:
+        logging.error(f"Monte Carlo DCF failed for {ticker}: {e}", exc_info=True)
+        return {'error': str(e)}
+# --- [END MODIFIED] calculate_monte_carlo_dcf ---

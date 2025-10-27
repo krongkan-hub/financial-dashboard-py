@@ -10,7 +10,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
-import yfinance as yf # ยังคงใช้สำหรับ Monte Carlo DCF
 import numpy as np
 import json
 import logging
@@ -20,7 +19,7 @@ from flask_login import current_user
 from app import app, db, server, User, UserSelection, UserAssumptions
 # --- [REFACTOR STEP 4 IMPORTS] ---
 # Import models ใหม่ที่เราจะใช้ Query
-from app import DimCompany, FactCompanySummary, FactDailyPrices
+from app import DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements # <<< [UPDATE: Added FactFinancialStatements]
 from sqlalchemy import func # Import SQL functions
 from datetime import datetime, timedelta # Import datetime
 # --- [END REFACTOR STEP 4 IMPORTS] ---
@@ -32,7 +31,7 @@ from layout import build_layout, create_navbar
 from data_handler import (
     # calculate_drawdown, get_scatter_data, (ถูกลบออก)
     # calculate_exit_multiple_valuation, (ถูกลบออก)
-    calculate_monte_carlo_dcf # ยังคงใช้ฟังก์ชันเดิม (ต้อง Refactor เพิ่มเติม)
+    calculate_monte_carlo_dcf # ถูกปรับปรุงให้ใช้ DB ภายใน
 )
 from pages import deep_dive
 from constants import (
@@ -90,8 +89,6 @@ def _prepare_display_dataframe(df_raw):
             df_display[col] = df_raw[col].apply(lambda x: x if pd.notna(x) else "")
     return df_display
 
-# --- ฟังก์ชัน _generate_datatable_columns และ _generate_datatable_style_conditionals ---
-# --- เหมือนเดิมทุกประการ ไม่ต้องแก้ไข ---
 def _generate_datatable_columns(tab_config):
     columns = []
     for col in tab_config["columns"]:
@@ -119,8 +116,6 @@ def _generate_datatable_style_conditionals(tab_config):
     return style_data_conditional, style_cell_conditional
 
 
-# --- ฟังก์ชัน apply_custom_scoring ---
-# --- แก้ไขเล็กน้อยให้ใช้ชื่อคอลัมน์จาก DB (snake_case) ---
 def apply_custom_scoring(df):
     if df.empty: return df
 
@@ -268,7 +263,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
     def update_index_summary_display(store_data):
         indices = store_data.get('indices', []) if store_data else []
         if not indices: return html.Span("No indices selected.", className="text-muted fst-italic")
-        return [html.Label("Selected Indices:", className="text-muted small")] + [dbc.Badge([INDEX_TICKER_TO_NAME.get(i, i), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': i})], color="light", className="m-1 p-2 text-dark border") for i in indices]
+        return [html.Label("Selected Indices:", className="text-muted small")] + [dbc.Badge([INDEX_TICKER_TO_NAME.get(i, i), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': i})], color="light", className="m-1 p-2 text-dark border") for t in indices]
 
     @app.callback(Output('ticker-select-dropdown', 'options'), [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')])
     def update_ticker_options(selected_sector, store_data):
@@ -351,7 +346,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         if not forecast_data: return 5, 10, 20
         return forecast_data.get('years', 5), forecast_data.get('growth', 10), forecast_data.get('pe', 20)
 
-    # --- [START OF GRAPH REFACTOR - FIXED pd.read_sql] ---
+    # --- [START OF GRAPH REFACTOR - MODIFIED DCF SECTION] ---
     @app.callback( 
         Output('analysis-pane-content', 'children'), 
         [Input('analysis-tabs', 'active_tab'), 
@@ -447,17 +442,36 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
             
             if active_tab == "tab-dcf":
-                # (ส่วนนี้ยังคงเดิม - ยังคงเรียก API สดเพื่อคำนวณ)
+                # (ส่วนนี้ถูกปรับปรุงให้ดึงข้อมูลฐานจาก DB ก่อนนำไปคำนวณ Monte Carlo Simulation)
                 if not tickers: return dbc.Alert("Please select stocks for DCF simulation.", color="info", className="mt-3 text-center")
                 if not dcf_data: return dbc.Alert("Please set simulation assumptions using the gear icon.", color="info", className="mt-3 text-center")
                 
                 all_results = []
                 for ticker in tickers:
-                    # ฟังก์ชันนี้ยังคงใช้ yfinance ภายใน
-                    result = calculate_monte_carlo_dcf(ticker=ticker, n_simulations=dcf_data.get('simulations', 10000), growth_min=dcf_data.get('growth_min', 3.0), growth_mode=dcf_data.get('growth_mode', 5.0), growth_max=dcf_data.get('growth_max', 8.0), perpetual_min=dcf_data.get('perpetual_min', 1.5), perpetual_mode=dcf_data.get('perpetual_mode', 2.5), perpetual_max=dcf_data.get('perpetual_max', 3.0), wacc_min=dcf_data.get('wacc_min', 7.0), wacc_mode=dcf_data.get('wacc_mode', 8.0), wacc_max=dcf_data.get('wacc_max', 10.0))
-                    if 'error' not in result: result['Ticker'] = ticker; all_results.append(result)
+                    # ฟังก์ชันนี้ถูกปรับปรุงให้ดึงข้อมูล TTM จาก DB ภายใน
+                    result = calculate_monte_carlo_dcf(
+                        ticker=ticker, 
+                        n_simulations=dcf_data.get('simulations', 10000), 
+                        growth_min=dcf_data.get('growth_min', 3.0), 
+                        growth_mode=dcf_data.get('growth_mode', 5.0), 
+                        growth_max=dcf_data.get('growth_max', 8.0), 
+                        perpetual_min=dcf_data.get('perpetual_min', 1.5), 
+                        perpetual_mode=dcf_data.get('perpetual_mode', 2.5), 
+                        perpetual_max=dcf_data.get('perpetual_max', 3.0), 
+                        wacc_min=dcf_data.get('wacc_min', 7.0), 
+                        wacc_mode=dcf_data.get('wacc_mode', 8.0), 
+                        wacc_max=dcf_data.get('wacc_max', 10.0)
+                    )
+                    
+                    if 'error' not in result: 
+                        result['Ticker'] = ticker
+                        all_results.append(result)
+                    else:
+                         # แสดง Error ที่ละเอียดขึ้น
+                         logging.warning(f"DCF simulation failed for {ticker}: {result['error']}")
+                         return dbc.Alert(f"DCF simulation for {ticker} failed: {result['error']}", color="danger", className="mt-3")
                 
-                if not all_results: return dbc.Alert("Could not run simulation for any selected stocks.", color="danger")
+                if not all_results: return dbc.Alert("Could not run simulation for any selected stocks. Check logs for details (e.g., missing financial data).", color="danger")
                 
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
                 for res in all_results: fig.add_trace(go.Histogram(x=res['simulated_values'], name=res['Ticker'], opacity=0.6, nbinsx=100), row=1, col=1)
@@ -465,21 +479,20 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 fig.add_trace(go.Scatter(x=df_mos['current_price'], y=df_mos['Ticker'], mode='markers', marker=dict(color='royalblue', size=10), name='Current Price'), row=2, col=1)
                 fig.add_trace(go.Scatter(x=df_mos['intrinsic_value'], y=df_mos['Ticker'], mode='markers', marker=dict(color='darkorange', size=10, symbol='diamond'), name='Mean Intrinsic Value'), row=2, col=1)
                 for i, row in df_mos.iterrows(): fig.add_shape(type='line', x0=row['current_price'], y0=row['Ticker'], x1=row['intrinsic_value'], y1=row['Ticker'], line=dict(color='limegreen' if row['intrinsic_value'] > row['current_price'] else 'tomato', width=3), row=2, col=1)
-                fig.update_layout(title_text='Monte Carlo DCF Analysis', barmode='overlay', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig.update_layout(title_text='Monte Carlo DCF Analysis (From DB)', barmode='overlay', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 fig.update_yaxes(title_text="Frequency", row=1, col=1); fig.update_yaxes(title_text="Ticker", row=2, col=1); fig.update_xaxes(title_text="Share Price ($)", row=2, col=1)
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
             
             return html.P("This is an empty tab!")
         
         except Exception as e:
-            # แก้ไข Log เพื่อให้บอกว่าเกิด Error ในแท็บไหน (โดยใช้ TABS_CONFIG)
             tab_name = TABS_CONFIG.get(active_tab, {}).get('tab_name', 'Graph')
             logging.error(f"Error rendering graph content for tab {tab_name} ({active_tab}): {e}", exc_info=True)
             return dbc.Alert(f"An error occurred while rendering '{tab_name}': {type(e).__name__} - {e}", color="danger")
-    # --- [END OF GRAPH REFACTOR] ---
+    # --- [END OF GRAPH REFACTOR - MODIFIED DCF SECTION] ---
 
 
-    # --- [START OF TABLE REFACTOR - FIXED pd.read_sql] ---
+    # --- [START OF TABLE REFACTOR - เหมือนเดิม] ---
     @app.callback(
         Output('table-pane-content', 'children'),
         Output('sort-by-dropdown', 'options'),

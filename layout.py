@@ -66,6 +66,7 @@ METRIC_DEFINITIONS = {
         * **Mean Value (Red Line):** The average of all simulation outcomes. It serves as a central point of the valuation.
         * **Current Price (Black Line):** The stock's current market price.
         * **Probability Analysis:** By comparing the distribution to the current price, you can assess the probability that the stock is undervalued (i.e., the percentage of simulation outcomes where the intrinsic value is higher than the current price).
+    **A limitation to note:** This model is less reliable for early-stage companies (Startups) or rapidly growing companies, as these companies often have consistently negative Free Cash Flow during the expansion phase.
     """, mathjax=True),
 
     # Valuation Metrics

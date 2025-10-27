@@ -1,4 +1,4 @@
-# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Job 2 Error)
+# etl.py (FINAL VERSION - Fixed UnboundLocalError and implemented Smart Weekend Buffer)
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -6,6 +6,7 @@ import yfinance as yf
 import numpy as np
 import time 
 from typing import Dict, List, Optional
+from sqlalchemy import func # Import SQL functions for MAX()
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
@@ -51,10 +52,11 @@ def _clean_numpy_types(data_dict: Dict) -> Dict:
 # ---------------------------------------------------------------------------------
 
 
-# --- Helper Function for Retry and Progress (ไม่เปลี่ยนแปลง) ---
+# --- Helper Function for Retry and Progress (MODIFIED: Removed time.sleep) ---
 def process_tickers_with_retry(job_name, items_list, process_func, initial_delay=0.5, retry_delay=60, max_retries=3):
     """
     วน Loop ผ่านรายการ (tickers หรือ tuples) พร้อม Retry, Delay และ Progress Tracking.
+    *** MODIFIED: Removed mandatory time.sleep here. Delay must be inside process_func. ***
     """
     total_items = len(items_list)
     processed_count = 0
@@ -77,7 +79,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
                 success = True
                 processed_count += 1
                 logging.info(f"[{job_name}] Successfully processed {identifier} ({i + 1}/{total_items})")
-                time.sleep(initial_delay)
+                # time.sleep(initial_delay) # <--- REMOVED: Delay is now inside process_func if API was called
 
             except Exception as e:
                 retries += 1
@@ -95,7 +97,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
                 else:
                     logging.error(f"[{job_name}] Max retries reached for {identifier}. Skipping.")
                     skipped_items.append(identifier)
-                    time.sleep(initial_delay)
+                    time.sleep(initial_delay) # Keep delay on FINAL skip/fail
 
         if (i + 1) % 10 == 0 or (i + 1) == total_items: 
              progress = (i + 1) / total_items * 100
@@ -110,7 +112,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     return skipped_items
 
 
-# --- Job 1: Update Company Summaries (Modified to accept list override) ---
+# --- Job 1: Update Company Summaries (MODIFIED: Added Skip logic and moved sleep) ---
 def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
@@ -123,9 +125,41 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     # --- [END MODIFICATION] ---
     today = datetime.utcnow().date()
 
+    # 1. Query Max Date for all relevant tickers from FactCompanySummary
+    with server.app_context():
+        max_date_results = db.session.query(
+            FactCompanySummary.ticker,
+            func.max(FactCompanySummary.date_updated)
+        ).filter(
+            FactCompanySummary.ticker.in_(tickers_to_process)
+        ).group_by(FactCompanySummary.ticker).all()
+        max_dates = {ticker: max_date for ticker, max_date in max_date_results}
+
+    
+    # 2. Prepare list of tickers to actually process (applying skip logic)
+    tickers_to_fetch = []
+    for ticker in tickers_to_process:
+        latest_date_in_db = max_dates.get(ticker)
+        
+        # Skip if already updated today (useful for manual runs on the same day)
+        if latest_date_in_db == today:
+             logging.info(f"[{job_name}] Skipping {ticker}: Already updated today ({latest_date_in_db}).")
+             continue
+             
+        tickers_to_fetch.append(ticker)
+
+    if not tickers_to_fetch:
+         logging.info(f"ETL Job: [{job_name}] All {len(tickers_to_process)} tickers are already up-to-date for today. Nothing to fetch.")
+         return
+
+    logging.info(f"ETL Job: Fetching summaries for {len(tickers_to_fetch)}/{len(tickers_to_process)} tickers.")
+
+
     def process_single_ticker_summary(ticker):
         try:
+            # Note: We must call the API here to get the data, but the DB write is the critical part
             df_single = get_competitor_data((ticker,)) 
+            
             if df_single.empty:
                 logging.warning(f"[{job_name}] get_competitor_data returned empty for {ticker}. Skipping DB insert.")
                 return 
@@ -178,6 +212,10 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                 db.session.execute(on_conflict_fact)
 
                 db.session.commit()
+                
+                # --- [FIX: เพิ่ม time.sleep ที่นี่ เพื่อหน่วงเวลาเฉพาะเมื่อมีการดึงข้อมูลจริงเท่านั้น] ---
+                time.sleep(0.3) 
+                # --- [END FIX] ---
 
         except Exception as inner_e:
             logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
@@ -185,8 +223,8 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                  db.session.rollback()
             raise inner_e 
 
-    # Use the helper function
-    process_tickers_with_retry(job_name, list(tickers_tuple), process_single_ticker_summary, initial_delay=0.7, max_retries=3)
+    # Use the helper function with the filtered list
+    process_tickers_with_retry(job_name, tickers_to_fetch, process_single_ticker_summary, initial_delay=0.7, max_retries=3)
 
 
 # --- [NEW HELPER FUNCTION FOR OOM FIX] ---
@@ -208,7 +246,7 @@ def process_single_ticker_prices(data_tuple):
         # --- [จบการแก้ไข] ---
 
         if prices_df.empty:
-            logging.warning(f"[{job_name}] yf.download returned empty for {ticker}. Skipping DB insert.")
+            logging.warning(f"[{job_name}] yf.download returned empty for {ticker} (Start: {start_date}). Skipping DB insert.")
             return
 
         # 2. Data Processing (เนื่องจากส่ง list [ticker] เข้าไป ผลลัพธ์จะเป็น MultiIndex)
@@ -271,6 +309,10 @@ def process_single_ticker_prices(data_tuple):
                     
                     db.session.execute(on_conflict_chunk)
                     db.session.commit()
+            
+            # --- [FIX: เพิ่ม time.sleep ที่นี่ เพื่อหน่วงเวลาเฉพาะเมื่อมีการดึงข้อมูลจริงเท่านั้น] ---
+            time.sleep(0.3)
+            # --- [END FIX] ---
 
     except Exception as e:
         # Rollback and re-raise to trigger the retry logic
@@ -280,18 +322,22 @@ def process_single_ticker_prices(data_tuple):
 # --- [END NEW HELPER FUNCTION FOR OOM FIX] ---
 
 
-# --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX) ---
+# --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX & SMART WEEKEND BUFFER) ---
 def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[str]] = None):
     """
     ETL Job 2: ดึงข้อมูลราคาย้อนหลังและ UPSERT ลง FactDailyPrices (ใช้ Batch Processing ต่อ Ticker)
+    *** MODIFIED: Implements Smart Weekend Buffer (3 days on Monday, 1 day otherwise). ***
     """
     job_name = "Job 2: Update Daily Prices"
     if sql_insert is None:
         logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
         return
 
+    # Define today's date once at the start of the function
+    today = datetime.utcnow().date() # <--- FIXED POSITION
+    
     with server.app_context():
-        logging.info(f"Starting ETL Job: [{job_name}] for {days_back} days back...")
+        logging.info(f"Starting ETL Job: [{job_name}] for {days_back} days back, implementing GAP FILLING...")
         
         # 1. Query Tickers or use Override List
         if tickers_list_override is not None and len(tickers_list_override) > 0:
@@ -309,25 +355,70 @@ def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[st
             logging.warning("ETL Job: No companies found in DimCompany. Skipping price update.")
             return
 
-        end_date = datetime.utcnow().date()
-        start_date = end_date - timedelta(days=days_back)
+        # 2. Query Max Date for all relevant tickers from FactDailyPrices
+        max_date_results = db.session.query(
+            FactDailyPrices.ticker,
+            func.max(FactDailyPrices.date)
+        ).filter(
+            FactDailyPrices.ticker.in_(tickers_list)
+        ).group_by(FactDailyPrices.ticker).all()
+
+        # Convert results to a dictionary for easy lookup: {ticker: max_date}
+        max_dates = {ticker: max_date for ticker, max_date in max_date_results}
+
+        # 3. Determine the required buffer based on the day of the week
+        # Monday is 0, Sunday is 6
+        is_monday = today.weekday() == 0 
+        required_days_back = 3 if is_monday else 1 
         
-        # 2. Prepare arguments for process_single_ticker_prices
-        # สร้าง Tuple (Ticker, Start Date, End Date)
-        ticker_tuples = [(t, start_date, end_date) for t in tickers_list]
+        # 4. Prepare arguments for process_single_ticker_prices with gap filling logic
+        ticker_tuples_to_process = []
+        # Use 'today' for calculating full history start date
+        full_history_start_date = today - timedelta(days=days_back)
         
-        # 3. Use the helper function to process tickers sequentially with retry
-        logging.info(f"ETL Job: Processing {len(tickers_list)} tickers sequentially to avoid OOM...")
+        for ticker in tickers_list:
+            latest_date_in_db = max_dates.get(ticker)
+            
+            if latest_date_in_db:
+                # Check if data is very recent (allowing for weekends/holidays)
+                if (today - latest_date_in_db).days <= required_days_back:
+                     logging.info(f"[{job_name}] Skipping {ticker}: Data is very recent (Latest: {latest_date_in_db}, Buffer: {required_days_back} days).")
+                     continue
+                
+                # Otherwise, fetch from the day after the latest date
+                new_start_date = latest_date_in_db + timedelta(days=1)
+            else:
+                # New ticker: Fetch full history (5 years)
+                new_start_date = full_history_start_date
+
+            # Safety check: if start date is today or later, skip anyway
+            if new_start_date >= today: 
+                logging.info(f"[{job_name}] Skipping {ticker}: Already up-to-date or start date is in the future (Start: {new_start_date}).")
+                continue
+
+            # yfinance.download(end=date) is exclusive, so using today's date will fetch up to yesterday.
+            fetch_end_date = today 
+            
+            ticker_tuples_to_process.append((ticker, new_start_date, fetch_end_date))
+        
+        if not ticker_tuples_to_process:
+             logging.info(f"ETL Job: [{job_name}] All {len(tickers_list)} tickers are already up-to-date. Nothing to process.")
+             return
+
+        logging.info(f"ETL Job: Processing {len(ticker_tuples_to_process)}/{len(tickers_list)} tickers. Fetching missing data.")
+
+        # 4. Use the helper function to process tickers sequentially with retry
         process_tickers_with_retry(
             job_name, 
-            ticker_tuples, 
-            process_single_ticker_prices, # ใช้ process_single_ticker_prices โดยตรง
-            initial_delay=0.3, # ลดหน่วงเวลา
+            ticker_tuples_to_process, 
+            process_single_ticker_prices, 
+            initial_delay=0.3, 
             retry_delay=60, 
             max_retries=3
         )
 
         logging.info(f"ETL Job: [{job_name}]... COMPLETED.")
+# --- [END MODIFIED] ---
 
 
 # --- Job 3: update_financial_statements (Unchanged) ---
@@ -418,7 +509,10 @@ def update_financial_statements():
                         except Exception as chunk_e:
                             logging.error(f"[{job_name}] Error inserting financial chunk for {ticker}: {chunk_e}")
                             db.session.rollback()
-                            
+                        
+                    db.session.commit() 
+            return True 
+
         except Exception as inner_e:
             logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
             with server.app_context():

@@ -1,6 +1,6 @@
-# run_etl_manually.py (รัน Job 2 เท่านั้น - FIXED: Comment Job 1 ออก)
+# run_etl_manually.py
+import time
 import logging
-import time 
 
 from app import server 
 # Import job ทั้งสองตัว
@@ -19,15 +19,15 @@ if __name__ == "__main__":
         
         # --- Job 1: Update Company Summaries (COMMENTED OUT) ---
         # เนื่องจาก Job 1 (DimCompany และ FactCompanySummary) เสร็จสมบูรณ์แล้ว จึง Comment ออก
-        # logging.info("--- Starting Manual Run: Job 1 (update_company_summaries) ---")
-        # start_time_job1 = time.time()
-        # try:
-        #     update_company_summaries(ALL_TICKERS_SORTED_BY_MC) 
-        #     elapsed_job1 = time.time() - start_time_job1
-        #     logging.info(f"--- Finished Manual Run: Job 1 (update_company_summaries) in {elapsed_job1:.2f} seconds ---")
-        # except Exception as e:
-        #     elapsed_job1 = time.time() - start_time_job1
-        #     logging.error(f"--- Manual Run FAILED: Job 1 (update_company_summaries) after {elapsed_job1:.2f} seconds: {e} ---", exc_info=True)
+        logging.info("--- Starting Manual Run: Job 1 (update_company_summaries) ---")
+        start_time_job1 = time.time()
+        try:
+            update_company_summaries(ALL_TICKERS_SORTED_BY_MC) 
+            elapsed_job1 = time.time() - start_time_job1
+            logging.info(f"--- Finished Manual Run: Job 1 (update_company_summaries) in {elapsed_job1:.2f} seconds ---")
+        except Exception as e:
+            elapsed_job1 = time.time() - start_time_job1
+            logging.error(f"--- Manual Run FAILED: Job 1 (update_company_summaries) after {elapsed_job1:.2f} seconds: {e} ---", exc_info=True)
         # --- [END COMMENTED OUT] ---
 
         # --- Run Job 2 (Price Update) ---

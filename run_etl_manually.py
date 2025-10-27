@@ -4,7 +4,7 @@ import logging
 
 from app import server 
 # Import job ทั้งสองตัว
-from etl import update_company_summaries, update_daily_prices 
+from etl import update_company_summaries, update_daily_prices, update_financial_statements
 # --- [NEW IMPORT] ---
 from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME
 # --- [END NEW IMPORT] ---

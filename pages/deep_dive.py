@@ -19,11 +19,12 @@ from data_handler import (
     # get_deep_dive_data, (ถูกลบออก)
     get_technical_analysis_data,
     # _get_logo_url, (ถูกลบออก)
-    # get_news_and_sentiment (ถูกลบออก)
+    get_news_and_sentiment # <<< [เพิ่ม] สำหรับการดึง Live Data
 )
 # --- [เพิ่ม Imports ใหม่] ---
 from app import db, server 
 from app import FactDailyPrices, DimCompany, FactCompanySummary, FactFinancialStatements, FactNewsSentiment
+from constants import ALL_TICKERS_SORTED_BY_MC # <<< [เพิ่ม] สำหรับเช็ค Top 20
 # --- End Imports ---
 
 # ตั้งค่า logging (ถ้าต้องการให้ log แสดงผล)
@@ -34,43 +35,84 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # SECTION 1: Layout Generating Functions 
 # ==============================================================================
 
-# --- create_sentiment_layout (เหมือนเดิม) ---
+# --- create_sentiment_layout (ปรับปรุงให้รองรับข้อมูลจากทั้ง DB และ Live) ---
 def create_sentiment_layout(sentiment_data):
-    # ... (โค้ดเหมือนเดิมทุกประการ) ...
     if not sentiment_data or sentiment_data.get("error"):
         return dbc.Alert(f"Error: {sentiment_data.get('error', 'Could not retrieve news.')}", color="danger")
+        
     summary, articles_raw = sentiment_data.get("summary", {}), sentiment_data.get("articles", [])
     if not articles_raw:
         return dbc.Alert("No recent news articles found.", color="info")
+        
     processed_articles = []
     for article in articles_raw:
-        if not all([article.get('title'), article.get('publishedAt'), article.get('description'), article.get('url')]): continue
+        # ใช้ .get() เพื่อป้องกัน KeyError และใช้ 'url' เป็นตัวบ่งชี้หลัก
+        if not all([article.get('title'), article.get('publishedAt'), article.get('url')]): continue
         try:
             # แก้ไข: ถ้า published_dt เป็น datetime object อยู่แล้ว (จาก DB)
-            if isinstance(article['publishedAt'], datetime):
-                 article['published_dt'] = article['publishedAt']
-            else:
-                 article['published_dt'] = datetime.fromisoformat(article['publishedAt'].replace("Z", "+00:00"))
+            published_at_val = article['publishedAt']
+            if isinstance(published_at_val, datetime):
+                 article['published_dt'] = published_at_val
+            else: # ถ้าเป็น string (จาก Live API)
+                 article['published_dt'] = datetime.fromisoformat(published_at_val.replace("Z", "+00:00"))
             processed_articles.append(article)
-        except (ValueError, TypeError): continue
+        except (ValueError, TypeError) as e: 
+             logging.warning(f"Error parsing date for article: {e}")
+             continue
+             
     processed_articles.sort(key=lambda x: x['published_dt'], reverse=True)
+    
+    # Recalculate summary in case of live fetch (or to normalize structure)
+    labels = [a['sentiment'] for a in processed_articles if a.get('sentiment')]
+    total_count = len(labels)
+    sentiment_scores = {'positive': labels.count('positive'), 'neutral': labels.count('neutral'), 'negative': labels.count('negative')}
+    summary = {
+        'total_count': total_count,
+        'positive_count': sentiment_scores['positive'], 
+        'neutral_count': sentiment_scores['neutral'], 
+        'negative_count': sentiment_scores['negative'],
+        'positive_pct': (sentiment_scores['positive'] / total_count) * 100 if total_count > 0 else 0,
+        'neutral_pct': (sentiment_scores['neutral'] / total_count) * 100 if total_count > 0 else 0,
+        'negative_pct': (sentiment_scores['negative'] / total_count) * 100 if total_count > 0 else 0,
+    }
+
+
     def get_sentiment_color_map(sentiment_label):
         if sentiment_label == 'positive': return "success"
         if sentiment_label == 'negative': return "danger"
         return "warning"
-    total_count = summary.get('total_count', 1); pos_pct, neu_pct, neg_pct = summary.get('positive_pct', 0), summary.get('neutral_pct', 0), summary.get('negative_pct', 0)
-    progress_bar = dbc.Progress([ dbc.Progress(value=pos_pct, color="success", bar=True, label=f"{pos_pct:.0f}%" if pos_pct > 10 else ""), dbc.Progress(value=neu_pct, color="warning", bar=True, label=f"{neu_pct:.0f}%" if neu_pct > 10 else ""), dbc.Progress(value=neg_pct, color="danger", bar=True, label=f"{neg_pct:.0f}%" if neg_pct > 10 else ""), ], style={"height": "15px"}, className="mb-4")
+        
+    pos_pct, neu_pct, neg_pct = summary.get('positive_pct', 0), summary.get('neutral_pct', 0), summary.get('negative_pct', 0)
+    
+    progress_bar = dbc.Progress([ 
+        dbc.Progress(value=pos_pct, color="success", bar=True, label=f"{pos_pct:.0f}%" if pos_pct > 10 else ""), 
+        dbc.Progress(value=neu_pct, color="warning", bar=True, label=f"{neu_pct:.0f}%" if neu_pct > 10 else ""), 
+        dbc.Progress(value=neg_pct, color="danger", bar=True, label=f"{neg_pct:.0f}%" if neg_pct > 10 else ""), 
+    ], style={"height": "15px"}, className="mb-4")
+    
     layout_components = [ html.H4("NEWS SENTIMENT ANALYSIS (LAST 7 DAYS)"), progress_bar ]
+    
     def date_keyfn(article): return article['published_dt'].date()
     grouped_articles = groupby(processed_articles, key=date_keyfn)
+    
     for date, articles in grouped_articles:
-        date_header = html.P(date.strftime("%B %d, %Y").upper(), className="text-muted small fw-bold mt-4 mb-2"); layout_components.append(date_header)
+        date_header = html.P(date.strftime("%B %d, %Y").upper(), className="text-muted small fw-bold mt-4 mb-2"); 
+        layout_components.append(date_header)
         article_layouts = []
         for article in articles:
-            sentiment_label = article.get('sentiment', 'neutral'); color = get_sentiment_color_map(sentiment_label)
-            article_layout = html.Div([ dbc.Row([ dbc.Col(dbc.Badge(sentiment_label.capitalize(), color=color, className="me-2"), width="auto", className="ps-3 pe-0"), dbc.Col(html.Span(article['title'], className="news-headline-text")) ], className="mb-1"), dbc.Row(dbc.Col(html.Span(f"{article['published_dt'].strftime('%I:%M %p')} | Source: {article.get('source', {}).get('name', 'N/A')}", className="text-muted", style={'fontSize': '0.85rem', 'paddingLeft': '20px'}),)) ], className="mb-3")
-            wrapper_link = html.A(article_layout, href=article['url'], target="_blank", className="card-link-wrapper"); article_layouts.append(wrapper_link)
+            sentiment_label = article.get('sentiment', 'neutral'); 
+            color = get_sentiment_color_map(sentiment_label)
+            article_layout = html.Div([ 
+                dbc.Row([ 
+                    dbc.Col(dbc.Badge(sentiment_label.capitalize(), color=color, className="me-2 sentiment-badge-fixed"), width="auto", className="ps-3 pe-0"), 
+                    dbc.Col(html.Span(article['title'], className="news-headline-text")) 
+                ], className="mb-1"), 
+                dbc.Row(dbc.Col(html.Span(f"{article['published_dt'].strftime('%I:%M %p')} | Source: {article.get('source', {}).get('name', 'N/A')}", className="text-muted", style={'fontSize': '0.85rem', 'paddingLeft': '20px'}),)) 
+            ], className="mb-3")
+            wrapper_link = html.A(article_layout, href=article['url'], target="_blank", className="card-link-wrapper"); 
+            article_layouts.append(wrapper_link)
         layout_components.append(html.Div(article_layouts))
+        
     return html.Div(layout_components)
 
 # --- create_technicals_layout (เหมือนเดิม) ---
@@ -268,7 +310,7 @@ def toggle_financial_dropdown_visibility(active_tab):
     return {'display': 'none'}
 
 
-# --- Callback หลักสำหรับเปลี่ยน Tab Content (แก้ไข Financials Tab) ---
+# --- Callback หลักสำหรับเปลี่ยน Tab Content (แก้ไข Financials Tab และเพิ่ม News Logic) ---
 @dash.callback(
     Output('deep-dive-tab-content', 'children'),
     Input('deep-dive-main-tabs', 'active_tab'),
@@ -279,30 +321,55 @@ def render_master_tab_content(active_tab, store_data):
     ticker, company_name = store_data.get('ticker'), store_data.get('company_name')
     
     if active_tab == "tab-sentiment-deep-dive":
-        # --- [โค้ดเดิมสำหรับ NEWS] ---
-        with server.app_context():
-            articles_from_db = db.session.query(FactNewsSentiment) \
-                                     .filter(FactNewsSentiment.ticker == ticker) \
-                                     .order_by(FactNewsSentiment.published_at.desc()) \
-                                     .limit(20).all()
-
-        if not articles_from_db:
-            return dbc.Alert("No recent news articles found in database.", color="info")
-
+        ETL_TICKERS = ALL_TICKERS_SORTED_BY_MC[:20] 
         articles_list = []
-        for article in articles_from_db:
-            articles_list.append({
-                'title': article.title,
-                'publishedAt': article.published_at, 
-                'description': article.description,
-                'url': article.article_url,
-                'source': {'name': article.source_name},
-                'sentiment': article.sentiment_label,
-                'sentiment_score': article.sentiment_score
-            })
         
-        labels = [a['sentiment'] for a in articles_list if a['sentiment']]
+        # --- ตรรกะการดึงข้อมูลข่าว ---
+        if ticker in ETL_TICKERS:
+            # Case 1: Ticker อยู่ในกลุ่ม Top 20 -> ดึงจาก Database (ETL)
+            logging.info(f"Ticker {ticker} is in Top 20. Fetching news/sentiment from DATABASE.")
+            with server.app_context():
+                articles_raw = db.session.query(FactNewsSentiment) \
+                                         .filter(FactNewsSentiment.ticker == ticker) \
+                                         .order_by(FactNewsSentiment.published_at.desc()) \
+                                         .limit(20).all()
+            
+            if not articles_raw:
+                return dbc.Alert(f"No recent news articles found in database for {ticker}. Waiting for next ETL run.", color="info")
+
+            # แปลง SQLAlchemy objects เป็น list of dicts
+            for article in articles_raw:
+                articles_list.append({
+                    'title': article.title,
+                    'publishedAt': article.published_at, # เป็น datetime object แล้ว
+                    'description': article.description,
+                    'url': article.article_url,
+                    'source': {'name': article.source_name},
+                    'sentiment': article.sentiment_label,
+                    'sentiment_score': article.sentiment_score
+                })
+
+        else:
+            # Case 2: Ticker ไม่อยู่ในกลุ่ม Top 20 -> ดึง Live Data จาก API
+            logging.info(f"Ticker {ticker} is outside Top 20. Fetching LIVE news/sentiment for {company_name}.")
+            if not company_name:
+                return dbc.Alert(f"Cannot fetch live news: Company name not found for {ticker}.", color="danger")
+                
+            live_result = get_news_and_sentiment(company_name)
+
+            if 'error' in live_result:
+                return dbc.Alert(f"Live News Fetch Error for {ticker}: {live_result['error']}", color="danger")
+            
+            articles_list = live_result.get('articles', [])
+        
+        # --- Common Logic for Summary and Display ---
+        if not articles_list:
+            return dbc.Alert("No recent news articles found for this company.", color="info")
+
+        # Recalculate summary (หรือใช้ summary ที่มากับ live_result)
+        labels = [a['sentiment'] for a in articles_list if a.get('sentiment')]
         total_count = len(labels)
+        
         summary = {
             'total_count': total_count,
             'positive_count': labels.count('positive'),

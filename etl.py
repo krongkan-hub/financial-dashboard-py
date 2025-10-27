@@ -577,24 +577,34 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
     logging.info(f"ETL Job: [{job_name}]... COMPLETED with skip logic.")
 
 
-# --- Job 4: update_news_sentiment (Unchanged) ---
+# --- Job 4: update_news_sentiment (MODIFIED to limit to top 20 tickers) ---
 def update_news_sentiment():
     """
     ETL Job 4: ดึงข้อมูลข่าวและ Sentiment (จาก get_news_and_sentiment)
-    และเก็บลง FactNewsSentiment
+    และเก็บลง FactNewsSentiment โดยจำกัด 20 Ticker ที่ใหญ่ที่สุด
     """
     if sql_insert is None:
         logging.error("ETL Job: [update_news_sentiment] cannot run because insert statement is not available.")
         return
 
     job_name = "Job 4: Update News/Sentiment"
+    
+    # [MODIFICATION START] ใช้ ALL_TICKERS_SORTED_BY_MC เพื่อจำกัด 20 อันดับแรก
+    tickers_for_etl = ALL_TICKERS_SORTED_BY_MC[:20] 
+    
     companies_list = []
     with server.app_context():
         try:
-            companies_list = db.session.query(DimCompany.ticker, DimCompany.company_name).filter(DimCompany.company_name != None).all()
+            # Query เฉพาะ Ticker ที่อยู่ใน 20 อันดับแรก
+            companies_list = db.session.query(DimCompany.ticker, DimCompany.company_name).filter(
+                DimCompany.ticker.in_(tickers_for_etl),
+                DimCompany.company_name != None
+            ).all()
+            logging.info(f"[{job_name}] Found {len(companies_list)}/{len(tickers_for_etl)} top tickers to process news for.")
         except Exception as e:
             logging.error(f"[{job_name}] Failed to query companies from DimCompany: {e}", exc_info=True)
             return
+    # [MODIFICATION END]
 
     def process_single_ticker_news(company_data_tuple):
         ticker, company_name = company_data_tuple 

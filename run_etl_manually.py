@@ -13,17 +13,17 @@ if __name__ == "__main__":
     start_time_total = time.time()
 
     with server.app_context():
-        # --- [FIX] เปิดการทำงาน Job 1 ---
-        logging.info("--- Starting Manual Run: Job 1 (update_company_summaries) ---")
-        start_time_job1 = time.time()
-        try:
-            update_company_summaries()
-            elapsed_job1 = time.time() - start_time_job1
-            logging.info(f"--- Finished Manual Run: Job 1 (update_company_summaries) in {elapsed_job1:.2f} seconds ---")
-        except Exception as e:
-            elapsed_job1 = time.time() - start_time_job1
-            logging.error(f"--- Manual Run FAILED: Job 1 (update_company_summaries) after {elapsed_job1:.2f} seconds: {e} ---", exc_info=True)
-        # --- [END FIX] ---
+        # # --- [FIX] เปิดการทำงาน Job 1 ---
+        # logging.info("--- Starting Manual Run: Job 1 (update_company_summaries) ---")
+        # start_time_job1 = time.time()
+        # try:
+        #     update_company_summaries()
+        #     elapsed_job1 = time.time() - start_time_job1
+        #     logging.info(f"--- Finished Manual Run: Job 1 (update_company_summaries) in {elapsed_job1:.2f} seconds ---")
+        # except Exception as e:
+        #     elapsed_job1 = time.time() - start_time_job1
+        #     logging.error(f"--- Manual Run FAILED: Job 1 (update_company_summaries) after {elapsed_job1:.2f} seconds: {e} ---", exc_info=True)
+        # # --- [END FIX] ---
 
         # --- Run Job 2 ---
         logging.info("--- Starting Manual Run: Job 2 (update_daily_prices) ---")

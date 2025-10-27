@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import yfinance as yf 
 import numpy as np
 import time 
-from typing import Dict 
+from typing import Dict, List, Optional
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
@@ -111,7 +111,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
 
 
 # --- Job 1: Update Company Summaries (Modified to accept list override) ---
-def update_company_summaries(tickers_list_override=None):
+def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
         return
@@ -281,7 +281,7 @@ def process_single_ticker_prices(data_tuple):
 
 
 # --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX) ---
-def update_daily_prices(days_back=5*365):
+def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[str]] = None):
     """
     ETL Job 2: ดึงข้อมูลราคาย้อนหลังและ UPSERT ลง FactDailyPrices (ใช้ Batch Processing ต่อ Ticker)
     """
@@ -293,13 +293,17 @@ def update_daily_prices(days_back=5*365):
     with server.app_context():
         logging.info(f"Starting ETL Job: [{job_name}] for {days_back} days back...")
         
-        # 1. Query Tickers from DimCompany
-        try:
-            tickers_to_update = db.session.query(DimCompany.ticker).all()
-            tickers_list = [t[0] for t in tickers_to_update]
-        except Exception as e:
-            logging.error(f"ETL Job: Failed to query tickers from DimCompany: {e}", exc_info=True)
-            return
+        # 1. Query Tickers or use Override List
+        if tickers_list_override is not None and len(tickers_list_override) > 0:
+            tickers_list = tickers_list_override
+            logging.info(f"ETL Job: Using OVERRIDE list with {len(tickers_list)} tickers.")
+        else:
+            try:
+                tickers_to_update = db.session.query(DimCompany.ticker).all()
+                tickers_list = [t[0] for t in tickers_to_update]
+            except Exception as e:
+                logging.error(f"ETL Job: Failed to query tickers from DimCompany: {e}", exc_info=True)
+                return
 
         if not tickers_list:
             logging.warning("ETL Job: No companies found in DimCompany. Skipping price update.")

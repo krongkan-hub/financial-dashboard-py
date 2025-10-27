@@ -43,16 +43,16 @@ def start_scheduler():
     scheduler = BackgroundScheduler(daemon=True, timezone=utc) 
     logging.info("Initializing APScheduler with UTC timezone...")
 
-    # --- Job 1: Update Company Summaries ---
-    scheduler.add_job(
-        update_company_summaries,
-        'cron',
-        hour=14,  # 8:00 UTC (21:00 Bangkok)
-        minute=0,
-        misfire_grace_time=3600, # ถ้าพลาด ให้ลองใหม่ภายใน 1 ชม.
-        id='update_summaries_job' # ตั้ง ID ให้ Job
-    )
-    logging.info("Scheduled job: update_company_summaries (Daily @ 08:00 UTC)")
+    # # --- Job 1: Update Company Summaries ---
+    # scheduler.add_job(
+    #     update_company_summaries,
+    #     'cron',
+    #     hour=14,  # 8:00 UTC (21:00 Bangkok)
+    #     minute=0,
+    #     misfire_grace_time=3600, # ถ้าพลาด ให้ลองใหม่ภายใน 1 ชม.
+    #     id='update_summaries_job' # ตั้ง ID ให้ Job
+    # )
+    # logging.info("Scheduled job: update_company_summaries (Daily @ 08:00 UTC)")
 
     # --- Job 2: Update Daily Prices ---
     scheduler.add_job(

@@ -1,28 +1,27 @@
-# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Rate Limiting with Retry & Progress & Batch UPSERT)
+# etl.py (เวอร์ชันสมบูรณ์ - [FIXED] Rate Limiting with Retry & Progress & Batch UPSERT & OOM FIX)
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
-import yfinance as yf # Import yfinance
+import yfinance as yf 
 import numpy as np
-import time # Import time for delays
-from typing import Dict # Import Dict for type hinting
+import time 
+from typing import Dict 
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
-# ตรวจสอบว่า FactDailyPrices ถูก Import ถูกต้อง
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
 from data_handler import get_competitor_data, get_deep_dive_data, get_news_and_sentiment
 from constants import ALL_TICKERS_SORTED_BY_MC
 
-# Import สำหรับ UPSERT (เลือกใช้ตาม DB ที่ Deploy จริง)
+# Import สำหรับ UPSERT
 try:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-    sql_insert = pg_insert # ใช้ตัวแปรกลาง
+    sql_insert = pg_insert 
     db_dialect = 'postgresql'
     logging.info("Using PostgreSQL dialect for UPSERT.")
 except ImportError:
     try:
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-        sql_insert = sqlite_insert # ใช้ตัวแปรกลาง
+        sql_insert = sqlite_insert 
         db_dialect = 'sqlite'
         logging.info("Using SQLite dialect for UPSERT.")
     except ImportError:
@@ -84,7 +83,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
                 retries += 1
                 error_msg = str(e)
                 # Check for common rate limit indicators (adjust based on actual errors observed)
-                is_rate_limit = "Too Many Requests" in error_msg or "429" in error_msg
+                is_rate_limit = "Too Many Requests" in error_msg or "429" in error_msg or "400" in error_msg
                 log_level = logging.WARNING if is_rate_limit else logging.ERROR
                 
                 logging.log(log_level, f"[{job_name}] Error processing {identifier} (Attempt {retries}/{max_retries}): {error_msg}")
@@ -111,7 +110,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     return skipped_items
 
 
-# --- Job 1: Update Company Summaries (Modified) ---
+# --- Job 1: Update Company Summaries (Unchanged) ---
 def update_company_summaries():
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
@@ -187,17 +186,98 @@ def update_company_summaries():
     process_tickers_with_retry(job_name, list(tickers_tuple), process_single_ticker_summary, initial_delay=0.7, max_retries=3)
 
 
-# --- Job 2: Update Daily Prices (FIXED: Numpy Type Conversion) ---
+# --- [NEW HELPER FUNCTION FOR OOM FIX] ---
+def process_single_ticker_prices(data_tuple):
+    """
+    [OOM FIX] Fetches price history for a single ticker and UPSERTs it to FactDailyPrices.
+    Requires data_tuple = (ticker, start_date, end_date).
+    """
+    ticker, start_date, end_date = data_tuple
+    if sql_insert is None:
+        raise Exception("SQL insert dialect not supported.")
+
+    job_name = "Job 2: Update Daily Prices"
+
+    try:
+        # 1. Download Price History for ONE Ticker
+        prices_df = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
+
+        if prices_df.empty:
+            logging.warning(f"[{job_name}] yf.download returned empty for {ticker}. Skipping DB insert.")
+            return
+
+        # 2. Data Processing (already in Wide format for single ticker, just need cleanup)
+        prices_df = prices_df.rename_axis(['Date']).reset_index()
+
+        # 3. Cleanup and Format
+        prices_df.rename(columns={
+            'Date': 'date', 'Open': 'open', 'High': 'high', 
+            'Low': 'low', 'Close': 'close', 'Volume': 'volume'
+        }, inplace=True)
+        
+        prices_df['ticker'] = ticker # Add ticker column
+        prices_df['date'] = pd.to_datetime(prices_df['date']).dt.date
+
+        # Convert to native Python types for UPSERT (as in old code)
+        prices_df['volume'] = pd.to_numeric(prices_df['volume'], errors='coerce').fillna(0).apply(lambda x: int(x) if pd.notna(x) else None)
+        prices_df['open'] = pd.to_numeric(prices_df['open'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)
+        prices_df['high'] = pd.to_numeric(prices_df['high'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)
+        prices_df['low'] = pd.to_numeric(prices_df['low'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)
+        prices_df['close'] = pd.to_numeric(prices_df['close'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)
+
+        required_cols = ['date', 'ticker', 'open', 'high', 'low', 'close', 'volume']
+        prices_df = prices_df[required_cols]
+        prices_df.dropna(subset=['close', 'ticker', 'date'], inplace=True)
+            
+        data_to_upsert = prices_df.to_dict(orient='records')
+        num_rows = len(data_to_upsert)
+
+        # 4. --- UPSERT ข้อมูลลง DB (Chunking Logic) ---
+        if data_to_upsert:
+            with server.app_context():
+                chunk_size = 1000 
+                constraint_name = '_ticker_price_date_uc'
+
+                for i in range(0, num_rows, chunk_size):
+                    chunk = data_to_upsert[i:i + chunk_size]
+                    stmt_chunk = sql_insert(FactDailyPrices).values(chunk)
+                    
+                    price_set_chunk_ = {
+                        'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high,
+                        'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close,
+                        'volume': stmt_chunk.excluded.volume
+                    }
+
+                    if db_dialect == 'postgresql':
+                        on_conflict_chunk = stmt_chunk.on_conflict_do_update(constraint=constraint_name, set_=price_set_chunk_)
+                    elif db_dialect == 'sqlite':
+                        on_conflict_chunk = stmt_chunk.on_conflict_do_update(index_elements=['ticker', 'date'], set_=price_set_chunk_)
+                    else:
+                        raise Exception("Unsupported DB dialect for UPSERT.")
+                    
+                    db.session.execute(on_conflict_chunk)
+                    db.session.commit()
+
+    except Exception as e:
+        # Rollback and re-raise to trigger the retry logic
+        with server.app_context():
+             db.session.rollback()
+        raise e
+# --- [END NEW HELPER FUNCTION FOR OOM FIX] ---
+
+
+# --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX) ---
 def update_daily_prices(days_back=5*365):
     """
-    ETL Job 2: ดึงข้อมูลราคาย้อนหลังและ UPSERT ลง FactDailyPrices
+    ETL Job 2: ดึงข้อมูลราคาย้อนหลังและ UPSERT ลง FactDailyPrices (ใช้ Batch Processing ต่อ Ticker)
     """
+    job_name = "Job 2: Update Daily Prices"
     if sql_insert is None:
-        logging.error("ETL Job: [update_daily_prices] cannot run because insert statement is not available.")
+        logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
         return
 
     with server.app_context():
-        logging.info(f"Starting ETL Job: [update_daily_prices] for {days_back} days back...")
+        logging.info(f"Starting ETL Job: [{job_name}] for {days_back} days back...")
         
         # 1. Query Tickers from DimCompany
         try:
@@ -213,114 +293,26 @@ def update_daily_prices(days_back=5*365):
 
         end_date = datetime.utcnow().date()
         start_date = end_date - timedelta(days=days_back)
-        prices_df = pd.DataFrame()
+        
+        # 2. Prepare arguments for process_single_ticker_prices
+        # สร้าง Tuple (Ticker, Start Date, End Date)
+        ticker_tuples = [(t, start_date, end_date) for t in tickers_list]
+        
+        # 3. Use the helper function to process tickers sequentially with retry
+        logging.info(f"ETL Job: Processing {len(tickers_list)} tickers sequentially to avoid OOM...")
+        process_tickers_with_retry(
+            job_name, 
+            ticker_tuples, 
+            process_single_ticker_prices, # ใช้ process_single_ticker_prices โดยตรง
+            initial_delay=0.3, # ลดหน่วงเวลา
+            retry_delay=60, 
+            max_retries=3
+        )
 
-        # 2. Download Price History
-        try:
-            logging.info(f"ETL Job: Downloading price history for {len(tickers_list)} tickers from {start_date} to {end_date}...")
-            prices_df = yf.download(tickers_list, start=start_date, end=end_date, auto_adjust=True, progress=False)
-            logging.info("ETL Job: Price history download complete.")
-
-            if prices_df.empty:
-                logging.warning("ETL Job: yf.download returned empty DataFrame for prices.")
-                return
-
-            # 3. Data Processing (Convert from Wide/MultiIndex to Long Format)
-            if isinstance(prices_df.columns, pd.MultiIndex) and len(tickers_list) > 1:
-                prices_df = prices_df.stack(level=1).rename_axis(['Date', 'Ticker']).reset_index()
-            elif not prices_df.empty: 
-                 prices_df = prices_df.rename_axis(['Date']).reset_index()
-                 if 'Ticker' not in prices_df.columns and len(tickers_list) == 1:
-                     prices_df['Ticker'] = tickers_list[0]
-            else: 
-                 pass
-
-            # 4. Cleanup and Format
-            prices_df.rename(columns={
-                'Date': 'date', 'Ticker': 'ticker', 'Open': 'open',
-                'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'
-            }, inplace=True)
-
-            if 'date' in prices_df.columns:
-                prices_df['date'] = pd.to_datetime(prices_df['date']).dt.date
-            else:
-                 logging.warning("ETL Job: 'date' column not found after processing yfinance download.")
-                 return
-
-            # Remove the old .astype(np.int64) and convert to native Python types
-            if 'volume' in prices_df.columns:
-                prices_df['volume'] = pd.to_numeric(prices_df['volume'], errors='coerce').fillna(0) 
-            else:
-                prices_df['volume'] = 0 
-
-            required_cols = ['date', 'ticker', 'open', 'high', 'low', 'close', 'volume']
-            for col in required_cols:
-                if col not in prices_df.columns:
-                     prices_df[col] = np.nan
-
-            prices_df = prices_df[required_cols]
-            prices_df.dropna(subset=['close', 'ticker', 'date'], inplace=True)
-            
-            # --- APPLY THE FIX HERE: Convert to standard Python int/float ---
-            # volume (BigInteger in DB) must be converted to Python int
-            prices_df['volume'] = prices_df['volume'].apply(lambda x: int(x) if pd.notna(x) and x is not None else None)
-            # price columns to standard Python float
-            prices_df['open'] = prices_df['open'].apply(lambda x: float(x) if pd.notna(x) and x is not None else None)
-            prices_df['high'] = prices_df['high'].apply(lambda x: float(x) if pd.notna(x) and x is not None else None)
-            prices_df['low'] = prices_df['low'].apply(lambda x: float(x) if pd.notna(x) and x is not None else None)
-            prices_df['close'] = prices_df['close'].apply(lambda x: float(x) if pd.notna(x) and x is not None else None)
-            # -----------------------------------------------------------------
-            
-            data_to_upsert = prices_df.to_dict(orient='records')
-            num_rows = len(data_to_upsert)
+        logging.info(f"ETL Job: [{job_name}]... COMPLETED.")
 
 
-        except Exception as e:
-            logging.error(f"ETL Job: Failed during yf.download or processing for prices: {e}", exc_info=True)
-            return
-
-        # 5. --- UPSERT ข้อมูลลง DB (Chunking Logic) ---
-        if data_to_upsert:
-            logging.info(f"ETL Job: Attempting to UPSERT {num_rows} price rows using {db_dialect} dialect...")
-            
-            chunk_size = 1000 
-            constraint_name = '_ticker_price_date_uc'
-            
-            for i in range(0, num_rows, chunk_size):
-                chunk = data_to_upsert[i:i + chunk_size]
-                
-                stmt_chunk = sql_insert(FactDailyPrices).values(chunk)
-                
-                price_set_chunk_ = {
-                    'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high,
-                    'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close,
-                    'volume': stmt_chunk.excluded.volume
-                }
-
-                try:
-                    if db_dialect == 'postgresql':
-                        on_conflict_chunk = stmt_chunk.on_conflict_do_update(constraint=constraint_name, set_=price_set_chunk_)
-                    elif db_dialect == 'sqlite':
-                        on_conflict_chunk = stmt_chunk.on_conflict_do_update(index_elements=['ticker', 'date'], set_=price_set_chunk_)
-                    else:
-                        logging.error("ETL Job: Unsupported DB dialect for UPSERT in chunking loop.")
-                        break 
-
-                    db.session.execute(on_conflict_chunk)
-                    db.session.commit() 
-                    logging.info(f"ETL Job: Successfully UPSERTED chunk {i // chunk_size + 1}/{(num_rows // chunk_size) + 1} ({len(chunk)} rows).")
-
-                except Exception as e:
-                    logging.error(f"ETL Job: Failed during database UPSERT for chunk {i // chunk_size + 1}: {e}", exc_info=True)
-                    db.session.rollback()
-                    
-            logging.info(f"ETL Job: [update_daily_prices]... COMPLETED. Successfully processed UPSERT for {num_rows} rows potential.")
-
-        else:
-             logging.warning("ETL Job: No price data prepared for UPSERT.")
-
-
-# --- Job 3: update_financial_statements (ไม่เปลี่ยนแปลง) ---
+# --- Job 3: update_financial_statements (Unchanged) ---
 def update_financial_statements():
     """
     ETL Job 3: ดึงข้อมูลงบการเงินรายไตรมาส (จาก get_deep_dive_data)
@@ -418,7 +410,7 @@ def update_financial_statements():
     process_tickers_with_retry(job_name, tickers_list, process_single_ticker_financials, initial_delay=0.8, max_retries=2) 
 
 
-# --- Job 4: update_news_sentiment (ไม่เปลี่ยนแปลง) ---
+# --- Job 4: update_news_sentiment (Unchanged) ---
 def update_news_sentiment():
     """
     ETL Job 4: ดึงข้อมูลข่าวและ Sentiment (จาก get_news_and_sentiment)

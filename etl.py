@@ -11,7 +11,7 @@ from sqlalchemy import func # Import SQL functions for MAX()
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
 from data_handler import get_competitor_data, get_deep_dive_data, get_news_and_sentiment
-from constants import ALL_TICKERS_SORTED_BY_MC
+from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME
 
 # Import สำหรับ UPSERT
 try:
@@ -347,6 +347,14 @@ def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[st
             try:
                 tickers_to_update = db.session.query(DimCompany.ticker).all()
                 tickers_list = [t[0] for t in tickers_to_update]
+
+                # --- [NEW FIX] Add Index Tickers to the list ---
+                index_tickers = list(INDEX_TICKER_TO_NAME.keys())
+                for index_t in index_tickers:
+                    if index_t not in tickers_list:
+                        tickers_list.append(index_t)
+                # --- [END NEW FIX] ---
+
             except Exception as e:
                 logging.error(f"ETL Job: Failed to query tickers from DimCompany: {e}", exc_info=True)
                 return

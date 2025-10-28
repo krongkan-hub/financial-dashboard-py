@@ -19,7 +19,7 @@ from sqlalchemy import func, update
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- [ปรับปรุง] Configuration ---
-K_RANGE = range(5, 31) # <--- ปรับช่วง k เป็น 5 ถึง 30
+K_RANGE = range(10, 40) # <--- ปรับช่วง k เป็น 5 ถึง 30
 MIN_K = min(K_RANGE)
 MAX_K = max(K_RANGE)
 MAX_ITERATIONS = 100 # <--- เพิ่ม: จำกัดจำนวนครั้งในการวน Loop หา k

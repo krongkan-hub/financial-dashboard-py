@@ -55,18 +55,18 @@ if __name__ == "__main__":
         #     logging.error(f"--- Manual Run FAILED: Job 3 (update_financial_statements) after {elapsed_job3:.2f} seconds: {e} ---", exc_info=True)
         # # --- [END Job 3] ---
         
-        # --- [NEW] Run Job 4 (News Sentiment)
-        logging.info("--- Starting Manual Run: Job 4 (update_news_sentiment) ---")
-        start_time_job4 = time.time()
-        try:
-            # รัน Job 4 ซึ่งจะดึงข้อมูลข่าวและ sentiment สำหรับ 20 Ticker แรก
-            update_news_sentiment() 
-            elapsed_job4 = time.time() - start_time_job4
-            logging.info(f"--- Finished Manual Run: Job 4 (update_news_sentiment) in {elapsed_job4:.2f} seconds ---")
-        except Exception as e:
-            elapsed_job4 = time.time() - start_time_job4
-            logging.error(f"--- Manual Run FAILED: Job 4 (update_news_sentiment) after {elapsed_job4:.2f} seconds: {e} ---", exc_info=True)
-        # --- [END Job 4] ---
+        # # --- [NEW] Run Job 4 (News Sentiment)
+        # logging.info("--- Starting Manual Run: Job 4 (update_news_sentiment) ---")
+        # start_time_job4 = time.time()
+        # try:
+        #     # รัน Job 4 ซึ่งจะดึงข้อมูลข่าวและ sentiment สำหรับ 20 Ticker แรก
+        #     update_news_sentiment() 
+        #     elapsed_job4 = time.time() - start_time_job4
+        #     logging.info(f"--- Finished Manual Run: Job 4 (update_news_sentiment) in {elapsed_job4:.2f} seconds ---")
+        # except Exception as e:
+        #     elapsed_job4 = time.time() - start_time_job4
+        #     logging.error(f"--- Manual Run FAILED: Job 4 (update_news_sentiment) after {elapsed_job4:.2f} seconds: {e} ---", exc_info=True)
+        # # --- [END Job 4] ---
             
     elapsed_total = time.time() - start_time_total
     logging.info(f"--- Finished ALL Manual ETL jobs in {elapsed_total:.2f} seconds ---")

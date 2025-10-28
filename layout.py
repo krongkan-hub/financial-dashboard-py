@@ -1,4 +1,4 @@
-# layout.py (Responsive Version with Monte Carlo DCF Modal & MathJax Fix)
+# layout.py (Responsive Version with Monte Carlo DCF Modal & MathJax Fix & Smart Peer Finder UI)
 
 from dash import dcc, html
 import dash_bootstrap_components as dbc
@@ -41,7 +41,7 @@ METRIC_DEFINITIONS = {
     "tab-dcf": dcc.Markdown("""
     **MARGIN OF SAFETY (MONTE CARLO DCF)**
     * **Definition:** This chart visualizes the distribution of possible intrinsic values for a stock, calculated using a Discounted Cash Flow (DCF) model combined with Monte Carlo simulation. Instead of single-point estimates, this approach uses a range of probable inputs to reflect real-world uncertainty.
-    
+
     * **Core Calculation (Simplified):**
         1.  **Calculate Free Cash Flow to the Firm (FCFF):**
             $$
@@ -322,11 +322,38 @@ def build_layout():
                     html.Label("Add Benchmarks to Compare", className="fw-bold"),
                     dcc.Dropdown(id='index-select-dropdown', placeholder="Select one or more indices...", multi=True),
                     dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id="add-index-button", n_clicks=0, className="mt-2 w-100"),
+
+                    # --- [START] New Section for Smart Peer Finder ---
+                    html.Hr(),
+                    html.Label("Find Smart Peers", className="fw-bold"),
+                    dcc.Dropdown(
+                        id='peer-reference-stock-dropdown',
+                        placeholder="Select a reference stock...",
+                        clearable=True, # Allow clearing the selection
+                        className="mt-1"
+                    ),
+                    dcc.Dropdown(
+                        id='peer-select-dropdown',
+                        placeholder="Select peers to add...",
+                        multi=True, # Allow selecting multiple peers
+                        className="mt-2"
+                    ),
+                    html.Div(id='peer-finder-status', className="text-muted small mt-1 mb-2"), # Status message area
+                    dbc.Button(
+                        [html.I(className="bi bi-robot me-2"), "Add Selected Peer(s)"],
+                        id="add-peer-button",
+                        n_clicks=0,
+                        className="w-100",
+                        color="info", # Different color to distinguish
+                        outline=True
+                    ),
+                    # --- [END] New Section for Smart Peer Finder ---
+
                     html.Hr(className="my-4"),
                     html.Div(id='ticker-summary-display'),
                     html.Div(id='index-summary-display', className="mt-2"),
                 ])), width=12, md=3, className="sidebar-fixed"),
-                
+
                 dbc.Col([
                     # Graph Controls Row (Responsive)
                     dbc.Row(
@@ -350,7 +377,7 @@ def build_layout():
                                     ],
                                     direction="horizontal",
                                     gap=2,
-                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0" 
+                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                 ),
                                 md=4
                             )
@@ -358,7 +385,7 @@ def build_layout():
                         align="center",
                         className="control-row"
                     ),
-                    
+
                     dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
                     html.Hr(className="my-5"),
 
@@ -393,7 +420,7 @@ def build_layout():
                         align="center",
                         className="control-row mt-3"
                     ),
-                    
+
                     dcc.Loading(html.Div(id="table-pane-content", className="mt-2"))
                 ], width=12, md=9, className="content-offset"),
             ], className="g-4")

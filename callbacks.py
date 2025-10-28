@@ -1,4 +1,4 @@
-# callbacks.py (Refactored - Step 4 - FIXED pd.read_sql TypeError)
+# callbacks.py (Refactored - Step 4 - FIXED pd.read_sql TypeError + Added Smart Peer Finder)
 # (เวอร์ชันสมบูรณ์ - เปลี่ยนไปดึงข้อมูลจาก DB ทั้งหมด)
 
 import dash
@@ -20,7 +20,7 @@ from app import app, db, server, User, UserSelection, UserAssumptions
 # --- [REFACTOR STEP 4 IMPORTS] ---
 # Import models ใหม่ที่เราจะใช้ Query
 from app import DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements # <<< [UPDATE: Added FactFinancialStatements]
-from sqlalchemy import func # Import SQL functions
+from sqlalchemy import func, distinct # <<< [MODIFIED] Import SQL functions (added distinct)
 from datetime import datetime, timedelta # Import datetime
 # --- [END REFACTOR STEP 4 IMPORTS] ---
 
@@ -154,7 +154,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
     # --- Callbacks อื่นๆ ทั้งหมด (display_page, update_navbar, load_user_data_to_store, ---
     # --- add/remove tickers/indices, update summaries, update dropdown options, ---
     # --- toggle modals, save assumptions, sync modal inputs) ---
-    # --- >>> เหมือนเดิมทุกประการ <<< ---
+    # --- >>> เหมือนเดิม ยกเว้นส่วนที่เกี่ยวกับ Dropdown Options ที่มีการเพิ่มส่วน Peer Finder <<< ---
     @app.callback(Output('page-content', 'children'), Input('url', 'pathname'))
     def display_page(pathname):
         if pathname.startswith('/deepdive/'):
@@ -263,13 +263,13 @@ def register_callbacks(app, METRIC_DEFINITIONS):
     def update_index_summary_display(store_data):
         indices = store_data.get('indices', []) if store_data else []
         if not indices: return html.Span("No indices selected.", className="text-muted fst-italic")
-    
+
         # แก้ไข 'i' เป็น 't'
         return [html.Label("Selected Indices:", className="text-muted small")] + [
             dbc.Badge([
                 INDEX_TICKER_TO_NAME.get(t, t), # <-- เปลี่ยน i เป็น t
                 html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': t})
-            ], color="light", className="m-1 p-2 text-dark border") 
+            ], color="light", className="m-1 p-2 text-dark border")
             for t in indices
         ]
 
@@ -355,10 +355,10 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         return forecast_data.get('years', 5), forecast_data.get('growth', 10), forecast_data.get('pe', 20)
 
     # --- [START OF GRAPH REFACTOR - MODIFIED DCF SECTION] ---
-    @app.callback( 
-        Output('analysis-pane-content', 'children'), 
-        [Input('analysis-tabs', 'active_tab'), 
-         Input('user-selections-store', 'data'), 
+    @app.callback(
+        Output('analysis-pane-content', 'children'),
+        [Input('analysis-tabs', 'active_tab'),
+         Input('user-selections-store', 'data'),
          Input('dcf-assumptions-store', 'data'),
          Input('table-pane-content', 'children')] # <--- [เพิ่ม] Trigger เมื่อตารางโหลดเสร็จ
     )
@@ -367,7 +367,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         tickers = tuple(store_data.get('tickers', []))
         indices = tuple(store_data.get('indices', []))
         all_symbols = tuple(set(tickers + indices))
-        
+
         if not all_symbols:
             return dbc.Alert("Please select items to display the chart", color="info", className="mt-3 text-center")
 
@@ -380,12 +380,12 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                                               FactDailyPrices.date >= start_of_year)
                     # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
                     raw_data = pd.read_sql(query.statement, db.engine)
-                
+
                 if raw_data.empty: raise ValueError("No price data found in DB for YTD.")
-                
+
                 ytd_data = raw_data.pivot(index='date', columns='ticker', values='close').sort_index().ffill()
                 if ytd_data.empty or len(ytd_data) < 2: raise ValueError("Not enough data after pivot.")
-                
+
                 ytd_perf = (ytd_data / ytd_data.iloc[0]) - 1
                 ytd_perf = ytd_perf.rename(columns=INDEX_TICKER_TO_NAME)
                 fig = px.line(ytd_perf, title='YTD Performance Comparison', color_discrete_map=COLOR_DISCRETE_MAP)
@@ -405,18 +405,18 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
                 prices = raw_data.pivot(index='date', columns='ticker', values='close').sort_index().ffill()
                 if prices.empty: raise ValueError("Not enough data after pivot.")
-                
+
                 rolling_max = prices.cummax()
                 drawdown_data = (prices / rolling_max) - 1
                 drawdown_data = drawdown_data.rename(columns=INDEX_TICKER_TO_NAME)
-                
+
                 fig = px.line(drawdown_data, title='1-Year Drawdown Comparison', color_discrete_map=COLOR_DISCRETE_MAP)
                 fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 
             if active_tab == "tab-scatter":
                 if not tickers: return dbc.Alert("Please select stocks to display the chart.", color="info", className="mt-3 text-center")
-                
+
                 with server.app_context():
                     # Query ข้อมูลล่าสุดจาก FactCompanySummary
                     latest_date_sq = db.session.query(
@@ -438,7 +438,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                     df_scatter.rename(columns={'ticker': 'Ticker', 'ev_ebitda': 'EV/EBITDA', 'ebitda_margin': 'EBITDA Margin'}, inplace=True)
 
                 if df_scatter.empty: return dbc.Alert("Could not fetch scatter data from DB.", color="warning")
-                
+
                 df_scatter = df_scatter.dropna()
                 if df_scatter.empty: return dbc.Alert("No valid scatter data points to plot.", color="warning")
 
@@ -448,39 +448,44 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 x_avg, y_avg = df_scatter["EBITDA Margin"].mean(), df_scatter["EV/EBITDA"].mean()
                 fig.add_vline(x=x_avg, line_width=1, line_dash="dash", line_color="grey"); fig.add_hline(y=y_avg, line_width=1, line_dash="dash", line_color="grey")
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
-            
+
             if active_tab == "tab-dcf":
                 # (ส่วนนี้ถูกปรับปรุงให้ดึงข้อมูลฐานจาก DB ก่อนนำไปคำนวณ Monte Carlo Simulation)
                 if not tickers: return dbc.Alert("Please select stocks for DCF simulation.", color="info", className="mt-3 text-center")
                 if not dcf_data: return dbc.Alert("Please set simulation assumptions using the gear icon.", color="info", className="mt-3 text-center")
-                
+
                 all_results = []
                 for ticker in tickers:
                     # ฟังก์ชันนี้ถูกปรับปรุงให้ดึงข้อมูล TTM จาก DB ภายใน
                     result = calculate_monte_carlo_dcf(
-                        ticker=ticker, 
-                        n_simulations=dcf_data.get('simulations', 10000), 
-                        growth_min=dcf_data.get('growth_min', 3.0), 
-                        growth_mode=dcf_data.get('growth_mode', 5.0), 
-                        growth_max=dcf_data.get('growth_max', 8.0), 
-                        perpetual_min=dcf_data.get('perpetual_min', 1.5), 
-                        perpetual_mode=dcf_data.get('perpetual_mode', 2.5), 
-                        perpetual_max=dcf_data.get('perpetual_max', 3.0), 
-                        wacc_min=dcf_data.get('wacc_min', 7.0), 
-                        wacc_mode=dcf_data.get('wacc_mode', 8.0), 
+                        ticker=ticker,
+                        n_simulations=dcf_data.get('simulations', 10000),
+                        growth_min=dcf_data.get('growth_min', 3.0),
+                        growth_mode=dcf_data.get('growth_mode', 5.0),
+                        growth_max=dcf_data.get('growth_max', 8.0),
+                        perpetual_min=dcf_data.get('perpetual_min', 1.5),
+                        perpetual_mode=dcf_data.get('perpetual_mode', 2.5),
+                        perpetual_max=dcf_data.get('perpetual_max', 3.0),
+                        wacc_min=dcf_data.get('wacc_min', 7.0),
+                        wacc_mode=dcf_data.get('wacc_mode', 8.0),
                         wacc_max=dcf_data.get('wacc_max', 10.0)
                     )
-                    
-                    if 'error' not in result: 
+
+                    if 'error' not in result:
                         result['Ticker'] = ticker
                         all_results.append(result)
                     else:
                          # แสดง Error ที่ละเอียดขึ้น
                          logging.warning(f"DCF simulation failed for {ticker}: {result['error']}")
-                         return dbc.Alert(f"DCF simulation for {ticker} failed: {result['error']}", color="danger", className="mt-3")
-                
-                if not all_results: return dbc.Alert("Could not run simulation for any selected stocks. Check logs for details (e.g., missing financial data).", color="danger")
-                
+                         # แสดง Alert ที่เฉพาะเจาะจงมากขึ้น แต่ไม่หยุดการทำงานทั้งหมด
+                         # return dbc.Alert(f"DCF simulation for {ticker} failed: {result['error']}", color="danger", className="mt-3")
+                         # แทนที่จะ return เราอาจจะเก็บ error message ไว้แสดงทีหลัง หรือแค่ log
+                         # ในที่นี้เลือกที่จะ log และดำเนินการต่อ
+
+                if not all_results:
+                    # ถ้า *ทุกตัว* ล้มเหลว ค่อยแสดง Alert
+                    return dbc.Alert("Could not run simulation for any selected stocks. Check logs for details (e.g., missing financial data).", color="danger")
+
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
                 for res in all_results: fig.add_trace(go.Histogram(x=res['simulated_values'], name=res['Ticker'], opacity=0.6, nbinsx=100), row=1, col=1)
                 mos_data = [{'Ticker': r['Ticker'], 'current_price': r['current_price'], 'intrinsic_value': r['mean']} for r in all_results]; df_mos = pd.DataFrame(mos_data)
@@ -490,9 +495,9 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 fig.update_layout(title_text='Monte Carlo DCF Analysis', barmode='overlay', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 fig.update_yaxes(title_text="Frequency", row=1, col=1); fig.update_yaxes(title_text="Ticker", row=2, col=1); fig.update_xaxes(title_text="Share Price ($)", row=2, col=1)
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
-            
+
             return html.P("This is an empty tab!")
-        
+
         except Exception as e:
             tab_name = TABS_CONFIG.get(active_tab, {}).get('tab_name', 'Graph')
             logging.error(f"Error rendering graph content for tab {tab_name} ({active_tab}): {e}", exc_info=True)
@@ -554,7 +559,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                     df_full = pd.DataFrame(data_list)
                 else:
                      # Fallback: ถ้า Query.all() ไม่ได้ผลลัพธ์
-                     # ลองใช้ pd.read_sql กับ query.statement โดยตรง 
+                     # ลองใช้ pd.read_sql กับ query.statement โดยตรง
                      # (เพื่อรองรับการใช้งานที่ db.session.query อาจไม่ได้ return tuple ที่คาดหวัง)
                      try:
                         # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
@@ -589,7 +594,8 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 'operating_margin': 'Operating Margin', 'cash_conversion': 'Cash Conversion',
                 'logo_url': 'logo_url', # เก็บไว้ใช้ใน _prepare_display_dataframe
                 'trailing_eps': 'Trailing EPS', # เพิ่มคอลัมน์ใหม่
-                'ebitda_margin': 'EBITDA Margin' # เพิ่มคอลัมน์ใหม่
+                'ebitda_margin': 'EBITDA Margin', # เพิ่มคอลัมน์ใหม่
+                'peer_cluster_id': 'peer_cluster_id' # <<< [เพิ่ม] เก็บ cluster ID ไว้ด้วย
             }
             df_full.rename(columns={k: v for k, v in column_mapping.items() if k in df_full.columns}, inplace=True)
 
@@ -598,16 +604,16 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             if active_tab == 'tab-forecast':
                 forecast_years, eps_growth, terminal_pe = forecast_data.get('years'), forecast_data.get('growth'), forecast_data.get('pe')
                 if all(v is not None for v in [forecast_years, eps_growth, terminal_pe]):
-                    
+
                     df_full['Trailing EPS'] = pd.to_numeric(df_full.get('Trailing EPS'), errors='coerce')
                     df_full['Price'] = pd.to_numeric(df_full.get('Price'), errors='coerce')
-                    
+
                     eps_growth_decimal = eps_growth / 100.0
-                    
+
                     def calc_target(row):
                         if pd.isna(row['Trailing EPS']) or row['Trailing EPS'] <= 0 or pd.isna(row['Price']) or row['Price'] <= 0:
                             return pd.NA, pd.NA, pd.NA
-                        
+
                         try:
                             future_eps = row['Trailing EPS'] * ((1 + eps_growth_decimal) ** forecast_years)
                             target_price = future_eps * terminal_pe
@@ -627,7 +633,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             config = TABS_CONFIG[active_tab]
             if sort_by_column and sort_by_column in df_full.columns:
                 ascending = not config['higher_is_better'].get(sort_by_column, True)
-                
+
                 # ใช้คอลัมน์ดิบ (ถ้ามี) สำหรับการเรียงลำดับที่เป็นตัวเลข
                 # (แปลง 'Target Upside' -> 'target_upside')
                 sort_col_raw = sort_by_column.lower().replace(' ', '_').replace('/', '_').replace('-', '_').replace('(', '').replace(')', '')
@@ -678,3 +684,121 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             error_msg = f"An unexpected error occurred while loading table data: {type(e).__name__} - {e}"
             return dbc.Alert(error_msg, color="danger", className="mt-3"), [], None
     # --- [END OF TABLE REFACTOR] ---
+
+
+    # ==================================================================
+    # --- [START] NEW CALLBACKS FOR SMART PEER FINDER ---
+    # ==================================================================
+
+    @app.callback(
+        Output('peer-reference-stock-dropdown', 'options'),
+        Input('user-selections-store', 'data')
+    )
+    def update_peer_reference_options(store_data):
+        """Populate the reference stock dropdown with currently selected tickers."""
+        tickers = store_data.get('tickers', []) if store_data else []
+        if not tickers:
+            return [{'label': 'Select stocks first', 'value': '', 'disabled': True}]
+        return [{'label': t, 'value': t} for t in sorted(tickers)]
+
+    @app.callback(
+        Output('peer-select-dropdown', 'options'),
+        Output('peer-select-dropdown', 'value'), # Clear selection when reference changes
+        Output('peer-finder-status', 'children'),
+        Input('peer-reference-stock-dropdown', 'value'),
+        State('user-selections-store', 'data')
+    )
+    def update_peer_select_options(reference_ticker, store_data):
+        """Find peers for the selected reference stock and update the peer selection dropdown."""
+        if not reference_ticker:
+            return [], [], "" # No reference selected, clear options, value, and status
+
+        current_tickers = set(store_data.get('tickers', [])) if store_data else set()
+        peer_options = []
+        status_message = ""
+
+        try:
+            with server.app_context():
+                latest_date = db.session.query(func.max(FactCompanySummary.date_updated)).scalar()
+                if not latest_date:
+                    status_message = "Error: Could not find latest data date."
+                    return [], [], status_message
+
+                # 1. Find the cluster ID of the reference ticker
+                ref_cluster_id_result = db.session.query(FactCompanySummary.peer_cluster_id) \
+                                                  .filter(FactCompanySummary.date_updated == latest_date,
+                                                          FactCompanySummary.ticker == reference_ticker) \
+                                                  .first()
+
+                if ref_cluster_id_result and ref_cluster_id_result[0] is not None:
+                    ref_cluster_id = ref_cluster_id_result[0]
+
+                    # 2. Find all tickers in the same cluster (excluding the reference and already selected)
+                    query = db.session.query(FactCompanySummary.ticker) \
+                                      .filter(FactCompanySummary.date_updated == latest_date,
+                                              FactCompanySummary.peer_cluster_id == ref_cluster_id,
+                                              FactCompanySummary.ticker != reference_ticker) \
+                                      .order_by(FactCompanySummary.ticker)
+                    all_peers_in_cluster = [item[0] for item in query.all()]
+
+                    # 3. Filter out peers already in the user's selection
+                    peers_to_show = [p for p in all_peers_in_cluster if p not in current_tickers]
+
+                    if peers_to_show:
+                        peer_options = [{'label': p, 'value': p} for p in peers_to_show]
+                        status_message = f"Found {len(peers_to_show)} potential peers for {reference_ticker}."
+                    else:
+                        status_message = f"No *new* peers found for {reference_ticker} in Cluster {ref_cluster_id}."
+                else:
+                    status_message = f"Peer cluster data not available for {reference_ticker}."
+
+        except Exception as e:
+            logging.error(f"Error finding peers for {reference_ticker}: {e}", exc_info=True)
+            status_message = f"Error finding peers for {reference_ticker}."
+
+        return peer_options, [], status_message # Return options, clear value, set status
+
+    @app.callback(
+        Output('user-selections-store', 'data', allow_duplicate=True),
+        Output('peer-reference-stock-dropdown', 'value', allow_duplicate=True), # Clear reference dropdown
+        Output('peer-select-dropdown', 'options', allow_duplicate=True),      # Clear peer options
+        Output('peer-select-dropdown', 'value', allow_duplicate=True),        # Clear peer selection
+        Output('peer-finder-status', 'children', allow_duplicate=True),        # Clear status
+        Input('add-peer-button', 'n_clicks'),
+        State('peer-select-dropdown', 'value'), # Peers selected by the user
+        State('user-selections-store', 'data'),
+        prevent_initial_call=True
+    )
+    def add_selected_peers_to_store(n_clicks, selected_peers, store_data):
+        """Adds the selected peers from the dropdown to the main user selection store."""
+        if not n_clicks or not selected_peers:
+            # If button not clicked or no peers selected, do nothing
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        store_data = store_data or {'tickers': [], 'indices': []}
+        current_tickers = store_data.get('tickers', [])
+        updated = False
+
+        for peer in selected_peers:
+            if peer not in current_tickers:
+                current_tickers.append(peer)
+                updated = True
+
+        if updated:
+            store_data['tickers'] = current_tickers # Update the list in the store data
+            if current_user.is_authenticated:
+                with server.app_context():
+                    # Save the updated list (including newly added peers) to DB
+                    save_selections_to_db(current_user.id, current_tickers, 'stock')
+            # Return updated store data and clear the peer finder UI elements
+            return store_data, None, [], [], ""
+        else:
+            # No new peers were actually added (e.g., they were already there somehow)
+            # Just clear the peer finder UI
+            return dash.no_update, None, [], [], ""
+
+    # ==================================================================
+    # --- [END] NEW CALLBACKS FOR SMART PEER FINDER ---
+    # ==================================================================
+
+# <<< End of register_callbacks function definition

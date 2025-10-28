@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import plotly.express as px
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 # import yfinance as yf # (ถูกลบออก - ไม่ได้ใช้ yf.Ticker() โดยตรงแล้ว)
 from itertools import groupby
 import logging
@@ -447,7 +447,7 @@ def render_financial_statement_table(selected_statement, store_data):
 
         # --- ส่วน Format และ แสดงผล (เหมือนเดิม) ---
         # Convert date columns (which are columns in wide format) to strings
-        df.columns = [col.strftime('%Y-%m-%d') if isinstance(col, (pd.Timestamp, datetime, pd.Timestamp.date)) else str(col) for col in df.columns]
+        df.columns = [col.strftime('%Y-%m-%d') if isinstance(col, (pd.Timestamp, datetime, date)) else str(col) for col in df.columns]
 
         df_formatted = df.copy()
         for col in df_formatted.columns:

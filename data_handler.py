@@ -317,7 +317,7 @@ def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
     df = price_history_df.copy()
 
     # --- [START FIX] Ensure column names are capitalized ---
-    df.columns = [col.capitalize() for col in df.columns]
+    df.columns = [str(col).capitalize() for col in df.columns]
     # Check if required capitalized columns exist now
     required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
     if not all(col in df.columns for col in required_cols):
@@ -790,7 +790,7 @@ def get_historical_prices(ticker: str, period: str = "5y") -> Tuple[pd.DataFrame
 
             # If data is reasonably recent (e.g., within 3 days, accounting for weekends), use DB data
             if days_diff <= 3:
-                logging.info(f"[Fallback] Found recent enough price history for {ticker} in DB (Last: {last_date_in_db.date()}).")
+                logging.info(f"[Fallback] Found recent enough price history for {ticker} in DB (Last: {last_date_in_db}).")
                 df_prices.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
                 return df_prices, source
             else:

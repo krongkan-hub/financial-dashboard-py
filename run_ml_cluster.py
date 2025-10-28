@@ -1,4 +1,4 @@
-# run_ml_cluster.py (เวอร์ชัน Hybrid + New Features + Adjusted Ratio)
+# run_ml_cluster.py (เวอร์ชันปรับปรุง Logic การหา k)
 
 import logging
 import pandas as pd
@@ -6,7 +6,6 @@ import numpy as np
 from datetime import date
 
 # --- Machine Learning ---
-# ถ้ายังไม่มี ต้อง pip install scikit-learn kneed matplotlib ก่อนนะครับ
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
@@ -19,12 +18,13 @@ from sqlalchemy import func, update
 # ตั้งค่า Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Configuration ---
-K_RANGE = range(3, 21) # กำหนดช่วง k
+# --- [ปรับปรุง] Configuration ---
+K_RANGE = range(5, 31) # <--- ปรับช่วง k เป็น 5 ถึง 30
 MIN_K = min(K_RANGE)
+MAX_K = max(K_RANGE)
+MAX_ITERATIONS = 100 # <--- เพิ่ม: จำกัดจำนวนครั้งในการวน Loop หา k
 
-# --- [ปรับปรุง] คอลัมน์ (Features) ที่จะใช้ ---
-# (เพิ่ม ebitda_margin, cash_conversion, fcf_sales_ratio และจะเพิ่ม log_market_cap ทีหลัง)
+# --- คอลัมน์ (Features) ที่จะใช้ (เหมือนเดิม) ---
 FEATURES_FOR_CLUSTERING = [
     'pe_ratio', 'pb_ratio', 'ev_ebitda', # Valuation
     'revenue_growth_yoy', 'net_income_growth_yoy', # Growth
@@ -34,11 +34,11 @@ FEATURES_FOR_CLUSTERING = [
     'cash_conversion', # Quality
 ]
 
-# --- Sanity Check Configuration ---
+# --- Sanity Check Configuration (เหมือนเดิม) ---
 MIN_CLUSTER_SIZE = 10         # กลุ่มต้องมีหุ้นอย่างน้อยกี่ตัว
-MAX_CLUSTER_SIZE_RATIO = 0.35 # --- [ปรับปรุง] ลดเกณฑ์ลงเหลือ 35% ---
+MAX_CLUSTER_SIZE_RATIO = 0.35 # ลดเกณฑ์ลงเหลือ 35%
 
-# --- ฟังก์ชันดึงข้อมูล ---
+# --- ฟังก์ชันดึงข้อมูล (เหมือนเดิม) ---
 def get_latest_financial_data() -> pd.DataFrame:
     """ดึงข้อมูลล่าสุดจาก FactCompanySummary สำหรับทุก Ticker"""
     logging.info("Querying latest financial data from FactCompanySummary...")
@@ -60,7 +60,7 @@ def get_latest_financial_data() -> pd.DataFrame:
         logging.error(f"Error querying data: {e}", exc_info=True)
         return pd.DataFrame()
 
-# --- [ปรับปรุง] ฟังก์ชันเตรียมข้อมูล ---
+# --- ฟังก์ชันเตรียมข้อมูล (เหมือนเดิม) ---
 def preprocess_data(df: pd.DataFrame) -> (pd.DataFrame, list): # <<< คืนค่า list ของ features ที่ใช้ด้วย
     """เตรียมข้อมูลให้พร้อมสำหรับ K-Means (ใช้ Features ใหม่)"""
     logging.info("Preprocessing data...")
@@ -97,88 +97,103 @@ def preprocess_data(df: pd.DataFrame) -> (pd.DataFrame, list): # <<< คืน�
     # 2. คำนวณ Log Market Cap (ถ้ามี)
     final_feature_list = FEATURES_FOR_CLUSTERING[:] # Copy list ไว้ก่อน
     if has_market_cap:
-        # ใช้ np.log1p เพื่อจัดการค่า market_cap = 0 (ถ้ามี) ให้กลายเป็น log(1)=0 แทนที่จะเป็น -inf
         log_market_cap = np.log1p(df_features['market_cap'].clip(lower=0))
-        # ตรวจสอบค่า inf หรือ NaN ที่อาจเกิดจากการคำนวณ log
         log_market_cap.replace([np.inf, -np.inf], np.nan, inplace=True)
-        # รวม log_market_cap เข้ากับ features หลัก (สำคัญ: ต้อง reset_index ก่อนเพื่อให้ index ตรงกัน)
         numeric_features_full = pd.concat(
             [numeric_features_base.reset_index(drop=True),
              log_market_cap.rename('log_market_cap').reset_index(drop=True)],
             axis=1
         )
-        final_feature_list.append('log_market_cap') # เพิ่มชื่อ feature ใหม่
+        final_feature_list.append('log_market_cap')
     else:
         numeric_features_full = numeric_features_base
-        # final_feature_list ไม่ต้องแก้
 
-    # 3. จัดการค่าที่ "สุดโต่ง" (Outliers) - ใช้ clip กับ numeric_features_full
-    for col in final_feature_list: # วนลูปตาม features สุดท้ายทั้งหมด
-         if col in numeric_features_full.columns: # เช็คเผื่อกรณีไม่มี market_cap
+    # 3. จัดการค่าที่ "สุดโต่ง" (Outliers)
+    for col in final_feature_list:
+         if col in numeric_features_full.columns:
             q_low = numeric_features_full[col].quantile(0.01)
             q_high = numeric_features_full[col].quantile(0.99)
-            # ใช้ .loc เพื่อหลีกเลี่ยง SettingWithCopyWarning
             numeric_features_full.loc[:, col] = numeric_features_full[col].clip(lower=q_low, upper=q_high)
 
-    # 4. เติมค่าว่าง (Impute Missing Values) - ใช้ Median กับ numeric_features_full
+    # 4. เติมค่าว่าง (Impute Missing Values)
     imputer = SimpleImputer(strategy='median')
-    # ต้องแน่ใจว่า input ไม่มีค่า inf อีก (clip ควรจัดการแล้ว แต่เช็คอีกรอบ)
     numeric_features_full.replace([np.inf, -np.inf], np.nan, inplace=True)
     numeric_features_imputed = imputer.fit_transform(numeric_features_full)
     df_imputed = pd.DataFrame(numeric_features_imputed, columns=final_feature_list, index=numeric_features_full.index)
 
-    # 5. ปรับสเกล (Scale Data) กับ df_imputed
+    # 5. ปรับสเกล (Scale Data)
     scaler = StandardScaler()
     scaled_features = scaler.fit_transform(df_imputed)
     df_scaled = pd.DataFrame(scaled_features, columns=final_feature_list, index=df_imputed.index)
 
-    # 6. รวม ticker กลับเข้าไป (ใช้ index เดิม)
-    # ต้อง reset_index ของ tickers ด้วยเพื่อให้ตรงกับ df_scaled
+    # 6. รวม ticker กลับเข้าไป
     df_processed = pd.concat([tickers.reset_index(drop=True), df_scaled], axis=1)
 
     logging.info(f"Data preprocessing complete. {len(df_processed)} stocks remaining. Using features: {final_feature_list}")
-    # คืนค่า DataFrame ที่ Process แล้ว และ List ของ Features ที่ใช้จริง
-    return df_processed, final_feature_list # <<< แก้ไข
+    return df_processed, final_feature_list
 
-# --- [ปรับปรุง] ฟังก์ชันหา k ที่เหมาะสม (รับ features ที่ใช้จริง) ---
-def find_optimal_k(df_scaled: pd.DataFrame, actual_features: list) -> int: # <<< รับ actual_features
+# --- ฟังก์ชันหา k ที่เหมาะสม (เหมือนเดิม) ---
+def find_optimal_k(df_scaled: pd.DataFrame, actual_features: list) -> int:
     """หาจำนวน Cluster (k) ที่เหมาะสมโดยใช้ Elbow Method"""
     logging.info("Finding optimal k using Elbow Method...")
-    if df_scaled.empty or len(df_scaled) < max(K_RANGE) or not actual_features: # <<< เช็ค actual_features
-        logging.warning("Not enough data or features to reliably determine optimal k. Defaulting to MIN_K.")
+    if df_scaled.empty or len(df_scaled) < max(K_RANGE) or not actual_features:
+        logging.warning(f"Not enough data or features to reliably determine optimal k. Defaulting to MIN_K={MIN_K}.")
         return MIN_K
 
-    data_for_elbow = df_scaled[actual_features] # <<< ใช้ actual_features
+    # --- [ปรับปรุง] ใช้ช่วง K_RANGE ใหม่ (5-30) ---
+    k_values_to_test = list(K_RANGE)
+    # Ensure we don't test more k than available data points
+    if len(df_scaled) < max(k_values_to_test):
+        k_values_to_test = list(range(MIN_K, len(df_scaled)))
+        if not k_values_to_test:
+            logging.warning("Less data points than MIN_K. Defaulting to MIN_K.")
+            return MIN_K
+        logging.warning(f"Number of data points ({len(df_scaled)}) is less than MAX_K ({MAX_K}). Testing k up to {k_values_to_test[-1]}.")
+
+    data_for_elbow = df_scaled[actual_features]
     inertia_values = []
 
-    for k in K_RANGE:
-        kmeans = KMeans(n_clusters=k, random_state=42, n_init='auto')
-        kmeans.fit(data_for_elbow)
-        inertia_values.append(kmeans.inertia_)
+    for k in k_values_to_test:
+        try:
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init='auto')
+            kmeans.fit(data_for_elbow)
+            inertia_values.append(kmeans.inertia_)
+        except Exception as e:
+            logging.error(f"Error during KMeans fit for k={k}: {e}. Stopping Elbow Method early.")
+            # If error occurs, only use inertia values calculated so far
+            k_values_to_test = k_values_to_test[:len(inertia_values)]
+            break # Exit the loop early
+
+    if len(inertia_values) < 2: # Need at least 2 points to find elbow
+         logging.warning(f"Could not calculate inertia for enough k values. Defaulting to MIN_K={MIN_K}.")
+         return MIN_K
 
     try:
-        kl = KneeLocator(list(K_RANGE), inertia_values, curve='convex', direction='decreasing')
+        # --- [ปรับปรุง] ใช้ k_values_to_test ที่อาจสั้นลง ---
+        kl = KneeLocator(k_values_to_test, inertia_values, curve='convex', direction='decreasing')
         optimal_k = kl.elbow
         if optimal_k is None:
-            logging.warning("Could not automatically detect elbow point. Defaulting to MIN_K.")
+            logging.warning(f"Could not automatically detect elbow point. Defaulting to MIN_K={MIN_K}.")
             optimal_k = MIN_K
         else:
-            logging.info(f"Optimal k detected by Elbow Method: {optimal_k}")
+            # --- [ปรับปรุง] Clamp ค่า k ให้อยู่ในช่วง MIN_K ถึง MAX_K ---
+            optimal_k = max(MIN_K, min(MAX_K, optimal_k))
+            logging.info(f"Optimal k detected by Elbow Method (Clamped): {optimal_k}")
     except Exception as e:
-        logging.warning(f"Error during KneeLocator: {e}. Defaulting to MIN_K.")
+        logging.warning(f"Error during KneeLocator: {e}. Defaulting to MIN_K={MIN_K}.")
         optimal_k = MIN_K
 
     return optimal_k
 
-# --- [ปรับปรุง] ฟังก์ชันจัดกลุ่ม (รับ features ที่ใช้จริง) ---
-def perform_clustering(df_scaled: pd.DataFrame, n_clusters: int, actual_features: list) -> pd.DataFrame: # <<< รับ actual_features
+# --- ฟังก์ชันจัดกลุ่ม (เหมือนเดิม) ---
+def perform_clustering(df_scaled: pd.DataFrame, n_clusters: int, actual_features: list) -> pd.DataFrame:
     """ใช้ K-Means จัดกลุ่มข้อมูลด้วยจำนวน Cluster และ Features ที่ระบุ"""
     logging.info(f"Performing K-Means clustering with k={n_clusters}...")
-    if df_scaled.empty or len(df_scaled) < n_clusters or not actual_features: # <<< เช็ค actual_features
+    if df_scaled.empty or len(df_scaled) < n_clusters or not actual_features:
         logging.warning("Not enough data or features for clustering. Skipping.")
         return pd.DataFrame()
 
-    data_for_clustering = df_scaled[actual_features] # <<< ใช้ actual_features
+    data_for_clustering = df_scaled[actual_features]
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto')
     kmeans.fit(data_for_clustering)
     cluster_labels = kmeans.labels_
@@ -190,24 +205,37 @@ def perform_clustering(df_scaled: pd.DataFrame, n_clusters: int, actual_features
     logging.info("K-Means clustering complete.")
     return df_results
 
-# --- ฟังก์ชันตรวจสอบความสมเหตุสมผล (เหมือนเดิม) ---
-def is_clustering_reasonable(df_results: pd.DataFrame, total_stocks: int) -> bool:
-    """ตรวจสอบว่าผลลัพธ์การจัดกลุ่มสมเหตุสมผลหรือไม่"""
-    if df_results.empty: return False
+# --- [ปรับปรุง] ฟังก์ชันตรวจสอบความสมเหตุสมผล (คืนค่า Flag แยก) ---
+def check_clustering_reasonableness(df_results: pd.DataFrame, total_stocks: int) -> (bool, bool, bool):
+    """
+    ตรวจสอบว่าผลลัพธ์การจัดกลุ่มสมเหตุสมผลหรือไม่
+    Returns: (passes_all, fails_min_size, fails_max_size)
+    """
+    if df_results.empty: return False, False, False
+
     cluster_counts = df_results['peer_cluster_id'].value_counts()
-    logging.info(f"Checking reasonableness of clustering results (k={len(cluster_counts)}):")
+    k = len(cluster_counts)
+    logging.info(f"Checking reasonableness of clustering results (k={k}):")
     logging.info(f"Cluster distribution:\n{cluster_counts.sort_index()}")
+
+    fails_min_size = False
     min_size = cluster_counts.min()
     if min_size < MIN_CLUSTER_SIZE:
         logging.warning(f"Sanity Check FAILED: Smallest cluster size ({min_size}) < minimum required ({MIN_CLUSTER_SIZE}).")
-        return False
+        fails_min_size = True
+
+    fails_max_size = False
     max_size = cluster_counts.max()
     max_ratio = max_size / total_stocks
     if max_ratio > MAX_CLUSTER_SIZE_RATIO:
         logging.warning(f"Sanity Check FAILED: Largest cluster size ({max_size}, {max_ratio:.1%}) > maximum ratio ({MAX_CLUSTER_SIZE_RATIO:.1%}).")
-        return False
-    logging.info("Sanity Check PASSED: Cluster sizes are reasonable.")
-    return True
+        fails_max_size = True
+
+    passes_all = not fails_min_size and not fails_max_size
+    if passes_all:
+        logging.info("Sanity Check PASSED: Cluster sizes are reasonable.")
+
+    return passes_all, fails_min_size, fails_max_size
 
 # --- ฟังก์ชันบันทึกผล (เหมือนเดิม) ---
 def update_cluster_ids_in_db(df_results: pd.DataFrame):
@@ -253,47 +281,85 @@ if __name__ == "__main__":
     df_raw = get_latest_financial_data()
 
     if not df_raw.empty:
-        # 2. เตรียมข้อมูล (รับ list features ที่ใช้จริงกลับมาด้วย)
-        df_processed, actual_features_used = preprocess_data(df_raw) # <<< แก้ไข
+        # 2. เตรียมข้อมูล
+        df_processed, actual_features_used = preprocess_data(df_raw)
 
-        # --- [ปรับปรุง] เช็คว่ามี features เหลือให้ใช้หรือไม่ ---
         if not df_processed.empty and actual_features_used:
             total_stocks_processed = len(df_processed)
 
-            # 3. หา k ที่เหมาะสมทางสถิติ (ส่ง features ที่ใช้จริงไปด้วย)
-            current_k = find_optimal_k(df_processed, actual_features_used) # <<< แก้ไข
+            # 3. หา k เริ่มต้นทางสถิติ
+            k_start = find_optimal_k(df_processed, actual_features_used)
+            # --- [เพิ่ม] ตรวจสอบ k_start ให้อยู่ในช่วง 5-30 ---
+            k_start = max(MIN_K, min(MAX_K, k_start))
+            logging.info(f"Starting k search from k_start = {k_start}")
 
-            # 4. วนลูปหา k ที่สมเหตุสมผล
+            # 4. --- [ปรับปรุง] วนลูปค้นหา k ที่เหมาะสม ---
+            current_k = k_start
+            tried_k = set()
+            iteration = 0
+            found_k = None
             final_results = pd.DataFrame()
-            while current_k >= MIN_K:
-                # 4.1 จัดกลุ่มด้วย k ปัจจุบัน (ส่ง features ที่ใช้จริงไปด้วย)
-                df_cluster_results = perform_clustering(df_processed, current_k, actual_features_used) # <<< แก้ไข
+
+            while iteration < MAX_ITERATIONS:
+                # --- เงื่อนไขการหยุด Loop ---
+                if current_k < MIN_K or current_k > MAX_K:
+                    logging.warning(f"k={current_k} is outside the allowed range ({MIN_K}-{MAX_K}). Stopping search.")
+                    break
+                if current_k in tried_k:
+                    logging.warning(f"Already tried k={current_k}. Stopping search to prevent infinite loop.")
+                    break
+
+                logging.info(f"--- Iteration {iteration + 1}/{MAX_ITERATIONS}: Trying k={current_k} ---")
+                tried_k.add(current_k)
+
+                # 4.1 จัดกลุ่มด้วย k ปัจจุบัน
+                df_cluster_results = perform_clustering(df_processed, current_k, actual_features_used)
 
                 if df_cluster_results.empty:
-                    logging.warning(f"Clustering failed for k={current_k}. Trying k={current_k-1}...")
-                    current_k -= 1
-                    continue
-
-                # 4.2 ตรวจสอบความสมเหตุสมผล (เหมือนเดิม)
-                if is_clustering_reasonable(df_cluster_results, total_stocks_processed):
-                    logging.info(f"Found reasonable clustering with k={current_k}.")
-                    final_results = df_cluster_results
-                    break
+                    logging.warning(f"Clustering failed unexpectedly for k={current_k}.")
+                    # ลองลด k ถ้าเกิด error (อาจจะลอง strategy อื่นก็ได้)
+                    next_k = current_k - 1
                 else:
-                    logging.warning(f"Clustering with k={current_k} was not reasonable. Trying k={current_k-1}...")
-                    current_k -= 1
-            else:
-                logging.error(f"Could not find a reasonable k value even down to {MIN_K}. Clustering failed.")
+                    # 4.2 ตรวจสอบความสมเหตุสมผล
+                    passes_all, fails_min_size, fails_max_size = check_clustering_reasonableness(
+                        df_cluster_results, total_stocks_processed
+                    )
 
-            # 5. บันทึกผลลัพธ์สุดท้าย (เหมือนเดิม)
-            if not final_results.empty:
+                    # 4.3 ตัดสินใจ k ต่อไปตาม Logic ใหม่
+                    if passes_all:
+                        logging.info(f"Found reasonable clustering with k={current_k}.")
+                        found_k = current_k
+                        final_results = df_cluster_results
+                        break # เจอแล้ว หยุด Loop
+                    elif fails_min_size: # ให้ความสำคัญกับ Min Size ก่อน (ไม่ว่า Max Size จะ Fail ด้วยหรือไม่)
+                        logging.warning(f"k={current_k} failed MIN size check. Trying k={current_k - 1}...")
+                        next_k = current_k - 1
+                    elif fails_max_size: # กรณี Fail เฉพาะ Max Size
+                        logging.warning(f"k={current_k} failed MAX size check. Trying k={current_k + 1}...")
+                        next_k = current_k + 1
+                    else:
+                         # Should not happen if logic is correct
+                         logging.error(f"Unexpected state for k={current_k}. Stopping search.")
+                         break
+
+                current_k = next_k
+                iteration += 1
+            # --- จบ Loop ค้นหา k ---
+
+            # 5. สรุปผลและบันทึก
+            if found_k is not None and not final_results.empty:
+                logging.info(f"Successfully found a reasonable k = {found_k}. Updating database.")
                 update_cluster_ids_in_db(final_results)
             else:
+                if iteration >= MAX_ITERATIONS:
+                    logging.error(f"Could not find a reasonable k value within {MAX_ITERATIONS} iterations. Clustering failed.")
+                else:
+                    logging.error(f"Stopped searching for k prematurely (k={current_k}). Clustering failed.")
                 logging.warning("No final clustering results to update in the database.")
-        # --- [จบการปรับปรุง] ---
+
         elif df_processed.empty:
              logging.warning("Data preprocessing resulted in empty data.")
-        else: # กรณี actual_features_used เป็น list ว่าง
+        else:
              logging.error("No valid features remaining after preprocessing. Clustering cannot proceed.")
     else:
         logging.warning("Failed to retrieve data from database.")

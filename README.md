@@ -88,4 +88,8 @@ With a solid data foundation in place, v3.0 can focus on integrating Machine Lea
 * **Factor Analysis:** Use ML to identify key financial factors driving stock performance within different sectors based on historical data.
 * **Caching:** Implement Redis to cache database queries and API results for faster UI loading.
 * **Asynchronous Tasks:** Potentially use Celery/Redis for any *new*, long-running ML model training or inference tasks initiated by user interaction (though daily ETL remains on GitHub Actions).
+<<<<<<< HEAD
 * **Dockerization:** Containerize the application for easier deployment and scalability.
+=======
+* **Dockerization:** Containerize the application for easier deployment and scalability.
+>>>>>>> e0e7ee531f74c1b74487353e5f21e2076cfbb442

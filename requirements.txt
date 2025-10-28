@@ -13,3 +13,4 @@ psycopg2-binary
 newsapi-python==0.2.7
 requests==2.31.0
 Flask-Migrate==4.0.7
+scikit-learn==1.7.2

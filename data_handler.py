@@ -1,9 +1,9 @@
-# data_handler.py (FINAL - DCF uses DB, TTM Tax Rate, and Dynamic WACC Calculation)
+# data_handler.py (FINAL - DCF uses DB, TTM Tax Rate, Dynamic WACC Calculation + Fallback Functions)
 
 import pandas as pd
 import yfinance as yf
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple # <<< Added Tuple
 from functools import lru_cache
 import logging
 import warnings
@@ -12,9 +12,9 @@ from urllib.parse import urlparse
 import requests
 import os
 import time # Import time for delays
-# --- [NEW IMPORTS FOR DB DCF] ---
-from app import db, server, FactFinancialStatements, FactCompanySummary, DimCompany
-from sqlalchemy import func, distinct, text
+# --- [NEW IMPORTS FOR DB DCF & FALLBACK] ---
+from app import db, server, FactFinancialStatements, FactCompanySummary, DimCompany, FactDailyPrices # <<< Added FactDailyPrices
+from sqlalchemy import func, distinct, text, desc # <<< Added desc
 # --- [END NEW IMPORTS] ---
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -50,13 +50,13 @@ def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
 
     headers = {"Authorization": f"Bearer {hf_token}"}
     payload = {"inputs": texts_to_analyze, "options": {"wait_for_model": True}}
-    
+
     final_results = []
-    
+
     try:
         response = requests.post(API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
-        results_batch = response.json() 
+        results_batch = response.json()
 
         if isinstance(results_batch, list) and len(results_batch) > 0:
             inner_results_list = results_batch[0]
@@ -76,7 +76,7 @@ def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
         else:
             logging.error(f"API response *outer* structure unexpected or empty: {results_batch}")
             return [default_result] * len(texts_to_analyze)
-                
+
     except requests.exceptions.Timeout:
         logging.error("API request timed out after 120 seconds.", exc_info=False)
         return [default_result] * len(texts_to_analyze)
@@ -86,7 +86,7 @@ def analyze_sentiment_batch(texts_to_analyze: List[str]) -> List[dict]:
     except Exception as e:
         logging.error(f"API batch request failed or parsing failed: {e}", exc_info=True)
         return [default_result] * len(texts_to_analyze)
-    
+
     return final_results
 
 # --- News Fetching Function (เหมือนเดิม) ---
@@ -97,8 +97,8 @@ def get_news_and_sentiment(company_name: str) -> dict:
     try:
         to_date, from_date = datetime.now(), datetime.now() - timedelta(days=7)
         all_articles = newsapi.get_everything(q=f'"{company_name}"', language='en', sort_by='relevancy', from_param=from_date.strftime('%Y-%m-%d'), to=to_date.strftime('%Y-%m-%d'), page_size=20)
-        
-        if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0: 
+
+        if all_articles['status'] != 'ok' or all_articles['totalResults'] == 0:
             return {"articles": [], "summary": {}}
 
         articles_to_process = []
@@ -118,13 +118,13 @@ def get_news_and_sentiment(company_name: str) -> dict:
 
         analyzed_articles = []
         sentiment_scores = {'positive': 0, 'neutral': 0, 'negative': 0}
-        
+
         for article, result in zip(articles_to_process, sentiment_results):
             article['sentiment'] = result['label']
             article['sentiment_score'] = result['score']
             analyzed_articles.append(article)
             sentiment_scores[result['label']] += 1
-            
+
         total_analyzed = len(analyzed_articles)
         summary = {
             'positive_count': sentiment_scores['positive'], 'neutral_count': sentiment_scores['neutral'], 'negative_count': sentiment_scores['negative'], 'total_count': total_analyzed,
@@ -133,7 +133,7 @@ def get_news_and_sentiment(company_name: str) -> dict:
             'negative_pct': (sentiment_scores['negative'] / total_analyzed) * 100 if total_analyzed > 0 else 0,
         }
         return {"articles": analyzed_articles, "summary": summary}
-        
+
     except Exception as e:
         logging.error(f"Error in get_news_and_sentiment for {company_name}: {e}", exc_info=True)
         return {"error": str(e)}
@@ -160,15 +160,15 @@ def _cagr(series: pd.Series, years: int) -> float:
     num_years = (series.index[-1].year - series.index[0].year) if pd.api.types.is_datetime64_any_dtype(series.index) else len(series) - 1
     if num_years <= 0: return np.nan
     start_val, end_val = series.iloc[0], series.iloc[-1]
-    if pd.notna(start_val) and pd.notna(end_val) and start_val > 0: 
+    if pd.notna(start_val) and pd.notna(end_val) and start_val > 0:
         try:
             result = (end_val / start_val)**(1.0 / num_years) - 1.0
             if isinstance(result, complex):
-                return np.nan 
-            return float(result) 
+                return np.nan
+            return float(result)
         except (ValueError, TypeError, ZeroDivisionError, OverflowError):
             return np.nan
-    return np.nan 
+    return np.nan
 
 def get_financial_data(statement_series, possible_keys):
     if statement_series is None: return None
@@ -178,19 +178,7 @@ def get_financial_data(statement_series, possible_keys):
             return abs(value) if pd.notna(value) else None
     return None
 
-def _get_logo_url(info: dict) -> Optional[str]:
-    if not info: return None
-    logo_url = info.get('logo_url')
-    if not logo_url:
-        website = info.get('website')
-        if website:
-            try:
-                domain = urlparse(website).netloc.replace('www.', '')
-                if domain: logo_url = f"https://logo.clearbit.com/{domain}"
-            except Exception: logo_url = None
-    return logo_url
-
-# --- Core Data Fetching Functions (เหมือนเดิม) ---
+# --- Core Data Fetching Functions (เหมือนเดิม ยกเว้น get_deep_dive_data ที่เอาออก) ---
 @lru_cache(maxsize=32)
 def get_revenue_series(ticker: str) -> pd.Series:
     try:
@@ -223,30 +211,30 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
     all_data = []
     total = len(tickers)
     logging.info(f"Starting to fetch competitor data for {total} tickers...")
-    
+
     for i, ticker in enumerate(tickers):
         try:
             tkr = yf.Ticker(ticker)
             info = tkr.info # Fetch info once
-            if not info or info.get('quoteType') != 'EQUITY': 
+            if not info or info.get('quoteType') != 'EQUITY':
                 logging.warning(f"({i+1}/{total}) Skipping {ticker}: Invalid ticker or no data.")
                 continue # Skip to the next ticker if info is bad
 
             logging.info(f"({i+1}/{total}) Fetching data for {ticker}...")
 
-            logo_url = _get_logo_url(info)
+            logo_url = _get_logo_url(info) # <<< Use the existing helper
             # Use financials/cashflow from the same tkr object to reduce API calls
             fin, cf = tkr.financials, tkr.cashflow
-            
+
             revenue_series = _pick_row(fin, FIN_KEYS["revenue"]) if fin is not None and not fin.empty else pd.Series(dtype=float)
-            if revenue_series is not None and not revenue_series.empty: 
+            if revenue_series is not None and not revenue_series.empty:
                 revenue_series.index = pd.to_datetime(revenue_series.index)
                 revenue_series = revenue_series.sort_index()
             cagr_3y = _cagr(revenue_series, 3) if revenue_series is not None and not revenue_series.empty else np.nan
-            
+
             cfo_series = _pick_row(cf, CF_KEYS['cfo']) if cf is not None and not cf.empty else None
             ni_series = _pick_row(fin, FIN_KEYS['net_income']) if fin is not None and not fin.empty else None
-            
+
             cash_conversion = np.nan
             if cfo_series is not None and ni_series is not None and not cfo_series.empty and not ni_series.empty:
                 # Ensure indices are aligned if possible, or use latest available period
@@ -257,31 +245,31 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
                     latest_common_date = common_index.max()
                     latest_cfo = aligned_cfo.get(latest_common_date)
                     latest_ni = aligned_ni.get(latest_common_date)
-                    if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0: 
+                    if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0:
                         cash_conversion = latest_cfo / latest_ni
                 elif not cfo_series.empty and not ni_series.empty: # Fallback if no common index
                     latest_cfo, latest_ni = cfo_series.iloc[0], ni_series.iloc[0]
-                    if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0: 
+                    if pd.notna(latest_cfo) and pd.notna(latest_ni) and latest_ni != 0:
                         cash_conversion = latest_cfo / latest_ni
 
 
             data_dict = {
-                "Ticker": ticker, 
+                "Ticker": ticker,
                 "company_name": info.get('longName'), # <--- Added for DimCompany
                 "sector": info.get('sector'), # <--- Added for DimCompany
-                "logo_url": logo_url, 
+                "logo_url": logo_url,
                 "Price": info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose'),
-                "Market Cap": info.get("marketCap"), 
-                "Beta": info.get("beta"), 
-                "P/E": info.get('trailingPE'), 
+                "Market Cap": info.get("marketCap"),
+                "Beta": info.get("beta"),
+                "P/E": info.get('trailingPE'),
                 "P/B": info.get('priceToBook'),
-                "EV/EBITDA": info.get('enterpriseToEbitda'), 
-                "Revenue Growth (YoY)": info.get('revenueGrowth'), 
+                "EV/EBITDA": info.get('enterpriseToEbitda'),
+                "Revenue Growth (YoY)": info.get('revenueGrowth'),
                 "Revenue CAGR (3Y)": cagr_3y,
-                "Net Income Growth (YoY)": info.get('earningsGrowth'), 
+                "Net Income Growth (YoY)": info.get('earningsGrowth'),
                 "ROE": info.get('returnOnEquity'),
                 "D/E Ratio": info.get('debtToEquity', 0) / 100 if info.get('debtToEquity') is not None else np.nan,
-                "Operating Margin": info.get('operatingMargins'), 
+                "Operating Margin": info.get('operatingMargins'),
                 "Cash Conversion": cash_conversion,
                 # --- [ข้อมูลใหม่ที่เพิ่มเข้ามา] ---
                 "EBITDA Margin": info.get('ebitdaMargins'),
@@ -295,7 +283,7 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
             # --- [FIX 4] เพิ่มการหน่วงเวลา ---
             time.sleep(0.5) # Wait 0.5 second between tickers
 
-        except Exception as e: 
+        except Exception as e:
             # Log the specific error for the ticker but continue the loop
             logging.error(f"({i+1}/{total}) An error occurred processing summary for {ticker}: {e}")
             time.sleep(1) # General short sleep on error before trying next ticker
@@ -304,7 +292,6 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
     logging.info(f"Finished fetching competitor data. Got data for {len(all_data)} out of {total} tickers.")
     return pd.DataFrame(all_data)
 # --- [END OF MODIFICATION] ---
-
 
 @lru_cache(maxsize=10)
 def get_scatter_data(tickers: tuple) -> pd.DataFrame:
@@ -321,43 +308,27 @@ def get_scatter_data(tickers: tuple) -> pd.DataFrame:
              time.sleep(5) # Longer delay on error
     return pd.DataFrame(scatter_data).dropna()
 
-@lru_cache(maxsize=32)
-def get_deep_dive_data(ticker: str) -> dict:
-    # ... (โค้ดเดิม) ...
-    try:
-        tkr = yf.Ticker(ticker)
-        # Fetch data needed for Financials and potentially DCF
-        info = tkr.info # Still needed for DCF potentially
-        if not info or info.get('quoteType') != 'EQUITY': return {"error": "Invalid ticker or no data available."}
-        
-        # Only fetch financials if needed (ETL Job 3 will call this)
-        # Let's keep fetching them for now as DCF might need them too,
-        # but be aware this is an area for potential optimization if DCF is also moved to DB.
-        qf = tkr.quarterly_financials
-        qbs = tkr.quarterly_balance_sheet
-        qcf = tkr.quarterly_cashflow
-        
-        result = {"info": info} # Keep info for DCF or other uses
-        
-        result["financial_statements"] = {
-            "income": qf.iloc[:,:16].dropna(how='all', axis=1) if qf is not None else pd.DataFrame(),
-            "balance": qbs.iloc[:,:16].dropna(how='all', axis=1) if qbs is not None else pd.DataFrame(),
-            "cashflow": qcf.iloc[:,:16].dropna(how='all', axis=1) if qcf is not None else pd.DataFrame()
-        }
-
-        # Removed price history, margin trends, financial trends as they are derived/stored elsewhere now
-        # result["price_history"] = tkr.history(period="5y") # Removed
-
-        return result
-    except Exception as e:
-        logging.error(f"Critical failure in get_deep_dive_data for {ticker}: {e}", exc_info=True)
-        return {"error": str(e)}
+# --- [REMOVED] get_deep_dive_data function ---
+# (ฟังก์ชันนี้ไม่จำเป็นแล้ว เพราะเราจะสร้างฟังก์ชันแยกสำหรับแต่ละส่วน)
 
 def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
-    # ... (โค้ดเดิม) ...
+    # ... (ส่วนอื่น ๆ ของ data_handler.py) ...
     if not isinstance(price_history_df, pd.DataFrame) or price_history_df.empty: return {"error": "Price history data is missing."}
     df = price_history_df.copy()
+
+    # --- [START FIX] Ensure column names are capitalized ---
+    df.columns = [col.capitalize() for col in df.columns]
+    # Check if required capitalized columns exist now
+    required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+    if not all(col in df.columns for col in required_cols):
+         missing = [col for col in required_cols if col not in df.columns]
+         logging.error(f"Input DataFrame is missing required columns after capitalization attempt: {missing}")
+         # <<< [แก้ไข] ส่งคืน Error ที่ชัดเจนขึ้น
+         return {"error": f"Input price data missing required columns: {missing}"}
+    # --- [END FIX] ---
+
     try:
+        # Calculate indicators using capitalized column names
         df['SMA50'] = df['Close'].rolling(window=50).mean()
         df['SMA200'] = df['Close'].rolling(window=200).mean()
         df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
@@ -372,14 +343,28 @@ def get_technical_analysis_data(price_history_df: pd.DataFrame) -> dict:
         rs = gain / loss.replace(0, np.nan) # Replace 0 loss with NaN to avoid division error
         df['RSI'] = 100 - (100 / (1 + rs))
         df['RSI'] = df['RSI'].fillna(50) # Fill NaN RSI values (e.g., at the start or if loss is consistently 0)
-        ema12, ema26 = df['Close'].ewm(span=12, adjust=False).mean(), df['Close'].ewm(span=26, adjust=False).mean()
+        ema12 = df['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = df['Close'].ewm(span=26, adjust=False).mean()
         df['MACD'] = ema12 - ema26
         df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
         df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
-        return {"data": df.dropna(subset=['SMA50', 'SMA200', 'EMA20', 'BB_Upper', 'BB_Lower', 'RSI', 'MACD', 'MACD_Signal', 'MACD_Hist'])} # Drop rows where indicators couldn't be calculated initially
+
+        # --- [แก้ไข] ตรวจสอบว่าคอลัมน์ Indicator ถูกสร้างขึ้นจริง ๆ ก่อน dropna ---
+        indicator_cols = ['SMA50', 'SMA200', 'EMA20', 'BB_Upper', 'BB_Lower', 'RSI', 'MACD', 'MACD_Signal', 'MACD_Hist']
+        existing_indicator_cols = [col for col in indicator_cols if col in df.columns]
+
+        # ถ้าไม่มี Indicator ไหนเลยคำนวณได้ ให้ส่งคืน Error
+        if not existing_indicator_cols:
+            logging.error("None of the required technical indicator columns could be calculated.")
+            return {"error": "Could not calculate any technical indicators."}
+
+        # Drop เฉพาะแถวที่ค่า Indicator ที่มีอยู่จริงเป็น NaN
+        return {"data": df.dropna(subset=existing_indicator_cols)}
+
     except Exception as e:
         logging.error(f"Error calculating technical indicators: {e}", exc_info=True)
-        return {"error": f"Calculation error: {e}"}
+        # --- [แก้ไข] ส่งคืน Error ที่เฉพาะเจาะจงมากขึ้น ---
+        return {"error": f"Calculation error: {type(e).__name__} - {e}"}
 
 
 @lru_cache(maxsize=32)
@@ -406,7 +391,7 @@ def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_grow
 # --- [NEW HELPER FUNCTION FOR DCF BASE DATA FROM DB] ---
 def _get_dcf_base_data_from_db(ticker: str) -> dict:
     """
-    Queries the database (FactFinancialStatements & FactCompanySummary) 
+    Queries the database (FactFinancialStatements & FactCompanySummary)
     to get the necessary base financial data for DCF analysis, including TTM metrics.
     FCFF = EBIT * (1 - TTM Tax Rate) + D&A - CapEx
     Also calculates WACC (WACC_calc) using Beta and Debt from DB.
@@ -421,17 +406,17 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         ).order_by(
             FactFinancialStatements.report_date.desc()
         ).limit(4).subquery()
-        
+
         # 2. Query TTM metrics (SUM over 4 quarters)
         required_ttm_metrics = [
-            'EBIT', 
-            'Depreciation And Amortization', 
+            'EBIT',
+            'Depreciation And Amortization',
             'Capital Expenditure',
-            'Income Tax Expense',        
-            'Income Before Tax',         
+            'Income Tax Expense',
+            'Income Before Tax',
             'Interest Expense'           # <<< ADDED
         ]
-        
+
         ttm_data = db.session.query(
             FactFinancialStatements.metric_name,
             func.sum(FactFinancialStatements.metric_value).label('ttm_value')
@@ -440,7 +425,7 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
             FactFinancialStatements.report_date.in_(latest_reports_query),
             FactFinancialStatements.metric_name.in_(required_ttm_metrics)
         ).group_by(FactFinancialStatements.metric_name).all()
-        
+
         ttm_dict = {name: (value if value is not None else 0.0) for name, value in ttm_data}
 
         # Check for required TTM metrics (FCFF components)
@@ -450,12 +435,12 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         # 3. Calculate TTM Tax Rate (Dynamic)
         ttm_tax = ttm_dict.get('Income Tax Expense', 0.0)
         ttm_pretax = ttm_dict.get('Income Before Tax', 0.0)
-        
+
         # Use Dynamic TTM Rate, fallback to 21%
         tax_rate = (ttm_tax / ttm_pretax) if ttm_pretax and ttm_pretax != 0 else 0.21
         # Ensure tax rate is within a reasonable range (e.g., 0% to 50%)
         tax_rate = max(0.0, min(0.5, tax_rate))
-        
+
         # 4. Query latest Balance Sheet items (Cash, Debt)
         latest_bs_date = db.session.query(
             func.max(FactFinancialStatements.report_date)
@@ -463,7 +448,7 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
             FactFinancialStatements.ticker == ticker,
             FactFinancialStatements.statement_type == 'balance'
         ).scalar()
-        
+
         bs_data = db.session.query(
             FactFinancialStatements.metric_name,
             FactFinancialStatements.metric_value
@@ -473,9 +458,9 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
             FactFinancialStatements.report_date == latest_bs_date,
             FactFinancialStatements.metric_name.in_(['Cash And Cash Equivalents', 'Total Debt'])
         ).all()
-        
+
         bs_dict = {name: (value if value is not None else 0.0) for name, value in bs_data}
-        
+
         # 5. Query latest price/market cap/beta from FactCompanySummary
         latest_summary = db.session.query(
             FactCompanySummary.price,
@@ -491,10 +476,10 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         price = latest_summary.price
         market_cap = latest_summary.market_cap
         beta = latest_summary.beta # <<< GET BETA
-        
+
         # 6. Calculate Shares Outstanding (Market Cap / Price)
         shares_outstanding = market_cap / price
-        
+
         if shares_outstanding == 0:
             return {'error': 'Could not calculate Shares Outstanding (Market Cap/Price is zero).', 'success': False}
 
@@ -507,10 +492,10 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         if beta is not None and total_debt >= 0 and total_capital > 0:
              # Cost of Debt (Rd) - Uses TTM Interest Expense, falls back to R_f if no debt/interest or interest=0
             cost_of_debt_rd = (interest_expense / total_debt) if total_debt != 0 and interest_expense is not None and interest_expense != 0 else ASSUMED_RISK_FREE_RATE
-            
+
              # Cost of Equity (Re)
             cost_of_equity_re = ASSUMED_RISK_FREE_RATE + beta * (ASSUMED_MARKET_RETURN - ASSUMED_RISK_FREE_RATE)
-            
+
              # WACC Formula
             wacc_calc = (
                 (market_cap / total_capital) * cost_of_equity_re
@@ -531,13 +516,13 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
             'total_debt': total_debt,
             'wacc_calculated': wacc_calc # <<< ADDED (for optional display/info)
         }
-        
+
         dcf_base['net_debt'] = dcf_base['total_debt'] - bs_dict.get('Cash And Cash Equivalents', 0.0)
         dcf_base['base_fcff'] = (dcf_base['ebit_ttm'] * (1 - dcf_base['tax_rate'])) + dcf_base['d_and_a_ttm'] - dcf_base['capex_ttm']
-        
+
         if dcf_base['base_fcff'] == 0:
              return {'error': 'Base FCFF is zero after calculation. Cannot run simulation.', 'success': False}
-        
+
         return dcf_base
 # --- [END NEW HELPER FUNCTION] ---
 
@@ -557,7 +542,7 @@ def calculate_monte_carlo_dcf(
     try:
         # --- [MODIFICATION: Fetch base data from DB] ---
         dcf_data = _get_dcf_base_data_from_db(ticker)
-        
+
         if not dcf_data.get('success'):
             # Propagate detailed error message
             return {'error': dcf_data.get('error', 'Missing essential data for DCF from DB.')}
@@ -568,7 +553,7 @@ def calculate_monte_carlo_dcf(
         shares_outstanding = dcf_data['shares_outstanding']
         current_price = dcf_data['current_price']
         # --- [END MODIFICATION] ---
-        
+
         PROJECTION_YEARS = 5
 
         # --- Monte Carlo Simulation Logic (เหมือนเดิม) ---
@@ -585,19 +570,19 @@ def calculate_monte_carlo_dcf(
         sim_growth = sim_growth[valid_sim]
         sim_perpetual = sim_perpetual[valid_sim]
         sim_wacc = sim_wacc[valid_sim]
-        
+
         if len(sim_wacc) == 0:
              return {'error': 'No valid simulations after filtering WACC > g.'}
-        
+
         n_valid_simulations = len(sim_wacc)
 
         # DCF Calculation
         future_fcffs = base_fcff * (1 + sim_growth) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
         discounted_fcffs = future_fcffs / (1 + sim_wacc) ** np.arange(1, PROJECTION_YEARS + 1)[:, np.newaxis]
         final_year_fcff = future_fcffs[-1]
-        
+
         terminal_value = (final_year_fcff * (1 + sim_perpetual)) / (sim_wacc - sim_perpetual)
-        terminal_value[terminal_value < 0] = 0 
+        terminal_value[terminal_value < 0] = 0
         discounted_terminal_value = terminal_value / ((1 + sim_wacc) ** PROJECTION_YEARS)
 
         enterprise_value = np.sum(discounted_fcffs, axis=0) + discounted_terminal_value
@@ -623,3 +608,334 @@ def calculate_monte_carlo_dcf(
         logging.error(f"Monte Carlo DCF failed for {ticker}: {e}", exc_info=True)
         return {'error': str(e)}
 # --- [END MODIFIED] calculate_monte_carlo_dcf ---
+
+
+# ==============================================================================
+# --- [NEW] SECTION: Fallback Data Fetching Functions ---
+# ==============================================================================
+
+@lru_cache(maxsize=128) # Cache results to avoid repeated API calls
+def get_deep_dive_header_data(ticker: str) -> dict:
+    """
+    Fetches header data for the deep dive page.
+    Tries database first, falls back to live yfinance fetch.
+    Returns a dictionary containing header info or an error message.
+    """
+    logging.info(f"[Fallback] Trying to fetch header data for {ticker} from DB...")
+    header_data = {'source': 'database', 'error': None}
+    try:
+        with server.app_context():
+            # Query DB for latest DimCompany and FactCompanySummary
+            db_result = db.session.query(
+                DimCompany.company_name, DimCompany.logo_url, DimCompany.sector,
+                FactCompanySummary.price, FactCompanySummary.market_cap,
+                FactCompanySummary.analyst_target_price, FactCompanySummary.pe_ratio,
+                FactCompanySummary.forward_pe, FactCompanySummary.long_business_summary,
+                FactCompanySummary.beta
+            ).outerjoin( # Use outerjoin in case DimCompany exists but summary doesn't yet
+                FactCompanySummary,
+                (DimCompany.ticker == FactCompanySummary.ticker) &
+                (FactCompanySummary.date_updated == db.session.query(func.max(FactCompanySummary.date_updated)).filter(FactCompanySummary.ticker == ticker).scalar_subquery())
+            ).filter(
+                DimCompany.ticker == ticker
+            ).first()
+
+            # Query DB for last two closing prices for daily change calculation
+            price_history_db = db.session.query(FactDailyPrices.close) \
+                                        .filter(FactDailyPrices.ticker == ticker) \
+                                        .order_by(FactDailyPrices.date.desc()) \
+                                        .limit(2).all()
+
+        if db_result:
+            logging.info(f"[Fallback] Found header data for {ticker} in DB.")
+            current_price = db_result.price
+            if len(price_history_db) >= 2:
+                previous_close = price_history_db[1][0]
+            elif len(price_history_db) == 1:
+                previous_close = price_history_db[0][0]
+            elif current_price is not None: # Fallback if only summary price exists
+                previous_close = current_price
+            else: # Cannot determine previous close
+                 previous_close = None
+                 logging.warning(f"[Fallback] Could not determine previous close for {ticker} from DB.")
+
+
+            # Populate dict from DB result
+            header_data.update({
+                'company_name': db_result.company_name,
+                'logo_url': db_result.logo_url,
+                'sector': db_result.sector,
+                'current_price': current_price,
+                'previous_close': previous_close, # Needed for daily change calculation
+                'market_cap': db_result.market_cap,
+                'analyst_target_price': db_result.analyst_target_price,
+                'pe_ratio': db_result.pe_ratio,
+                'forward_pe': db_result.forward_pe,
+                'long_business_summary': db_result.long_business_summary,
+                'beta': db_result.beta,
+                # Add other necessary fields if needed
+            })
+            # Check if essential data like price is present
+            if header_data.get('current_price') is not None:
+                return header_data # Return data from DB
+            else:
+                 logging.warning(f"[Fallback] Data found for {ticker} in DB, but essential info (like price) is missing. Will try live fetch.")
+
+        else:
+             logging.info(f"[Fallback] Header data for {ticker} not found in DB. Trying live fetch...")
+
+        # --- Fallback to Live Fetch ---
+        header_data['source'] = 'live'
+        try:
+            tkr = yf.Ticker(ticker)
+            info = tkr.info
+            hist = tkr.history(period="2d") # Get last 2 days for price change
+
+            if not info or info.get('quoteType') != 'EQUITY':
+                header_data['error'] = "Invalid ticker or no data available from yfinance."
+                return header_data
+
+            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+            previous_close = None
+            if not hist.empty and len(hist) > 0:
+                 # Try getting 'previousClose' from info first, then from history
+                 previous_close = info.get('previousClose')
+                 if previous_close is None and len(hist) >= 1 :
+                      # If only one day in history use its close, otherwise use the second to last day
+                      previous_close_index = -1 if len(hist) == 1 else -2
+                      previous_close = hist['Close'].iloc[previous_close_index]
+
+
+            # Get logo using the helper function
+            logo_url = _get_logo_url(info)
+
+            header_data.update({
+                'company_name': info.get('longName'),
+                'logo_url': logo_url,
+                'sector': info.get('sector'),
+                'current_price': current_price,
+                'previous_close': previous_close,
+                'market_cap': info.get('marketCap'),
+                'analyst_target_price': info.get('targetMeanPrice'),
+                'pe_ratio': info.get('trailingPE'),
+                'forward_pe': info.get('forwardPE'),
+                'long_business_summary': info.get('longBusinessSummary'),
+                'beta': info.get('beta'),
+                # Map other yfinance info keys as needed
+            })
+            logging.info(f"[Fallback] Successfully fetched live header data for {ticker}.")
+            # Ensure essential data exists after live fetch
+            if header_data.get('current_price') is None:
+                 header_data['error'] = "Live fetch successful but essential data (price) is still missing."
+
+
+        except Exception as e:
+            logging.error(f"[Fallback] Live fetch failed for {ticker}: {e}", exc_info=True)
+            header_data['error'] = f"Live yfinance fetch failed: {e}"
+
+        return header_data
+
+    except Exception as db_e:
+        logging.error(f"[Fallback] Database query failed for {ticker} header: {db_e}", exc_info=True)
+        header_data['error'] = f"Database query failed: {db_e}"
+        # Optionally, you could still attempt a live fetch here if the DB query itself fails
+        # but for simplicity, we return the DB error first.
+        return header_data
+
+# --- [NEW] Helper: Convert period string to start date ---
+def _period_to_start_date(period: str) -> datetime.date:
+    """Converts yfinance period string (e.g., '5y', '1y') to a start date."""
+    today = datetime.utcnow().date()
+    if period == '5y':
+        return today - timedelta(days=5*365)
+    elif period == '1y':
+        return today - timedelta(days=365)
+    elif period == 'ytd':
+         return datetime(today.year, 1, 1).date()
+    # Add more periods as needed
+    else: # Default to 5 years if unrecognized
+        logging.warning(f"Unrecognized period '{period}'. Defaulting to 5 years.")
+        return today - timedelta(days=5*365)
+
+
+@lru_cache(maxsize=64)
+def get_historical_prices(ticker: str, period: str = "5y") -> Tuple[pd.DataFrame, str]:
+    """
+    Fetches historical OHLCV data for the deep dive technical chart.
+    Tries database first, falls back to live yfinance fetch.
+    Returns a tuple: (DataFrame, source_string)
+    """
+    logging.info(f"[Fallback] Trying to fetch '{period}' price history for {ticker} from DB...")
+    source = 'database'
+    start_date = _period_to_start_date(period)
+    end_date = datetime.utcnow().date() # Fetch up to today
+
+    try:
+        with server.app_context():
+            query = db.session.query(
+                FactDailyPrices.date, FactDailyPrices.open, FactDailyPrices.high,
+                FactDailyPrices.low, FactDailyPrices.close, FactDailyPrices.volume
+            ).filter(
+                FactDailyPrices.ticker == ticker,
+                FactDailyPrices.date >= start_date
+            ).order_by(FactDailyPrices.date.asc())
+
+            # Fetch results using pandas read_sql for efficiency
+            df_prices = pd.read_sql(query.statement, db.engine, index_col='date')
+
+        if not df_prices.empty:
+            # --- Check data recency ---
+            last_date_in_db = df_prices.index.max()
+            days_diff = (end_date - last_date_in_db).days
+
+            # If data is reasonably recent (e.g., within 3 days, accounting for weekends), use DB data
+            if days_diff <= 3:
+                logging.info(f"[Fallback] Found recent enough price history for {ticker} in DB (Last: {last_date_in_db.date()}).")
+                df_prices.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+                return df_prices, source
+            else:
+                logging.warning(f"[Fallback] Price history for {ticker} in DB is outdated (Last: {last_date_in_db.date()}). Will try live fetch.")
+
+        else:
+             logging.info(f"[Fallback] Price history for {ticker} not found in DB for period '{period}'. Trying live fetch...")
+
+        # --- Fallback to Live Fetch ---
+        source = 'live'
+        try:
+            # Use yfinance download
+            df_prices = yf.download([ticker], start=start_date, end=end_date, auto_adjust=True, progress=False)
+
+            if df_prices.empty:
+                logging.warning(f"[Fallback] Live fetch (yf.download) returned empty for {ticker} and period '{period}'.")
+                return pd.DataFrame(), source # Return empty DataFrame
+
+            # Rename columns if needed (yf.download might return slightly different names)
+            df_prices.rename(columns={'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume'}, inplace=True, errors='ignore')
+
+            # Ensure required columns exist
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in df_prices.columns for col in required_cols):
+                 logging.error(f"[Fallback] Live fetched data for {ticker} is missing required OHLCV columns.")
+                 return pd.DataFrame(), source
+
+
+            logging.info(f"[Fallback] Successfully fetched live price history for {ticker}.")
+            return df_prices, source
+
+        except Exception as e:
+            logging.error(f"[Fallback] Live price fetch failed for {ticker}: {e}", exc_info=True)
+            return pd.DataFrame({"error": f"Live yfinance fetch failed: {e}"}), source # Return DataFrame with error
+
+
+    except Exception as db_e:
+        logging.error(f"[Fallback] Database query failed for {ticker} prices: {db_e}", exc_info=True)
+        # Attempt live fetch even if DB query fails
+        logging.info("[Fallback] DB query failed, attempting live fetch as fallback...")
+        source = 'live_fallback_db_error'
+        try:
+            df_prices = yf.download([ticker], start=start_date, end=end_date, auto_adjust=True, progress=False)
+            if df_prices.empty:
+                logging.warning(f"[Fallback] Live fetch (after DB error) returned empty for {ticker}.")
+                return pd.DataFrame({"error": "DB query failed and live fetch returned no data."}), source
+            df_prices.rename(columns={'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume'}, inplace=True, errors='ignore')
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in df_prices.columns for col in required_cols):
+                 logging.error(f"[Fallback] Live fetched data (after DB error) for {ticker} is missing required OHLCV columns.")
+                 return pd.DataFrame({"error": "DB query failed and live fetch data is incomplete."}), source
+            logging.info(f"[Fallback] Successfully fetched live price history for {ticker} after DB error.")
+            return df_prices, source
+        except Exception as live_e:
+             logging.error(f"[Fallback] Live price fetch failed for {ticker} after DB error: {live_e}", exc_info=True)
+             return pd.DataFrame({"error": f"DB query failed ({db_e}) AND live yfinance fetch failed ({live_e})."}), source
+
+@lru_cache(maxsize=128)
+def get_quarterly_financials(ticker: str, statement_type: str) -> Tuple[pd.DataFrame, str]:
+    """
+    Fetches quarterly financial statement data (Income, Balance Sheet, Cash Flow).
+    Tries database first, falls back to live yfinance fetch.
+    Returns a tuple: (DataFrame in WIDE format, source_string)
+    """
+    logging.info(f"[Fallback] Trying to fetch '{statement_type}' statement for {ticker} from DB...")
+    source = 'database'
+    valid_statement_types = ['income', 'balance', 'cashflow']
+    if statement_type not in valid_statement_types:
+        logging.error(f"Invalid statement type requested: {statement_type}")
+        return pd.DataFrame({"error": f"Invalid statement type: {statement_type}"}), 'error'
+
+    try:
+        with server.app_context():
+            # Query the long-format data from DB
+            query = db.session.query(
+                FactFinancialStatements.report_date,
+                FactFinancialStatements.metric_name,
+                FactFinancialStatements.metric_value
+            ).filter(
+                FactFinancialStatements.ticker == ticker,
+                FactFinancialStatements.statement_type == statement_type
+            ).order_by(
+                FactFinancialStatements.report_date.desc()
+            ) # Fetch all available quarterly data
+
+            df_long = pd.read_sql(query.statement, db.engine)
+
+        if not df_long.empty:
+            logging.info(f"[Fallback] Found '{statement_type}' data for {ticker} in DB.")
+            # Pivot to wide format for display consistency
+            df_wide = df_long.pivot(index='metric_name', columns='report_date', values='metric_value')
+            # Sort columns (dates) from newest to oldest
+            df_wide = df_wide[sorted(df_wide.columns, reverse=True)]
+            # Limit to latest 16 quarters if more exist
+            df_wide = df_wide.iloc[:, :16]
+            return df_wide, source
+
+        else:
+             logging.info(f"[Fallback] '{statement_type}' data for {ticker} not found in DB. Trying live fetch...")
+
+        # --- Fallback to Live Fetch ---
+        source = 'live'
+        try:
+            tkr = yf.Ticker(ticker)
+            df_live = None
+            if statement_type == 'income':
+                df_live = tkr.quarterly_financials
+            elif statement_type == 'balance':
+                df_live = tkr.quarterly_balance_sheet
+            elif statement_type == 'cashflow':
+                df_live = tkr.quarterly_cashflow
+
+            if df_live is None or df_live.empty:
+                logging.warning(f"[Fallback] Live fetch (yfinance) returned empty for {ticker} '{statement_type}'.")
+                return pd.DataFrame(), source # Return empty DataFrame
+
+            # Limit to latest 16 quarters from live data
+            df_live = df_live.iloc[:, :16]
+
+            logging.info(f"[Fallback] Successfully fetched live '{statement_type}' data for {ticker}.")
+            return df_live, source
+
+        except Exception as e:
+            logging.error(f"[Fallback] Live financial statement fetch failed for {ticker} '{statement_type}': {e}", exc_info=True)
+            return pd.DataFrame({"error": f"Live yfinance fetch failed: {e}"}), source
+
+    except Exception as db_e:
+        logging.error(f"[Fallback] Database query failed for {ticker} '{statement_type}': {db_e}", exc_info=True)
+         # Attempt live fetch even if DB query fails
+        logging.info(f"[Fallback] DB query failed for {statement_type}, attempting live fetch...")
+        source = 'live_fallback_db_error'
+        try:
+            tkr = yf.Ticker(ticker)
+            df_live = None
+            if statement_type == 'income': df_live = tkr.quarterly_financials
+            elif statement_type == 'balance': df_live = tkr.quarterly_balance_sheet
+            elif statement_type == 'cashflow': df_live = tkr.quarterly_cashflow
+
+            if df_live is None or df_live.empty:
+                logging.warning(f"[Fallback] Live fetch (after DB error) returned empty for {ticker} '{statement_type}'.")
+                return pd.DataFrame({"error": "DB query failed and live fetch returned no data."}), source
+
+            df_live = df_live.iloc[:, :16]
+            logging.info(f"[Fallback] Successfully fetched live '{statement_type}' data for {ticker} after DB error.")
+            return df_live, source
+        except Exception as live_e:
+             logging.error(f"[Fallback] Live financial fetch failed for {ticker} '{statement_type}' after DB error: {live_e}", exc_info=True)
+             return pd.DataFrame({"error": f"DB query failed ({db_e}) AND live yfinance fetch failed ({live_e})."}), source

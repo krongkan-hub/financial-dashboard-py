@@ -1,0 +1,39 @@
+name: Daily ETL Job Runner
+
+on:
+  # ตั้งเวลาให้รัน (Cron)
+  # '0 11 * * *' คือ 11:00 UTC ซึ่งเท่ากับ 18:00 (6 โมงเย็น) เวลาไทย
+  schedule:
+    - cron: '0 11 * * *'
+  
+  # เพิ่ม "workflow_dispatch" เพื่อให้คุณสามารถกดรัน Manual เองได้จากหน้า GitHub
+  workflow_dispatch:
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 1. Check out the repository
+        uses: actions/checkout@v4
+
+      - name: 2. Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # (ใช้เวอร์ชัน Python ที่ตรงกับโปรเจกต์คุณ)
+
+      - name: 3. Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 4. Run the ETL script
+        env:
+          # สั่งให้ Action ดึงค่า Secret ที่เราจะตั้งค่าในขั้นตอนถัดไป
+          # มาใส่เป็น Environment Variables ให้สคริปต์ Python
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+          HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+        
+        # รันสคริปต์ ETL ของเรา
+        run: python run_etl_manually.py

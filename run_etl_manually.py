@@ -42,18 +42,18 @@ if __name__ == "__main__":
             elapsed_job2 = time.time() - start_time_job2
             logging.error(f"--- Manual Run FAILED: Job 2 (update_daily_prices) after {elapsed_job2:.2f} seconds: {e} ---", exc_info=True)
             
-        # --- [NEW] Run Job 3 (Financial Statements)
-        logging.info("--- Starting Manual Run: Job 3 (update_financial_statements) ---")
-        start_time_job3 = time.time()
-        try:
-            # รัน Job 3 ซึ่งจะดึงข้อมูลงบการเงินและใช้ Skip logic ที่เพิ่งเพิ่ม
-            update_financial_statements() 
-            elapsed_job3 = time.time() - start_time_job3
-            logging.info(f"--- Finished Manual Run: Job 3 (update_financial_statements) in {elapsed_job3:.2f} seconds ---")
-        except Exception as e:
-            elapsed_job3 = time.time() - start_time_job3
-            logging.error(f"--- Manual Run FAILED: Job 3 (update_financial_statements) after {elapsed_job3:.2f} seconds: {e} ---", exc_info=True)
-        # --- [END Job 3] ---
+        # # --- [NEW] Run Job 3 (Financial Statements)
+        # logging.info("--- Starting Manual Run: Job 3 (update_financial_statements) ---")
+        # start_time_job3 = time.time()
+        # try:
+        #     # รัน Job 3 ซึ่งจะดึงข้อมูลงบการเงินและใช้ Skip logic ที่เพิ่งเพิ่ม
+        #     update_financial_statements() 
+        #     elapsed_job3 = time.time() - start_time_job3
+        #     logging.info(f"--- Finished Manual Run: Job 3 (update_financial_statements) in {elapsed_job3:.2f} seconds ---")
+        # except Exception as e:
+        #     elapsed_job3 = time.time() - start_time_job3
+        #     logging.error(f"--- Manual Run FAILED: Job 3 (update_financial_statements) after {elapsed_job3:.2f} seconds: {e} ---", exc_info=True)
+        # # --- [END Job 3] ---
         
         # --- [NEW] Run Job 4 (News Sentiment)
         logging.info("--- Starting Manual Run: Job 4 (update_news_sentiment) ---")

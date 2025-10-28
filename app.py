@@ -116,7 +116,8 @@ class FactCompanySummary(db.Model):
     ticker = db.Column(db.String(20), db.ForeignKey('dim_company.ticker'), nullable=False, index=True)
     # วันที่ที่ข้อมูลนี้ถูกดึงมา (สำหรับ ETL)
     date_updated = db.Column(db.Date, nullable=False, default=datetime.utcnow().date(), index=True)
-    
+    fcf_ttm = db.Column(db.Float, nullable=True)
+    revenue_ttm = db.Column(db.Float, nullable=True)
     # --- คอลัมน์ที่ตรงกับผลลัพธ์ของ get_competitor_data (เดิม) ---
     price = db.Column(db.Float, nullable=True)
     market_cap = db.Column(db.Float, nullable=True) # yfinance ส่งมาเป็น Float (e.g., 2.5e12)
@@ -144,6 +145,8 @@ class FactCompanySummary(db.Model):
     analyst_target_price = db.Column(db.Float, nullable=True)
     long_business_summary = db.Column(db.Text, nullable=True) # db.Text สำหรับข้อความยาว
     # (สามารถเพิ่มคอลัมน์อื่นๆ ที่ดึงจาก tkr.info ได้ที่นี่)
+
+    peer_cluster_id = db.Column(db.Integer, nullable=True, index=True)
 
     # สร้าง Unique Constraint เพื่อป้องกันข้อมูลซ้ำซ้อน
     # (ไม่อนุญาตให้มี Ticker เดียวกันในวันเดียวกัน 2 แถว)

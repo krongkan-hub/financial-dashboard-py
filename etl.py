@@ -10,7 +10,7 @@ from sqlalchemy import func # Import SQL functions for MAX()
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
-from data_handler import get_competitor_data, get_deep_dive_data, get_news_and_sentiment
+from data_handler import get_competitor_data, get_news_and_sentiment
 from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME # <<< [เพิ่ม] Import ALL_TICKERS_SORTED_BY_MC
 
 # Import สำหรับ UPSERT
@@ -486,16 +486,37 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
 
 
     def process_single_ticker_financials(ticker):
-        try:
-            # Note: The actual data fetching happens here
-            data = get_deep_dive_data(ticker)
-            if 'error' in data or 'financial_statements' not in data:
-                logging.warning(f"[{job_name}] No financial statement data found via get_deep_dive_data for {ticker}.")
-                return
+        """
+        ประมวลผลข้อมูลงบการเงินรายไตรมาสสำหรับ Ticker เดียว
+        และทำการ UPSERT ลง FactFinancialStatements
+        """
+        job_name = "Job 3: Update Financials (Top 500)" # หรือชื่อ Job ที่คุณตั้งไว้
+        if sql_insert is None:
+            logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
+            return # หรือ raise Exception ก็ได้
 
-            statements = data.get("financial_statements", {})
+        try:
+            # --- [ส่วนที่แก้ไข] ---
+            # ดึงข้อมูลงบการเงินโดยตรงด้วย yfinance
+            logging.info(f"[{job_name}] Fetching financial statements directly for {ticker} using yfinance...")
+            tkr = yf.Ticker(ticker)
+            statements = {
+                'income': tkr.quarterly_financials,
+                'balance': tkr.quarterly_balance_sheet,
+                'cashflow': tkr.quarterly_cashflow
+            }
+            # ตรวจสอบว่าดึงข้อมูลมาได้จริงหรือไม่
+            if not any(df is not None and not df.empty for df in statements.values()):
+                logging.warning(f"[{job_name}] No financial statement data found via yfinance for {ticker}.")
+                # --- [เพิ่ม] หน่วงเวลาก่อน return เพื่อป้องกัน rate limit ---
+                time.sleep(0.8)
+                # --- [จบการเพิ่ม] ---
+                return # ออกจากฟังก์ชันถ้าไม่มีข้อมูล
+            # --- [จบส่วนที่แก้ไข] ---
+
             all_statements_data = []
 
+            # --- โค้ดส่วนที่เหลือของฟังก์ชัน (Melt DataFrame, UPSERT to DB) ---
             for statement_type in ['income', 'balance', 'cashflow']:
                 df = statements.get(statement_type)
                 if df is None or df.empty:
@@ -504,27 +525,38 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
                 if df.index.name is None:
                     df.index.name = 'metric_name'
 
+                # --- แก้ไขการจัดการคอลัมน์วันที่ให้ปลอดภัยขึ้น ---
                 try:
-                    date_columns = [col for col in df.columns if isinstance(col, (datetime, pd.Timestamp)) or pd.api.types.is_datetime64_any_dtype(col)]
-                    non_date_columns = [col for col in df.columns if col not in date_columns]
+                    # แปลงชื่อคอลัมน์ที่เป็น Timestamp หรือ datetime object ให้เป็น datetime object
+                    date_columns = pd.to_datetime(df.columns, errors='coerce').dropna()
+                    # เก็บชื่อคอลัมน์ที่ไม่ใช่วันที่ไว้
+                    non_date_column_names = [col for col in df.columns if col not in date_columns]
+                    # ตั้งชื่อคอลัมน์ใหม่ (ใช้วันที่เป็น object)
+                    df.columns = non_date_column_names + date_columns.tolist()
 
-                    new_date_cols = pd.to_datetime(date_columns, errors='coerce').dropna()
-
-                    df.columns = non_date_columns + new_date_cols.tolist()
                 except Exception as date_err:
-                     logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_type}: {date_err}. Skipping this statement.")
-                     continue
+                    logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_type}: {date_err}. Skipping this statement.")
+                    continue
+                # --- จบการแก้ไข ---
 
-                df_to_melt = df.select_dtypes(include=[np.number, 'datetime', 'object']).reset_index()
+                # ใช้คอลัมน์ที่เป็น datetime object ในการ Melt
+                df_to_melt = df.reset_index() # metric_name กลายเป็นคอลัมน์
 
-                df_long = df_to_melt.melt(id_vars='metric_name', var_name='report_date', value_name='metric_value')
+                df_long = df_to_melt.melt(
+                    id_vars='metric_name',
+                    var_name='report_date', # คอลัมน์วันที่ยังเป็น datetime object
+                    value_name='metric_value'
+                )
 
                 df_long['ticker'] = ticker
                 df_long['statement_type'] = statement_type
+                # แปลง report_date เป็น date object (สำหรับ DB)
                 df_long['report_date'] = pd.to_datetime(df_long['report_date']).dt.date
                 df_long.dropna(subset=['metric_value'], inplace=True)
 
+                # แปลง metric_value เป็น float และจัดการ error
                 df_long['metric_value'] = pd.to_numeric(df_long['metric_value'], errors='coerce').astype(float)
+                df_long.dropna(subset=['metric_value'], inplace=True) # เอาแถวที่แปลงเป็นตัวเลขไม่ได้ออก
 
                 df_long['metric_name'] = df_long['metric_name'].astype(str).str.strip()
 
@@ -534,13 +566,13 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
             if all_statements_data:
                 with server.app_context():
                     chunk_size = 1000
-                    constraint_name = '_ticker_date_statement_metric_uc'
+                    constraint_name = '_ticker_date_statement_metric_uc' # ชื่อ Unique Constraint ใน DB
 
                     for i in range(0, len(all_statements_data), chunk_size):
                         chunk = all_statements_data[i:i + chunk_size]
 
                         stmt = sql_insert(FactFinancialStatements).values(chunk)
-                        set_ = {'metric_value': stmt.excluded.metric_value}
+                        set_ = {'metric_value': stmt.excluded.metric_value} # อัปเดตเฉพาะ metric_value ถ้าข้อมูลซ้ำ
 
                         try:
                             if db_dialect == 'postgresql':
@@ -551,23 +583,31 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
                                 raise Exception("Unsupported DB dialect for UPSERT.")
 
                             db.session.execute(on_conflict_stmt)
+                            # Commit ทีละ chunk เพื่อลด Transaction ขนาดใหญ่
                             db.session.commit()
                         except Exception as chunk_e:
                             logging.error(f"[{job_name}] Error inserting financial chunk for {ticker}: {chunk_e}")
-                            db.session.rollback()
+                            db.session.rollback() # Rollback เฉพาะ chunk ที่ผิดพลาด
+                            # อาจจะ break หรือ continue ตามต้องการ
+                            continue # ลองไปทำ chunk ถัดไป
 
-                    db.session.commit()
-
-            # --- [ADD] Delay after successful API call
+            # --- [ย้าย] time.sleep มาไว้ตรงนี้ เพื่อให้แน่ใจว่ามีการหน่วงเวลา *หลังจาก* ดึงข้อมูลสำเร็จ ---
             time.sleep(0.8)
+            # --- [จบการย้าย] ---
 
-            return True
+            return True # คืนค่า True ถ้าสำเร็จ
 
         except Exception as inner_e:
             logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
-            with server.app_context():
-                db.session.rollback()
-            raise inner_e
+            # ไม่ต้อง rollback ที่นี่ เพราะทำใน loop chunk แล้ว หรือถ้า error ก่อนเข้า loop ก็ไม่มีอะไรให้ rollback
+            # แต่อาจจะ rollback ถ้า error เกิดนอก loop chunk
+            try:
+                with server.app_context():
+                    db.session.rollback()
+            except Exception as rb_err:
+                logging.error(f"[{job_name}] Error during rollback for {ticker}: {rb_err}")
+
+            raise inner_e # ส่ง error ต่อเพื่อให้ process_tickers_with_retry ทำงาน (retry logic)
 
     # Use the helper function with the filtered list
     process_tickers_with_retry(job_name, tickers_to_fetch, process_single_ticker_financials, initial_delay=0.8, max_retries=2)

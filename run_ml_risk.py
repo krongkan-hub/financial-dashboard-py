@@ -71,7 +71,7 @@ def fetch_data(start_year=2015):
     # Metrics needed from FactFinancialStatements
     required_metrics = [
         # For Target Variable
-        'Total Equity', 'EBIT', 'Interest Expense', 'Net Income',
+        'total equity', 'EBIT', 'Interest Expense', 'Net Income',
         # For Features
         'Total Revenue', 'Operating Cash Flow', 'Total Current Assets',
         'Total Current Liabilities', 'Inventory', 'Total Assets'
@@ -108,28 +108,55 @@ def fetch_data(start_year=2015):
 
             # Query FactCompanySummary for D/E Ratio (use latest available per quarter end)
             # Find the closest summary date *before or on* the report_date
-            FCS = aliased(FactCompanySummary)
+            FCS = aliased(FactCompanySummary) #********************************
+            # --- MODIFICATION START ---
+            quarter_group = (func.strftime('%Y', FCS.date_updated) + '-' +
+                             ((func.strftime('%m', FCS.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
+                            ).label('year_quarter') # Label for clarity
+
             subquery = db.session.query(
                 FCS.ticker,
-                func.date_trunc('quarter', FCS.date_updated).label('quarter_start'),
+                quarter_group, # Group by the calculated year-quarter string
                 func.max(FCS.date_updated).label('max_summary_date')
-            ).group_by(FCS.ticker, func.date_trunc('quarter', FCS.date_updated)).subquery()
+            ).group_by(FCS.ticker, quarter_group).subquery() # Group by ticker and year_quarter
 
             stmt_fcs = db.session.query(
                 FactCompanySummary.ticker,
                 FactCompanySummary.date_updated.label('summary_date'),
-                func.date_trunc('quarter', FactCompanySummary.date_updated).label('quarter_start'),
+                 # Re-calculate year_quarter here for joining if needed, or just select needed cols
+                (func.strftime('%Y', FactCompanySummary.date_updated) + '-' +
+                 ((func.strftime('%m', FactCompanySummary.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
+                ).label('year_quarter'), # Re-calculate for the main query SELECT if required by join logic (often not needed if joining on max_date)
                 FactCompanySummary.de_ratio
             ).join(
                 subquery,
                 and_(
                     FactCompanySummary.ticker == subquery.c.ticker,
-                    FactCompanySummary.date_updated == subquery.c.max_summary_date
+                    FactCompanySummary.date_updated == subquery.c.max_summary_date # Join condition remains the same
                 )
             ).filter(FactCompanySummary.date_updated >= start_date).statement # Filter by start date
+            # --- MODIFICATION END ---
 
-            df_fcs = pd.read_sql(stmt_fcs, db.engine)
-            df_fcs['report_date_approx'] = pd.to_datetime(df_fcs['quarter_start']) + pd.offsets.QuarterEnd(0)
+            df_fcs = pd.read_sql(stmt_fcs, db.engine) #*************************
+            # --- MODIFICATION START ---
+            # Calculate report_date_approx from the 'year_quarter' column
+            df_fcs[['Year', 'Quarter']] = df_fcs['year_quarter'].str.split('-', expand=True)
+            df_fcs['Year'] = df_fcs['Year'].astype(int)
+            df_fcs['Quarter'] = df_fcs['Quarter'].astype(float).astype(int)
+            # Calculate the first month of the quarter: Q1->1, Q2->4, Q3->7, Q4->10
+            df_fcs['Quarter_Start_Month'] = (df_fcs['Quarter'] - 1) * 3 + 1
+            # Create a date for the first day of the quarter's starting month
+            # Use errors='coerce' to handle potential invalid date combinations if any
+            df_fcs['Quarter_Start_Date'] = pd.to_datetime(
+                df_fcs['Year'].astype(str) + '-' + df_fcs['Quarter_Start_Month'].astype(str) + '-01',
+                errors='coerce'
+            )
+            # Calculate the Quarter End date
+            df_fcs['report_date_approx'] = df_fcs['Quarter_Start_Date'] + pd.offsets.QuarterEnd(0)
+
+            # Drop intermediate columns if no longer needed
+            df_fcs = df_fcs.drop(columns=['Year', 'Quarter', 'Quarter_Start_Month', 'Quarter_Start_Date', 'year_quarter'])
+            # --- MODIFICATION END ---
             df_fcs = df_fcs.sort_values(by=['ticker', 'report_date_approx'])
 
             logging.info(f"Fetched {len(df_ffs_wide)} wide financial statement records.")

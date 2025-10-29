@@ -1,4 +1,4 @@
-# etl.py (FINAL VERSION - Fixed UnboundLocalError, implemented Smart Weekend Buffer, Limited Job 2 & 3 to Top 500)
+# etl.py (FINAL VERSION - Fixed UnboundLocalError, implemented Smart Weekend Buffer, Limited Job 2 & 3 to Top 500, Skip Logo Update)
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -10,7 +10,8 @@ from sqlalchemy import func # Import SQL functions for MAX()
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
-from data_handler import get_competitor_data, get_news_and_sentiment
+# --- [แก้ไข] ลบ get_competitor_data ออกจาก import นี้ เพราะจะใช้จาก data_handler โดยตรง ---
+from data_handler import get_news_and_sentiment, get_competitor_data 
 from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME # <<< [เพิ่ม] Import ALL_TICKERS_SORTED_BY_MC
 
 # Import สำหรับ UPSERT
@@ -112,39 +113,31 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     return skipped_items
 
 
-# --- Job 1: Update Company Summaries (MODIFIED: Added Skip logic and moved sleep) ---
+# --- Job 1: Update Company Summaries (MODIFIED: Skip logo update logic) ---
 def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
         return
 
     job_name = "Job 1: Update Summaries"
-    # --- [MODIFICATION] Use override list or default list (ยังคงใช้ ALL_TICKERS_SORTED_BY_MC ถ้าไม่มี override) ---
     tickers_to_process = tickers_list_override if tickers_list_override is not None else ALL_TICKERS_SORTED_BY_MC
-    # --- [END MODIFICATION] ---
     today = datetime.utcnow().date()
 
-    # 1. Query Max Date for all relevant tickers from FactCompanySummary
     with server.app_context():
         max_date_results = db.session.query(
             FactCompanySummary.ticker,
             func.max(FactCompanySummary.date_updated)
         ).filter(
-            FactCompanySummary.ticker.in_(tickers_to_process) # Filter เฉพาะ tickers ที่จะ process
+            FactCompanySummary.ticker.in_(tickers_to_process)
         ).group_by(FactCompanySummary.ticker).all()
         max_dates = {ticker: max_date for ticker, max_date in max_date_results}
 
-
-    # 2. Prepare list of tickers to actually process (applying skip logic)
     tickers_to_fetch = []
     for ticker in tickers_to_process:
         latest_date_in_db = max_dates.get(ticker)
-
-        # Skip if already updated today (useful for manual runs on the same day)
         if latest_date_in_db == today:
              logging.info(f"[{job_name}] Skipping {ticker}: Already updated today ({latest_date_in_db}).")
              continue
-
         tickers_to_fetch.append(ticker)
 
     if not tickers_to_fetch:
@@ -153,14 +146,16 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
 
     logging.info(f"ETL Job: Fetching summaries for {len(tickers_to_fetch)}/{len(tickers_to_process)} tickers.")
 
-
     def process_single_ticker_summary(ticker):
         try:
-            # Note: We must call the API here to get the data, but the DB write is the critical part
+            # ใช้ get_competitor_data ที่ import มา
             df_single = get_competitor_data((ticker,))
 
             if df_single.empty:
                 logging.warning(f"[{job_name}] get_competitor_data returned empty for {ticker}. Skipping DB insert.")
+                # --- [แก้ไข] เพิ่มการหน่วงเวลาแม้จะ skip ---
+                time.sleep(0.3) # หน่วงเล็กน้อยก่อนไปตัวถัดไป
+                # --- [จบการแก้ไข] ---
                 return
 
             row = df_single.iloc[0]
@@ -168,10 +163,9 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
             dim_data = {
                 'ticker': row['Ticker'],
                 'company_name': row.get('company_name'),
-                'logo_url': row.get('logo_url'),
+                'logo_url': row.get('logo_url'), # <<< ดึงโลโก้มาตามปกติก่อน
                 'sector': row.get('sector')
             }
-            # fact_data ยังมี NumPy types อยู่
             fact_data = {
                 'ticker': row['Ticker'], 'date_updated': today,
                 'price': row.get('Price'), 'market_cap': row.get('Market Cap'), 'beta': row.get('Beta'),
@@ -185,28 +179,59 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                 'forward_pe': row.get('Forward P/E'),
                 'analyst_target_price': row.get('Analyst Target Price'),
                 'long_business_summary': row.get('Long Business Summary'),
-                # --- [เพิ่ม] ดึง fcf_ttm และ revenue_ttm ถ้ามี ---
-                'fcf_ttm': row.get('freeCashflow'), # ตรวจสอบ key จาก yfinance.info()
-                'revenue_ttm': row.get('totalRevenue') # ตรวจสอบ key จาก yfinance.info()
-                # --- [จบการเพิ่ม] ---
+                'fcf_ttm': row.get('freeCashflow'),
+                'revenue_ttm': row.get('totalRevenue')
             }
 
             with server.app_context():
-                # --- APPLY THE FIX HERE: Clean NumPy types ---
+                # --- [START] เพิ่มโค้ดเช็คโลโก้ที่มีอยู่ ---
+                try:
+                    existing_company_logo = db.session.query(DimCompany.logo_url).filter_by(ticker=row['Ticker']).scalar()
+                    # ถ้าเจอ logo_url ใน DB (ไม่ใช่ None และไม่เป็นสตริงว่าง) และเรามี logo_url ใหม่ใน dim_data
+                    if existing_company_logo and 'logo_url' in dim_data and dim_data['logo_url']:
+                        logging.info(f"[{job_name}] Skipping logo_url update for {row['Ticker']}: Already exists in DB ('{existing_company_logo[:30]}...').")
+                        del dim_data['logo_url'] # <<< ลบ key 'logo_url' ออกจาก dict ที่จะ insert/update
+                    elif 'logo_url' not in dim_data or not dim_data.get('logo_url'):
+                         # ถ้า get_competitor_data ไม่ได้โลโก้มา หรือเป็น None/สตริงว่าง ก็ลบออก เพื่อไม่ให้เขียนทับค่าเก่าด้วย None
+                         if 'logo_url' in dim_data:
+                            # logging.debug(f"[{job_name}] Removing empty/None fetched logo_url for {row['Ticker']}.")
+                            del dim_data['logo_url']
+                except Exception as query_err:
+                     logging.warning(f"[{job_name}] Could not query existing logo for {row['Ticker']}: {query_err}. Will proceed with fetched data.")
+                # --- [END] เพิ่มโค้ดเช็คโลโก้ ---
+
                 fact_data_clean = _clean_numpy_types(fact_data)
 
-                # UPSERT DimCompany
-                stmt_dim = sql_insert(DimCompany).values(dim_data)
-                dim_set_ = { 'company_name': stmt_dim.excluded.company_name, 'logo_url': stmt_dim.excluded.logo_url, 'sector': stmt_dim.excluded.sector }
-                if db_dialect == 'postgresql':
-                    on_conflict_dim = stmt_dim.on_conflict_do_update(constraint='dim_company_pkey', set_=dim_set_)
-                elif db_dialect == 'sqlite':
-                    on_conflict_dim = stmt_dim.on_conflict_do_update(index_elements=['ticker'], set_=dim_set_)
-                db.session.execute(on_conflict_dim)
+                # --- UPSERT DimCompany (ส่วนนี้ต้องปรับเล็กน้อย) ---
+                if dim_data:
+                    stmt_dim = sql_insert(DimCompany).values(dim_data)
 
-                # UPSERT FactCompanySummary (ใช้ fact_data_clean)
+                    # --- [ปรับปรุง] สร้าง set_ dynamically ---
+                    dim_columns_to_update = ['company_name', 'logo_url', 'sector']
+                    dim_set_ = {
+                        col: getattr(stmt_dim.excluded, col)
+                        for col in dim_columns_to_update if col in dim_data
+                    }
+                    # --- [จบการปรับปรุง] ---
+
+                    if dim_set_: # ถ้ามี field ที่จะ update (เช่น company_name, sector หรือ logo_url ครั้งแรก)
+                        if db_dialect == 'postgresql':
+                            on_conflict_dim = stmt_dim.on_conflict_do_update(constraint='dim_company_pkey', set_=dim_set_)
+                        elif db_dialect == 'sqlite':
+                            on_conflict_dim = stmt_dim.on_conflict_do_update(index_elements=['ticker'], set_=dim_set_)
+                        db.session.execute(on_conflict_dim)
+                    else: # ถ้าไม่มีอะไรให้อัปเดตเลย (มีแค่ ticker)
+                        # ใช้ on conflict do nothing เพื่อ insert ถ้ายังไม่มี หรือ ไม่ทำอะไรเลยถ้ามีอยู่แล้ว
+                        if db_dialect == 'postgresql':
+                             on_conflict_dim_nothing = stmt_dim.on_conflict_do_nothing(constraint='dim_company_pkey')
+                        elif db_dialect == 'sqlite':
+                             on_conflict_dim_nothing = stmt_dim.on_conflict_do_nothing(index_elements=['ticker'])
+                        # Execute a plain INSERT or DO NOTHING, not DO UPDATE with empty set_
+                        db.session.execute(on_conflict_dim_nothing)
+
+                # UPSERT FactCompanySummary (ส่วนนี้เหมือนเดิม)
                 stmt_fact = sql_insert(FactCompanySummary).values(fact_data_clean)
-                all_cols = {c.name for c in FactCompanySummary.__table__.columns if c.name not in ['id', 'ticker', 'date_updated']}
+                all_cols = {c.name for c in FactCompanySummary.__table__.columns if c.name not in ['id', 'ticker', 'date_updated', 'peer_cluster_id']} # ไม่ update cluster id ที่นี่
                 fact_set_ = {col: getattr(stmt_fact.excluded, col) for col in all_cols}
                 if db_dialect == 'postgresql':
                     on_conflict_fact = stmt_fact.on_conflict_do_update(constraint='_ticker_date_uc', set_=fact_set_)
@@ -216,26 +241,20 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
 
                 db.session.commit()
 
-                # --- [FIX: เพิ่ม time.sleep ที่นี่ เพื่อหน่วงเวลาเฉพาะเมื่อมีการดึงข้อมูลจริงเท่านั้น] ---
-                time.sleep(0.3)
-                # --- [END FIX] ---
+                time.sleep(0.3) # หน่วงเวลาหลัง API call สำเร็จ
 
         except Exception as inner_e:
             logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
             with server.app_context():
                  db.session.rollback()
-            raise inner_e
+            raise inner_e # Re-raise เพื่อให้ retry logic ทำงาน
 
-    # Use the helper function with the filtered list
     process_tickers_with_retry(job_name, tickers_to_fetch, process_single_ticker_summary, initial_delay=0.7, max_retries=3)
 
 
+# --- Job 2: Update Daily Prices (เหมือนเดิม) ---
 # --- [NEW HELPER FUNCTION FOR OOM FIX] ---
 def process_single_ticker_prices(data_tuple):
-    """
-    [OOM FIX] Fetches price history for a single ticker and UPSERTs it to FactDailyPrices.
-    Requires data_tuple = (ticker, start_date, end_date).
-    """
     ticker, start_date, end_date = data_tuple
     if sql_insert is None:
         raise Exception("SQL insert dialect not supported.")
@@ -243,37 +262,22 @@ def process_single_ticker_prices(data_tuple):
     job_name = "Job 2: Update Daily Prices"
 
     try:
-        # 1. Download Price History for ONE Ticker
-        # --- [จุดที่แก้ไข: ห่อ ticker ด้วย list [] เพื่อแก้ Error ใน Job 2] ---
         prices_df = yf.download([ticker], start=start_date, end=end_date, auto_adjust=True, progress=False)
-        # --- [จบการแก้ไข] ---
 
         if prices_df.empty:
             logging.warning(f"[{job_name}] yf.download returned empty for {ticker} (Start: {start_date}). Skipping DB insert.")
             return
 
-        # 2. Data Processing (เนื่องจากส่ง list [ticker] เข้าไป ผลลัพธ์จะเป็น MultiIndex)
         if isinstance(prices_df.columns, pd.MultiIndex):
-            # Flatten columns: ('Close', 'NFLX') -> 'NFLX'
             prices_df.columns = prices_df.columns.get_level_values(0)
             prices_df = prices_df.rename_axis(['Date']).reset_index()
-            prices_df.rename(columns={
-                'Date': 'date', 'Open': 'open', 'High': 'high',
-                'Low': 'low', 'Close': 'close', 'Volume': 'volume'
-            }, inplace=True)
+            prices_df.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
         else:
              prices_df = prices_df.rename_axis(['Date']).reset_index()
-             prices_df.rename(columns={
-                'Date': 'date', 'Open': 'open', 'High': 'high',
-                'Low': 'low', 'Close': 'close', 'Volume': 'volume'
-             }, inplace=True)
+             prices_df.rename(columns={'Date': 'date', 'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
 
-
-        # 3. Cleanup and Format
-        prices_df['ticker'] = ticker # Add ticker column
+        prices_df['ticker'] = ticker
         prices_df['date'] = pd.to_datetime(prices_df['date']).dt.date
-
-        # Convert to native Python types for UPSERT
         prices_df['volume'] = pd.to_numeric(prices_df['volume'], errors='coerce').fillna(0).apply(lambda x: int(x) if pd.notna(x) else None)
         prices_df['open'] = pd.to_numeric(prices_df['open'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)
         prices_df['high'] = pd.to_numeric(prices_df['high'], errors='coerce').apply(lambda x: float(x) if pd.notna(x) else None)
@@ -287,7 +291,6 @@ def process_single_ticker_prices(data_tuple):
         data_to_upsert = prices_df.to_dict(orient='records')
         num_rows = len(data_to_upsert)
 
-        # 4. --- UPSERT ข้อมูลลง DB (Chunking Logic) ---
         if data_to_upsert:
             with server.app_context():
                 chunk_size = 1000
@@ -296,114 +299,67 @@ def process_single_ticker_prices(data_tuple):
                 for i in range(0, num_rows, chunk_size):
                     chunk = data_to_upsert[i:i + chunk_size]
                     stmt_chunk = sql_insert(FactDailyPrices).values(chunk)
-
-                    price_set_chunk_ = {
-                        'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high,
-                        'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close,
-                        'volume': stmt_chunk.excluded.volume
-                    }
-
+                    price_set_chunk_ = {'open': stmt_chunk.excluded.open, 'high': stmt_chunk.excluded.high, 'low': stmt_chunk.excluded.low, 'close': stmt_chunk.excluded.close, 'volume': stmt_chunk.excluded.volume}
                     if db_dialect == 'postgresql':
                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(constraint=constraint_name, set_=price_set_chunk_)
                     elif db_dialect == 'sqlite':
                         on_conflict_chunk = stmt_chunk.on_conflict_do_update(index_elements=['ticker', 'date'], set_=price_set_chunk_)
-                    else:
-                        raise Exception("Unsupported DB dialect for UPSERT.")
-
+                    else: raise Exception("Unsupported DB dialect for UPSERT.")
                     db.session.execute(on_conflict_chunk)
                     db.session.commit()
-
-            # --- [FIX: เพิ่ม time.sleep ที่นี่ เพื่อหน่วงเวลาเฉพาะเมื่อมีการดึงข้อมูลจริงเท่านั้น] ---
             time.sleep(0.3)
-            # --- [END FIX] ---
 
     except Exception as e:
-        # Rollback and re-raise to trigger the retry logic
-        with server.app_context():
-             db.session.rollback()
+        with server.app_context(): db.session.rollback()
         raise e
 # --- [END NEW HELPER FUNCTION FOR OOM FIX] ---
 
-
 # --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 500 LIMIT) ---
 def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[str]] = None):
-    """
-    ETL Job 2: ดึงข้อมูลราคาย้อนหลังและ UPSERT ลง FactDailyPrices (ใช้ Batch Processing ต่อ Ticker)
-    *** MODIFIED: Implements Smart Weekend Buffer (3 days on Monday, 1 day otherwise). ***
-    *** MODIFIED: Limits to Top 500 tickers if override list is not provided. ***
-    """
-    job_name = "Job 2: Update Daily Prices (Top 500)" # <<< Updated job name
+    job_name = "Job 2: Update Daily Prices (Top 500)"
     if sql_insert is None:
         logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
         return
 
-    # Define today's date once at the start of the function
-    today = datetime.utcnow().date() # <--- FIXED POSITION
+    today = datetime.utcnow().date()
 
     with server.app_context():
         logging.info(f"Starting ETL Job: [{job_name}] for {days_back} days back, implementing GAP FILLING...")
-
-        # --- [START OF TOP 500 MODIFICATION] ---
-        # 1. Use Override List or Default to Top 500
         if tickers_list_override is not None and len(tickers_list_override) > 0:
             tickers_list = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_list)} tickers.")
         else:
-            # Default to Top 500 + Index Tickers
             top_500_tickers = ALL_TICKERS_SORTED_BY_MC[:500]
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
-            tickers_list = list(set(top_500_tickers + index_tickers)) # Use set to avoid duplicates
+            tickers_list = list(set(top_500_tickers + index_tickers))
             logging.info(f"ETL Job: [{job_name}] Defaulting to Top 500 Market Cap + Index tickers ({len(tickers_list)} total unique).")
-        # --- [END OF TOP 500 MODIFICATION] ---
 
         if not tickers_list:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping price update.")
             return
 
-        # 2. Query Max Date for all relevant tickers from FactDailyPrices
-        max_date_results = db.session.query(
-            FactDailyPrices.ticker,
-            func.max(FactDailyPrices.date)
-        ).filter(
-            FactDailyPrices.ticker.in_(tickers_list)
-        ).group_by(FactDailyPrices.ticker).all()
-
-        # Convert results to a dictionary for easy lookup: {ticker: max_date}
+        max_date_results = db.session.query(FactDailyPrices.ticker, func.max(FactDailyPrices.date)).filter(FactDailyPrices.ticker.in_(tickers_list)).group_by(FactDailyPrices.ticker).all()
         max_dates = {ticker: max_date for ticker, max_date in max_date_results}
 
-        # 3. Determine the required buffer based on the day of the week
-        # Monday is 0, Sunday is 6
         is_monday = today.weekday() == 0
         required_days_back = 3 if is_monday else 1
-
-        # 4. Prepare arguments for process_single_ticker_prices with gap filling logic
         ticker_tuples_to_process = []
-        # Use 'today' for calculating full history start date
         full_history_start_date = today - timedelta(days=days_back)
 
         for ticker in tickers_list:
             latest_date_in_db = max_dates.get(ticker)
-
             if latest_date_in_db:
-                # Check if data is very recent (allowing for weekends/holidays)
                 if (today - latest_date_in_db).days <= required_days_back:
                      logging.info(f"[{job_name}] Skipping {ticker}: Data is very recent (Latest: {latest_date_in_db}, Buffer: {required_days_back} days).")
                      continue
-
-                # Otherwise, fetch from the day after the latest date
                 new_start_date = latest_date_in_db + timedelta(days=1)
             else:
-                # New ticker: Fetch full history (5 years)
                 new_start_date = full_history_start_date
 
-            # Safety check: if start date is today or later, skip anyway
             if new_start_date >= today:
                 logging.info(f"[{job_name}] Skipping {ticker}: Already up-to-date or start date is in the future (Start: {new_start_date}).")
                 continue
-
-            # yfinance.download(end=date) is exclusive, so using today's date will fetch up to yesterday.
             fetch_end_date = today
-
             ticker_tuples_to_process.append((ticker, new_start_date, fetch_end_date))
 
         if not ticker_tuples_to_process:
@@ -411,71 +367,41 @@ def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[st
              return
 
         logging.info(f"ETL Job: [{job_name}] Processing {len(ticker_tuples_to_process)}/{len(tickers_list)} tickers. Fetching missing data.")
-
-        # 5. Use the helper function to process tickers sequentially with retry
-        process_tickers_with_retry(
-            job_name,
-            ticker_tuples_to_process,
-            process_single_ticker_prices,
-            initial_delay=0.3,
-            retry_delay=60,
-            max_retries=3
-        )
-
+        process_tickers_with_retry(job_name, ticker_tuples_to_process, process_single_ticker_prices, initial_delay=0.3, retry_delay=60, max_retries=3)
         logging.info(f"ETL Job: [{job_name}]... COMPLETED.")
 # --- [END MODIFIED] ---
 
 
-# --- Job 3: update_financial_statements (MODIFIED for daily skip logic, consistent signature, AND TOP 500 LIMIT) ---
+# --- Job 3: update_financial_statements (เหมือนเดิม) ---
 def update_financial_statements(tickers_list_override: Optional[List[str]] = None):
-    """
-    ETL Job 3: ดึงข้อมูลงบการเงินรายไตรมาส (จาก get_deep_dive_data)
-    และแปลงเป็น Long Format เก็บลง FactFinancialStatements พร้อม Daily Skip Logic
-    *** MODIFIED: Limits to Top 500 tickers if override list is not provided. ***
-    """
     if sql_insert is None:
         logging.error("ETL Job: [update_financial_statements] cannot run because insert statement is not available.")
         return
 
-    job_name = "Job 3: Update Financials (Top 500)" # <<< Updated job name
-    today = datetime.utcnow().date() # <<< ADDED for consistency
+    job_name = "Job 3: Update Financials (Top 500)"
+    today = datetime.utcnow().date()
 
-    # --- [START OF TOP 500 MODIFICATION] ---
-    # 1. Use Override List or Default to Top 500
     with server.app_context():
         if tickers_list_override is not None and len(tickers_list_override) > 0:
             tickers_to_process = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
         else:
-            # Default to Top 500
             tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:500]
             logging.info(f"ETL Job: [{job_name}] Defaulting to Top 500 Market Cap tickers ({len(tickers_to_process)} total).")
-    # --- [END OF TOP 500 MODIFICATION] ---
 
         if not tickers_to_process:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping job.")
             return
 
-        # 2. Query Max Update Date (using FactCompanySummary as a proxy for daily ETL run)
-        # We use FactCompanySummary.date_updated as a marker that all daily jobs were run for this ticker.
-        max_date_results = db.session.query(
-            FactCompanySummary.ticker,
-            func.max(FactCompanySummary.date_updated)
-        ).filter(
-            FactCompanySummary.ticker.in_(tickers_to_process) # Filter only relevant tickers
-        ).group_by(FactCompanySummary.ticker).all()
+        max_date_results = db.session.query(FactCompanySummary.ticker, func.max(FactCompanySummary.date_updated)).filter(FactCompanySummary.ticker.in_(tickers_to_process)).group_by(FactCompanySummary.ticker).all()
         max_dates = {ticker: max_date for ticker, max_date in max_date_results}
 
-    # 3. Prepare list of tickers to actually process (applying skip logic)
     tickers_to_fetch = []
     for ticker in tickers_to_process:
         latest_summary_date = max_dates.get(ticker)
-
-        # We assume if the latest summary was updated today, Job 3 ran effectively today.
         if latest_summary_date == today:
              logging.info(f"[{job_name}] Skipping {ticker}: FactCompanySummary was updated today ({latest_summary_date}). Assuming Job 3 ran recently.")
              continue
-
         tickers_to_fetch.append(ticker)
 
     if not tickers_to_fetch:
@@ -484,169 +410,96 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
 
     logging.info(f"ETL Job: [{job_name}] Fetching financial statements for {len(tickers_to_fetch)}/{len(tickers_to_process)} tickers.")
 
-
     def process_single_ticker_financials(ticker):
-        """
-        ประมวลผลข้อมูลงบการเงินรายไตรมาสสำหรับ Ticker เดียว
-        และทำการ UPSERT ลง FactFinancialStatements
-        """
-        job_name = "Job 3: Update Financials (Top 500)" # หรือชื่อ Job ที่คุณตั้งไว้
+        job_name = "Job 3: Update Financials (Top 500)"
         if sql_insert is None:
             logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
-            return # หรือ raise Exception ก็ได้
+            return
 
         try:
-            # --- [ส่วนที่แก้ไข] ---
-            # ดึงข้อมูลงบการเงินโดยตรงด้วย yfinance
             logging.info(f"[{job_name}] Fetching financial statements directly for {ticker} using yfinance...")
             tkr = yf.Ticker(ticker)
-            statements = {
-                'income': tkr.quarterly_financials,
-                'balance': tkr.quarterly_balance_sheet,
-                'cashflow': tkr.quarterly_cashflow
-            }
-            # ตรวจสอบว่าดึงข้อมูลมาได้จริงหรือไม่
+            statements = {'income': tkr.quarterly_financials, 'balance': tkr.quarterly_balance_sheet, 'cashflow': tkr.quarterly_cashflow}
             if not any(df is not None and not df.empty for df in statements.values()):
                 logging.warning(f"[{job_name}] No financial statement data found via yfinance for {ticker}.")
-                # --- [เพิ่ม] หน่วงเวลาก่อน return เพื่อป้องกัน rate limit ---
                 time.sleep(0.8)
-                # --- [จบการเพิ่ม] ---
-                return # ออกจากฟังก์ชันถ้าไม่มีข้อมูล
-            # --- [จบส่วนที่แก้ไข] ---
+                return
 
             all_statements_data = []
-
-            # --- โค้ดส่วนที่เหลือของฟังก์ชัน (Melt DataFrame, UPSERT to DB) ---
             for statement_type in ['income', 'balance', 'cashflow']:
                 df = statements.get(statement_type)
-                if df is None or df.empty:
-                    continue
-
-                if df.index.name is None:
-                    df.index.name = 'metric_name'
-
-                # --- แก้ไขการจัดการคอลัมน์วันที่ให้ปลอดภัยขึ้น ---
+                if df is None or df.empty: continue
+                if df.index.name is None: df.index.name = 'metric_name'
                 try:
-                    # แปลงชื่อคอลัมน์ที่เป็น Timestamp หรือ datetime object ให้เป็น datetime object
                     date_columns = pd.to_datetime(df.columns, errors='coerce').dropna()
-                    # เก็บชื่อคอลัมน์ที่ไม่ใช่วันที่ไว้
                     non_date_column_names = [col for col in df.columns if col not in date_columns]
-                    # ตั้งชื่อคอลัมน์ใหม่ (ใช้วันที่เป็น object)
                     df.columns = non_date_column_names + date_columns.tolist()
-
                 except Exception as date_err:
                     logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_type}: {date_err}. Skipping this statement.")
                     continue
-                # --- จบการแก้ไข ---
 
-                # ใช้คอลัมน์ที่เป็น datetime object ในการ Melt
-                df_to_melt = df.reset_index() # metric_name กลายเป็นคอลัมน์
-
-                df_long = df_to_melt.melt(
-                    id_vars='metric_name',
-                    var_name='report_date', # คอลัมน์วันที่ยังเป็น datetime object
-                    value_name='metric_value'
-                )
-
+                df_to_melt = df.reset_index()
+                df_long = df_to_melt.melt(id_vars='metric_name', var_name='report_date', value_name='metric_value')
                 df_long['ticker'] = ticker
                 df_long['statement_type'] = statement_type
-                # แปลง report_date เป็น date object (สำหรับ DB)
                 df_long['report_date'] = pd.to_datetime(df_long['report_date']).dt.date
                 df_long.dropna(subset=['metric_value'], inplace=True)
-
-                # แปลง metric_value เป็น float และจัดการ error
                 df_long['metric_value'] = pd.to_numeric(df_long['metric_value'], errors='coerce').astype(float)
-                df_long.dropna(subset=['metric_value'], inplace=True) # เอาแถวที่แปลงเป็นตัวเลขไม่ได้ออก
-
+                df_long.dropna(subset=['metric_value'], inplace=True)
                 df_long['metric_name'] = df_long['metric_name'].astype(str).str.strip()
-
-
                 all_statements_data.extend(df_long.to_dict('records'))
 
             if all_statements_data:
                 with server.app_context():
                     chunk_size = 1000
-                    constraint_name = '_ticker_date_statement_metric_uc' # ชื่อ Unique Constraint ใน DB
-
+                    constraint_name = '_ticker_date_statement_metric_uc'
                     for i in range(0, len(all_statements_data), chunk_size):
                         chunk = all_statements_data[i:i + chunk_size]
-
                         stmt = sql_insert(FactFinancialStatements).values(chunk)
-                        set_ = {'metric_value': stmt.excluded.metric_value} # อัปเดตเฉพาะ metric_value ถ้าข้อมูลซ้ำ
-
+                        set_ = {'metric_value': stmt.excluded.metric_value}
                         try:
-                            if db_dialect == 'postgresql':
-                                on_conflict_stmt = stmt.on_conflict_do_update(constraint=constraint_name, set_=set_)
-                            elif db_dialect == 'sqlite':
-                                on_conflict_stmt = stmt.on_conflict_do_update(index_elements=['ticker', 'report_date', 'statement_type', 'metric_name'], set_=set_)
-                            else:
-                                raise Exception("Unsupported DB dialect for UPSERT.")
-
+                            if db_dialect == 'postgresql': on_conflict_stmt = stmt.on_conflict_do_update(constraint=constraint_name, set_=set_)
+                            elif db_dialect == 'sqlite': on_conflict_stmt = stmt.on_conflict_do_update(index_elements=['ticker', 'report_date', 'statement_type', 'metric_name'], set_=set_)
+                            else: raise Exception("Unsupported DB dialect for UPSERT.")
                             db.session.execute(on_conflict_stmt)
-                            # Commit ทีละ chunk เพื่อลด Transaction ขนาดใหญ่
                             db.session.commit()
                         except Exception as chunk_e:
                             logging.error(f"[{job_name}] Error inserting financial chunk for {ticker}: {chunk_e}")
-                            db.session.rollback() # Rollback เฉพาะ chunk ที่ผิดพลาด
-                            # อาจจะ break หรือ continue ตามต้องการ
-                            continue # ลองไปทำ chunk ถัดไป
-
-            # --- [ย้าย] time.sleep มาไว้ตรงนี้ เพื่อให้แน่ใจว่ามีการหน่วงเวลา *หลังจาก* ดึงข้อมูลสำเร็จ ---
+                            db.session.rollback(); continue
             time.sleep(0.8)
-            # --- [จบการย้าย] ---
-
-            return True # คืนค่า True ถ้าสำเร็จ
+            return True
 
         except Exception as inner_e:
             logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
-            # ไม่ต้อง rollback ที่นี่ เพราะทำใน loop chunk แล้ว หรือถ้า error ก่อนเข้า loop ก็ไม่มีอะไรให้ rollback
-            # แต่อาจจะ rollback ถ้า error เกิดนอก loop chunk
             try:
-                with server.app_context():
-                    db.session.rollback()
-            except Exception as rb_err:
-                logging.error(f"[{job_name}] Error during rollback for {ticker}: {rb_err}")
+                with server.app_context(): db.session.rollback()
+            except Exception as rb_err: logging.error(f"[{job_name}] Error during rollback for {ticker}: {rb_err}")
+            raise inner_e
 
-            raise inner_e # ส่ง error ต่อเพื่อให้ process_tickers_with_retry ทำงาน (retry logic)
-
-    # Use the helper function with the filtered list
     process_tickers_with_retry(job_name, tickers_to_fetch, process_single_ticker_financials, initial_delay=0.8, max_retries=2)
-
     logging.info(f"ETL Job: [{job_name}]... COMPLETED with skip logic.")
 
 
-# --- Job 4: update_news_sentiment (MODIFIED to limit to top 20 tickers - NO CHANGE HERE) ---
+# --- Job 4: update_news_sentiment (เหมือนเดิม) ---
 def update_news_sentiment():
-    """
-    ETL Job 4: ดึงข้อมูลข่าวและ Sentiment (จาก get_news_and_sentiment)
-    และเก็บลง FactNewsSentiment โดยจำกัด 20 Ticker ที่ใหญ่ที่สุด
-    """
     if sql_insert is None:
         logging.error("ETL Job: [update_news_sentiment] cannot run because insert statement is not available.")
         return
 
-    job_name = "Job 4: Update News/Sentiment (Top 20)" # <<< Updated job name
-
-    # [MODIFICATION START] ใช้ ALL_TICKERS_SORTED_BY_MC เพื่อจำกัด 20 อันดับแรก
+    job_name = "Job 4: Update News/Sentiment (Top 20)"
     tickers_for_etl = ALL_TICKERS_SORTED_BY_MC[:20]
-
     companies_list = []
+
     with server.app_context():
         try:
-            # Query เฉพาะ Ticker ที่อยู่ใน 20 อันดับแรก
-            companies_list = db.session.query(DimCompany.ticker, DimCompany.company_name).filter(
-                DimCompany.ticker.in_(tickers_for_etl),
-                DimCompany.company_name != None
-            ).all()
+            companies_list = db.session.query(DimCompany.ticker, DimCompany.company_name).filter(DimCompany.ticker.in_(tickers_for_etl), DimCompany.company_name != None).all()
             logging.info(f"[{job_name}] Found {len(companies_list)}/{len(tickers_for_etl)} top tickers to process news for.")
         except Exception as e:
             logging.error(f"[{job_name}] Failed to query companies from DimCompany: {e}", exc_info=True)
             return
-    # [MODIFICATION END]
 
     def process_single_ticker_news(company_data_tuple):
         ticker, company_name = company_data_tuple
-
         if not company_name:
             logging.warning(f"[{job_name}] Skipping news for {ticker}, no company name found.")
             return True
@@ -666,31 +519,14 @@ def update_news_sentiment():
 
                     published_dt_str = article['publishedAt']
                     if isinstance(published_dt_str, str):
-                        if published_dt_str.endswith('Z'):
-                             published_dt = datetime.fromisoformat(published_dt_str.replace("Z", "+00:00"))
+                        if published_dt_str.endswith('Z'): published_dt = datetime.fromisoformat(published_dt_str.replace("Z", "+00:00"))
                         else:
-                             try:
-                                 published_dt = datetime.fromisoformat(published_dt_str)
-                             except ValueError:
-                                 logging.warning(f"[{job_name}] Could not parse datetime '{published_dt_str}' for article URL {article.get('url')}. Skipping article.")
-                                 continue
-                    elif isinstance(published_dt_str, datetime):
-                        published_dt = published_dt_str
-                    else:
-                        logging.warning(f"[{job_name}] Invalid publishedAt format for article URL {article.get('url')}. Skipping article.")
-                        continue
+                             try: published_dt = datetime.fromisoformat(published_dt_str)
+                             except ValueError: logging.warning(f"[{job_name}] Could not parse datetime '{published_dt_str}' for article URL {article.get('url')}. Skipping article."); continue
+                    elif isinstance(published_dt_str, datetime): published_dt = published_dt_str
+                    else: logging.warning(f"[{job_name}] Invalid publishedAt format for article URL {article.get('url')}. Skipping article."); continue
 
-
-                    articles_data.append({
-                        'ticker': ticker,
-                        'published_at': published_dt,
-                        'title': article.get('title'),
-                        'article_url': article.get('url'),
-                        'source_name': article.get('source', {}).get('name'),
-                        'description': article.get('description'),
-                        'sentiment_label': article.get('sentiment'),
-                        'sentiment_score': article.get('sentiment_score')
-                    })
+                    articles_data.append({'ticker': ticker, 'published_at': published_dt, 'title': article.get('title'), 'article_url': article.get('url'), 'source_name': article.get('source', {}).get('name'), 'description': article.get('description'), 'sentiment_label': article.get('sentiment'), 'sentiment_score': article.get('sentiment_score')})
                 except Exception as parse_e:
                     logging.warning(f"[{job_name}] Skipping article for {ticker} due to processing error: {parse_e}")
                     continue
@@ -698,32 +534,23 @@ def update_news_sentiment():
             if articles_data:
                 with server.app_context():
                     chunk_size = 500
-
                     for i in range(0, len(articles_data), chunk_size):
                         chunk = articles_data[i:i + chunk_size]
-
                         stmt = sql_insert(FactNewsSentiment).values(chunk)
-
                         try:
-                            if db_dialect == 'postgresql':
-                                on_conflict_stmt = stmt.on_conflict_do_nothing(constraint='fact_news_sentiment_article_url_key')
-                            elif db_dialect == 'sqlite':
-                                on_conflict_stmt = stmt.on_conflict_do_nothing(index_elements=['article_url'])
-                            else:
-                                raise Exception("Unsupported DB dialect for UPSERT with DO NOTHING.")
-
+                            if db_dialect == 'postgresql': on_conflict_stmt = stmt.on_conflict_do_nothing(constraint='fact_news_sentiment_article_url_key')
+                            elif db_dialect == 'sqlite': on_conflict_stmt = stmt.on_conflict_do_nothing(index_elements=['article_url'])
+                            else: raise Exception("Unsupported DB dialect for UPSERT with DO NOTHING.")
                             db.session.execute(on_conflict_stmt)
                         except Exception as chunk_e:
                             logging.error(f"[{job_name}] Error inserting news chunk for {ticker}: {chunk_e}")
                             db.session.rollback()
-
                     db.session.commit()
             return True
 
         except Exception as inner_e:
             logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker} ({company_name}): {inner_e}", exc_info=True)
-            with server.app_context():
-                db.session.rollback()
+            with server.app_context(): db.session.rollback()
             raise inner_e
 
     process_tickers_with_retry(job_name, companies_list, process_single_ticker_news, initial_delay=1.0, retry_delay=90, max_retries=2)

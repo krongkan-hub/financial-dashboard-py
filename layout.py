@@ -344,14 +344,12 @@ def build_layout():
                         id="add-peer-button",
                         n_clicks=0,
                         className="w-100",
-                        color="info", # Different color to distinguish
-                        outline=True
                     ),
                     # --- [END] New Section for Smart Peer Finder ---
 
                     html.Hr(className="my-4"),
                     html.Div(id='ticker-summary-display'),
-                    html.Div(id='index-summary-display', className="mt-2"),
+                    html.Div(id='index-summary-display', className="pt-0"),
                 ])), width=12, md=3, className="sidebar-fixed"),
 
                 dbc.Col([

@@ -1,5 +1,10 @@
 # data_handler.py (FINAL - DCF uses DB, TTM Tax Rate, Dynamic WACC Calculation + Fallback Functions)
 
+import os
+import requests
+import logging
+from typing import Optional
+from dotenv import load_dotenv
 import pandas as pd
 import yfinance as yf
 import numpy as np
@@ -22,6 +27,9 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 from config import Config
 from newsapi import NewsApiClient
+
+load_dotenv()
+FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
 
 # --- [WACC CONSTANTS] ---
 ASSUMED_MARKET_RETURN = 0.08  # 8.0% Market Risk Premium assumption
@@ -204,6 +212,43 @@ def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
     except Exception as e:
         logging.error(f"Error in calculate_drawdown for {tickers}: {e}")
         return pd.DataFrame()
+
+# --- [NEW] Logo Fetching Helper (with Rate Limit Handling) ---
+def _get_logo_url(ticker: str) -> Optional[str]:
+    """
+    Fetches the company logo URL from Finnhub API.
+    """
+    if not FINNHUB_API_KEY:
+        logging.warning("FINNHUB_API_KEY not set. Skipping logo fetch.")
+        return None
+
+    try:
+        url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_API_KEY}"
+        r = requests.get(url, timeout=10) # Set timeout
+        r.raise_for_status() # Raise error for bad responses (4xx, 5xx)
+        data = r.json()
+        logo_url = data.get('logo')
+
+        if logo_url:
+            # logging.info(f"Successfully fetched logo for {ticker}")
+            return logo_url
+        else:
+            # logging.warning(f"No logo URL found in Finnhub data for {ticker}")
+            return None
+    except requests.exceptions.HTTPError as http_err:
+        if r.status_code == 429:
+            logging.warning(f"Rate limit hit while fetching logo for {ticker}. Skipping.")
+        else:
+            logging.warning(f"HTTP error fetching logo for {ticker}: {http_err}")
+        return None
+    except requests.exceptions.RequestException as req_err:
+        logging.error(f"Request error fetching logo for {ticker}: {req_err}")
+        return None
+    except Exception as e:
+        logging.error(f"An unexpected error occurred fetching logo for {ticker}: {e}")
+        return None
+
+# --- [END Logo Helper] ---
 
 # --- [MODIFIED] get_competitor_data (เหมือนเดิม) ---
 @lru_cache(maxsize=10)

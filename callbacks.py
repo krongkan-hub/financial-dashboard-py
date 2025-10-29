@@ -724,29 +724,39 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                     status_message = "Error: Could not find latest data date."
                     return [], [], status_message
 
-                # 1. Find the cluster ID of the reference ticker
-                ref_cluster_id_result = db.session.query(FactCompanySummary.peer_cluster_id) \
-                                                  .filter(FactCompanySummary.date_updated == latest_date,
-                                                          FactCompanySummary.ticker == reference_ticker) \
-                                                  .first()
+                # 1. Query market_cap ของ reference stock เพิ่ม
+                ref_data = db.session.query(FactCompanySummary.peer_cluster_id, FactCompanySummary.market_cap) \
+                                    .filter(FactCompanySummary.date_updated == latest_date,
+                                            FactCompanySummary.ticker == reference_ticker) \
+                                    .first()
 
-                if ref_cluster_id_result and ref_cluster_id_result[0] is not None:
-                    ref_cluster_id = ref_cluster_id_result[0]
+                if ref_data and ref_data.peer_cluster_id is not None and ref_data.market_cap is not None:
+                    ref_cluster_id = ref_data.peer_cluster_id
+                    ref_market_cap = ref_data.market_cap # <--- เก็บ market cap ไว้
 
-                    # 2. Find all tickers in the same cluster (excluding the reference and already selected)
-                    query = db.session.query(FactCompanySummary.ticker) \
-                                      .filter(FactCompanySummary.date_updated == latest_date,
-                                              FactCompanySummary.peer_cluster_id == ref_cluster_id,
-                                              FactCompanySummary.ticker != reference_ticker) \
-                                      .order_by(FactCompanySummary.ticker)
-                    all_peers_in_cluster = [item[0] for item in query.all()]
+                    # 2. Query peers พร้อม market cap
+                    query = db.session.query(FactCompanySummary.ticker, FactCompanySummary.market_cap) \
+                                    .filter(FactCompanySummary.date_updated == latest_date,
+                                            FactCompanySummary.peer_cluster_id == ref_cluster_id,
+                                            FactCompanySummary.ticker != reference_ticker)
+                    all_peers_in_cluster_with_mc = query.all() # ได้ list of tuples [(ticker, market_cap), ...]
 
-                    # 3. Filter out peers already in the user's selection
-                    peers_to_show = [p for p in all_peers_in_cluster if p not in current_tickers]
+                    # 3. กรอง peer ที่มีอยู่แล้ว และคำนวณความต่าง
+                    peers_to_process = []
+                    for peer_ticker, peer_mc in all_peers_in_cluster_with_mc:
+                        if peer_ticker not in current_tickers and peer_mc is not None:
+                            # 4. คำนวณ absolute difference
+                            mc_diff = abs(peer_mc - ref_market_cap)
+                            peers_to_process.append({'ticker': peer_ticker, 'mc_diff': mc_diff})
+
+                    # 5. Sort peers ตาม mc_diff จากน้อยไปมาก
+                    peers_to_process.sort(key=lambda x: x['mc_diff'])
+
+                    peers_to_show = [p['ticker'] for p in peers_to_process] # เอาเฉพาะ ticker ที่เรียงแล้ว
 
                     if peers_to_show:
-                        peer_options = [{'label': p, 'value': p} for p in peers_to_show]
-                        status_message = f"Found {len(peers_to_show)} potential peers for {reference_ticker}."
+                        peer_options = [{'label': p, 'value': p} for p in peers_to_show] # สร้าง options จาก list ที่ sort แล้ว
+                        status_message = f"Found {len(peers_to_show)} potential peers for {reference_ticker} (sorted by Mkt Cap diff)."
                     else:
                         status_message = f"No *new* peers found for {reference_ticker} in Cluster {ref_cluster_id}."
                 else:

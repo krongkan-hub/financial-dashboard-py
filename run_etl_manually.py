@@ -66,16 +66,16 @@ if __name__ == "__main__":
         # --- [END Job 3] ---
 
         # --- [KEEP COMMENTED] Run Job 4 (News Sentiment for Top 20) ---
-        # logging.info("--- Starting Manual Run: Job 4 (update_news_sentiment for Top 20) ---")
-        # start_time_job4 = time.time()
-        # try:
-        #     # รัน Job 4 ซึ่งจำกัดแค่ 20 ตัวแรกอยู่แล้ว ไม่ต้องส่ง override
-        #     update_news_sentiment()
-        #     elapsed_job4 = time.time() - start_time_job4
-        #     logging.info(f"--- Finished Manual Run: Job 4 (update_news_sentiment) in {elapsed_job4:.2f} seconds ---")
-        # except Exception as e:
-        #     elapsed_job4 = time.time() - start_time_job4
-        #     logging.error(f"--- Manual Run FAILED: Job 4 (update_news_sentiment) after {elapsed_job4:.2f} seconds: {e} ---", exc_info=True)
+        logging.info("--- Starting Manual Run: Job 4 (update_news_sentiment for Top 20) ---")
+        start_time_job4 = time.time()
+        try:
+            # รัน Job 4 ซึ่งจำกัดแค่ 20 ตัวแรกอยู่แล้ว ไม่ต้องส่ง override
+            update_news_sentiment()
+            elapsed_job4 = time.time() - start_time_job4
+            logging.info(f"--- Finished Manual Run: Job 4 (update_news_sentiment) in {elapsed_job4:.2f} seconds ---")
+        except Exception as e:
+            elapsed_job4 = time.time() - start_time_job4
+            logging.error(f"--- Manual Run FAILED: Job 4 (update_news_sentiment) after {elapsed_job4:.2f} seconds: {e} ---", exc_info=True)
         # --- [END Job 4] ---
 
     elapsed_total = time.time() - start_time_total

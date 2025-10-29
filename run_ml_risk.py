@@ -1,4 +1,4 @@
-# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Fixed NameError, scale_pos_weight, Time Split, Z-Score)
+# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Fixed NameError, scale_pos_weight, Time Split, Z-Score, SHAP base_score error)
 
 import logging
 import pandas as pd
@@ -555,7 +555,7 @@ def train_model(X_train, y_train):
         eval_metric='logloss',
         n_jobs=-1,
         scale_pos_weight=scale_pos_weight_value, # CRITICAL CHANGE: Use scale_pos_weight instead of SMOTE
-        base_score=0.5 # CRITICAL FIX for SHAP ValueError
+        # base_score=0.5 # <--- CRITICAL FIX: บรรทัดนี้ถูกนำออกเพื่อแก้ปัญหา SHAP Error
     )
 
     model.fit(X_train_res, y_train_res)

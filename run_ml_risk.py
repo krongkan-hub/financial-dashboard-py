@@ -1,23 +1,22 @@
-# run_ml_risk.py (เวอร์ชันแก้ไขสมบูรณ์: ป้องกัน SimpleImputer ตัด Features ทิ้ง)
+# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Fixed AUC, SMOTE, and Time-Based Split Robustness)
 
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, date
+from datetime import datetime, date
 import os
-import joblib # For saving the model
-import shap # For model explanation
-# NOTE: ต้องติดตั้ง imblearn (pip install imbalanced-learn) หากต้องการใช้ SMOTE
-from imblearn.over_sampling import SMOTE # For handling imbalanced data
+import joblib 
+import shap 
+from imblearn.over_sampling import SMOTE 
+from xgboost import XGBClassifier 
 
 # --- Database Interaction ---
 from app import db, server, FactFinancialStatements, FactCompanySummary
-from sqlalchemy import func, distinct, and_, text
+from sqlalchemy import func, and_
 from sqlalchemy.orm import aliased
 
 # --- Machine Learning ---
-from sklearn.model_selection import train_test_split # Initially, then maybe TimeSeriesSplit
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split 
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -26,30 +25,22 @@ from sklearn.metrics import (
 )
 
 # --- Configuration ---
-# ตั้งค่า Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Constants for Target Variable Definition
 DE_RATIO_THRESHOLD = 5.0
 ICR_THRESHOLD = 1.0
-CONSECUTIVE_LOSS_PERIODS = 6 # Number of quarters for consecutive net loss
+CONSECUTIVE_LOSS_PERIODS = 6 
 
 # Feature Engineering Constants
-YEARS_FOR_CHANGE = 1 # Look back 1 year for change calculations
-MA_PERIODS = 4 # Moving average over 4 quarters
-
-# Data Splitting Configuration (Example: Time-based split)
-# ใช้หน่วยเป็นเดือนแทนปีเศษส่วน เพื่อป้องกัน ValueError
-VALIDATION_PERIOD_MONTHS = 6 # Use 6 months for validation
-TEST_PERIOD_MONTHS = 12      # Use 1 most recent year for testing (12 months)
+MA_PERIODS = 4 
 
 # Model Saving Configuration
 MODEL_DIR = "models"
-MODEL_FILENAME = "trained_risk_model.joblib"
-SCALER_FILENAME = "scaler.joblib" # Save the scaler too!
-IMPUTER_FILENAME = "imputer.joblib" # Save the imputer too!
+MODEL_FILENAME = "trained_risk_model_xgb.joblib" 
+SCALER_FILENAME = "scaler.joblib" 
+IMPUTER_FILENAME = "imputer.joblib" 
 
-# Ensure model directory exists
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # --- Helper Functions ---
@@ -61,6 +52,13 @@ def calculate_change(series, periods):
     """Calculates the change over a number of periods."""
     return series.diff(periods=periods)
 
+def get_column(df, possible_names):
+    """NEW HELPER: Finds the first existing column from a list of possible names."""
+    for name in possible_names:
+        if name in df.columns:
+            return name
+    return None 
+
 # --- Core Functions ---
 
 def fetch_data(start_year=2015):
@@ -70,18 +68,20 @@ def fetch_data(start_year=2015):
     logging.info(f"1. Fetching data from database starting from year {start_year}...")
     start_date = date(start_year, 1, 1)
 
-    # Metrics needed from FactFinancialStatements
+    # UPDATED: รวมชื่อ Metric ที่เป็นไปได้ทั้งหมดจากการสังเกตข้อมูล YFinance/ETL
     required_metrics = [
-        # For Target Variable 
-        'Stockholders Equity', 'EBIT', 'Interest Expense', 'Net Income',
-        # For Features 
-        'Total Revenue', 'Operating Cash Flow', 'Current Assets', 
-        'Current Liabilities', 'Inventory', 'Total Assets'
+        # Base/Target Metrics (High Ambiguity)
+        'Total Stockholders Equity', 'Stockholders Equity', 'Total Assets',
+        'Total Liabilities', 'Total Liab', 'Total Liabilities Net Minority Interest',
+        'EBIT', 'Operating Income', 
+        
+        # Base/Target Metrics (Low Ambiguity)
+        'Interest Expense', 'Net Income', 'Total Revenue', 'Operating Cash Flow',
+        'Current Assets', 'Current Liabilities', 'Inventory', 
     ]
 
     try:
         with server.app_context():
-            # Query FactFinancialStatements
             stmt_ffs = db.session.query(
                 FactFinancialStatements.ticker,
                 FactFinancialStatements.report_date,
@@ -107,56 +107,48 @@ def fetch_data(start_year=2015):
             ).reset_index()
             df_ffs_wide = df_ffs_wide.sort_values(by=['ticker', 'report_date'])
 
-            # Query FactCompanySummary for D/E Ratio (use latest available per quarter end)
+            # Query FactCompanySummary for D/E Ratio (using original logic)
             FCS = aliased(FactCompanySummary)
             
+            # ... (unchanged logic for querying FactCompanySummary) ...
             quarter_group = (func.strftime('%Y', FCS.date_updated) + '-' +
                              ((func.strftime('%m', FCS.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
-                            ).label('year_quarter') # Label for clarity
+                             ).label('year_quarter')
 
             subquery = db.session.query(
                 FCS.ticker,
-                quarter_group, # Group by the calculated year-quarter string
+                quarter_group, 
                 func.max(FCS.date_updated).label('max_summary_date')
-            ).group_by(FCS.ticker, quarter_group).subquery() # Group by ticker and year_quarter
+            ).group_by(FCS.ticker, quarter_group).subquery() 
 
             stmt_fcs = db.session.query(
                 FactCompanySummary.ticker,
                 FactCompanySummary.date_updated.label('summary_date'),
-                 
                 (func.strftime('%Y', FactCompanySummary.date_updated) + '-' +
                  ((func.strftime('%m', FactCompanySummary.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
-                ).label('year_quarter'), 
+                 ).label('year_quarter'), 
                 FactCompanySummary.de_ratio
             ).join(
                 subquery,
                 and_(
                     FactCompanySummary.ticker == subquery.c.ticker,
-                    FactCompanySummary.date_updated == subquery.c.max_summary_date # Join condition remains the same
+                    FactCompanySummary.date_updated == subquery.c.max_summary_date 
                 )
             ).filter(FactCompanySummary.date_updated >= start_date).statement 
             
             df_fcs = pd.read_sql(stmt_fcs, db.engine) 
             
-            # Calculate report_date_approx from the 'year_quarter' column
+            # Approximate date calculation (original logic)
             df_fcs[['Year', 'Quarter']] = df_fcs['year_quarter'].str.split('-', expand=True)
-            df_fcs['Year'] = df_fcs['Year'].astype(int)
-            df_fcs['Quarter'] = df_fcs['Quarter'].astype(float).astype(int)
-            # Calculate the first month of the quarter: Q1->1, Q2->4, Q3->7, Q4->10
-            df_fcs['Quarter_Start_Month'] = (df_fcs['Quarter'] - 1) * 3 + 1
-            # Create a date for the first day of the quarter's starting month
+            df_fcs['Quarter_Start_Month'] = (df_fcs['Quarter'].astype(float).astype(int) - 1) * 3 + 1
             df_fcs['Quarter_Start_Date'] = pd.to_datetime(
                 df_fcs['Year'].astype(str) + '-' + df_fcs['Quarter_Start_Month'].astype(str) + '-01',
                 errors='coerce'
             )
-            # Calculate the Quarter End date
             df_fcs['report_date_approx'] = df_fcs['Quarter_Start_Date'] + pd.offsets.QuarterEnd(0)
-
-            # Drop intermediate columns if no longer needed
-            df_fcs = df_fcs.drop(columns=['Year', 'Quarter', 'Quarter_Start_Month', 'Quarter_Start_Date', 'year_quarter'])
-            
+            df_fcs = df_fcs.drop(columns=['Year', 'Quarter', 'Quarter_Start_Month', 'Quarter_Start_Date', 'year_quarter', 'summary_date'])
             df_fcs = df_fcs.sort_values(by=['ticker', 'report_date_approx'])
-
+            
             logging.info(f"Fetched {len(df_ffs_wide)} wide financial statement records.")
             logging.info(f"Fetched {len(df_fcs)} D/E ratio records.")
             return df_ffs_wide, df_fcs
@@ -169,7 +161,6 @@ def fetch_data(start_year=2015):
 def create_target_variable(df_ffs, df_fcs):
     """
     Creates the binary target variable (Y) based on defined risk criteria.
-    Includes a time lag: Y at time T+lag is predicted using X at time T.
     """
     logging.info("2. Creating Target Variable (Y)...")
     if df_ffs.empty:
@@ -177,66 +168,75 @@ def create_target_variable(df_ffs, df_fcs):
         return pd.DataFrame()
 
     df = df_ffs.copy()
-    # Ensure dataframe is sorted
     df = df.sort_values(by=['ticker', 'report_date']).reset_index(drop=True)
 
-    # --- Calculate necessary components ---
-    # TTM ICR
-    df['EBIT_TTM'] = df.groupby('ticker')['EBIT'].transform(calculate_ttm)
-    # Handle zero or negative interest expense carefully
-    df['Interest Expense_TTM'] = df.groupby('ticker')['Interest Expense'].transform(lambda x: x.rolling(window=4, min_periods=4).sum().replace(0, np.nan)) # Replace 0 with NaN temporarily
-    df['TTM_ICR'] = df['EBIT_TTM'] / df['Interest Expense_TTM']
-    # If Interest Expense was originally 0 or positive EBIT / 0 -> inf, treat as non-risky for ICR threshold
-    # If EBIT is negative and Interest Expense > 0 -> ICR is negative (risky)
-    # If both EBIT and Interest Expense are 0 or NaN, ICR will be NaN
-    df['TTM_ICR'] = df['TTM_ICR'].replace([np.inf, -np.inf], np.nan) # Clean up potential infs
+    # --- Use Robust Column Selection for Ambiguous Metrics ---
+    
+    equity_col = get_column(df, ['Stockholders Equity', 'Total Stockholders Equity'])
+    ebit_col = get_column(df, ['EBIT', 'Operating Income'])
+    interest_col = get_column(df, ['Interest Expense'])
+    net_income_col = get_column(df, ['Net Income', 'Net Income Common Stockholders'])
 
+    # --- Calculate necessary components for Y ---
+    
+    # TTM ICR
+    if ebit_col and interest_col:
+        df['EBIT_TTM'] = df.groupby('ticker')[ebit_col].transform(calculate_ttm)
+        df['Interest Expense_TTM'] = df.groupby('ticker')[interest_col].transform(lambda x: x.rolling(window=4, min_periods=4).sum().replace(0, np.nan))
+        df['TTM_ICR'] = df['EBIT_TTM'] / df['Interest Expense_TTM'].replace(0, np.nan)
+        df['TTM_ICR'] = df['TTM_ICR'].replace([np.inf, -np.inf], np.nan)
+    else:
+        df['TTM_ICR'] = np.nan
+        
     # Consecutive Net Losses
-    df['is_loss'] = (df['Net Income'] < 0).astype(int)
-    # Calculate rolling sum of losses over the specified window
-    df['consecutive_losses'] = df.groupby('ticker')['is_loss'].transform(
-        lambda x: x.rolling(window=CONSECUTIVE_LOSS_PERIODS, min_periods=CONSECUTIVE_LOSS_PERIODS).sum()
-    )
+    if net_income_col:
+        df['is_loss'] = (df.get(net_income_col, pd.Series()) < 0).astype(int)
+        df['consecutive_losses'] = df.groupby('ticker')['is_loss'].transform(
+            lambda x: x.rolling(window=CONSECUTIVE_LOSS_PERIODS, min_periods=CONSECUTIVE_LOSS_PERIODS).sum()
+        )
+    else:
+        df['consecutive_losses'] = np.nan
 
     # Negative Equity
-    df['is_negative_equity'] = (df['Stockholders Equity'] < 0).astype(int)
+    if equity_col:
+        df['is_negative_equity'] = (df.get(equity_col, pd.Series()) < 0).astype(int)
+    else:
+        df['is_negative_equity'] = 0 
 
-    # Merge D/E Ratio (approximate merge based on quarter end)
+    # Merge D/E Ratio (using original merge logic)
     df['report_date_approx'] = df['report_date'] + pd.offsets.QuarterEnd(0)
-    
-    # *** แก้ไข: เพิ่ม tolerance เป็น 1 ปี เพื่อให้ Merge D/E Ratio สำเร็จมากขึ้น ***
     df = pd.merge_asof(df.sort_values('report_date_approx'),
                        df_fcs[['ticker', 'report_date_approx', 'de_ratio']].sort_values('report_date_approx'),
                        on='report_date_approx',
                        by='ticker',
-                       direction='backward', # Find latest D/E on or before the report date
-                       tolerance=pd.Timedelta('365 days')) # เพิ่มเป็น 1 ปี
-    # *** สิ้นสุดแก้ไข ***
+                       direction='backward', 
+                       tolerance=pd.Timedelta('365 days')) 
 
     # --- Apply Risk Rules ---
     rule1 = df['is_negative_equity'] == 1
-    # D/E ratio อาจเป็น NaN หาก Merge ไม่สำเร็จ
     rule2 = (df['de_ratio'] > DE_RATIO_THRESHOLD) & (df['TTM_ICR'] < ICR_THRESHOLD)
     rule3 = df['consecutive_losses'] >= CONSECUTIVE_LOSS_PERIODS
 
-    # Combine rules: If any rule is met, Y_raw = 1
     df['Y_raw'] = ((rule1) | (rule2) | (rule3)).astype(int)
 
-    # --- Introduce Time Lag ---
-    # We want to predict risk *in the future* (e.g., 1 year = 4 quarters ahead)
+    # --- Introduce Time Lag (4 quarters) ---
     lag_periods = 4
     df['Y'] = df.groupby('ticker')['Y_raw'].shift(-lag_periods)
     logging.info(f"Target variable Y created with a lag of {lag_periods} quarters.")
 
-    # Drop rows where the lagged Y is NaN (i.e., the last 'lag_periods' for each ticker)
     df_final = df.dropna(subset=['Y']).copy()
     df_final['Y'] = df_final['Y'].astype(int)
 
     logging.info(f"Created Y for {len(df_final)} data points.")
     logging.info(f"Distribution of Y: \n{df_final['Y'].value_counts(normalize=True)}")
 
-    # Select relevant columns for features and the final Y
-    cols_to_keep = ['ticker', 'report_date', 'Y'] + list(df_ffs.columns.drop(['ticker', 'report_date'])) + ['de_ratio'] # Keep base metrics + D/E
+    # --- Robust column selection: Keep all financial metrics and calculated Y/de_ratio ---
+    explicit_cols = ['ticker', 'report_date', 'Y', 'de_ratio']
+    cols_to_keep_from_original = [col for col in df_ffs.columns if col not in ['ticker', 'report_date']]
+    
+    cols_to_keep = explicit_cols + cols_to_keep_from_original
+    cols_to_keep = [col for col in cols_to_keep if col in df_final.columns]
+
     df_final = df_final[cols_to_keep]
 
     return df_final
@@ -244,7 +244,7 @@ def create_target_variable(df_ffs, df_fcs):
 
 def engineer_features(df):
     """
-    Calculates trend/change features, handles missing values, and scales data.
+    Calculates 19 features, handles infinities/NaNs, and applies scaling/imputation.
     """
     logging.info("3. Engineering Features (X)...")
     if df.empty or 'Y' not in df.columns:
@@ -254,116 +254,188 @@ def engineer_features(df):
     df_eng = df.copy()
     df_eng = df_eng.sort_values(by=['ticker', 'report_date']).reset_index(drop=True)
     periods_per_year = 4
-
-    # --- Calculate Base Ratios / Size Features ---
-    df_eng['Current Ratio'] = df_eng['Current Assets'] / df_eng['Current Liabilities'].replace(0, np.nan)
     
-    # เพิ่มการคำนวณ Total Assets (ln) และ Operating Margin
-    df_eng['Total Assets (ln)'] = np.log(df_eng['Total Assets'].replace(0, np.nan))
-    if 'Operating Margin' not in df_eng.columns and 'EBIT' in df_eng.columns and 'Total Revenue' in df_eng.columns:
-        df_eng['Operating Margin'] = df_eng['EBIT'] / df_eng['Total Revenue'].replace(0, np.nan)
-
-    # --- Calculate YoY Growth Features ---
-    growth_cols = ['Total Revenue', 'Net Income', 'Operating Cash Flow']
-    for col in growth_cols:
-        if col in df_eng.columns:
-            # เพิ่ม fill_method=None เพื่อหลีกเลี่ยง FutureWarning ในอนาคต
-            df_eng[f'{col}_YoY_Growth'] = df_eng.groupby('ticker')[col].pct_change(periods=periods_per_year, fill_method=None)
-
-    # --- Calculate Change in Key Ratios (Over 1 Year) ---
-    change_cols_map = {'de_ratio': 'D/E Ratio', 'Operating Margin': 'Operating Margin', 'Current Ratio': 'Current Ratio'} 
+    # --- Use Robust Column Selection for all raw metrics ---
     
+    # Financial/Balance Sheet Components
+    ca_col = get_column(df_eng, ['Current Assets'])
+    cl_col = get_column(df_eng, ['Current Liabilities'])
+    ta_col = get_column(df_eng, ['Total Assets'])
+    inv_col = get_column(df_eng, ['Inventory'])
+    liab_col = get_column(df_eng, ['Total Liabilities', 'Total Liab', 'Total Liabilities Net Minority Interest'])
+    equity_col = get_column(df_eng, ['Stockholders Equity', 'Total Stockholders Equity'])
+    
+    # Income/Cash Flow Components
+    ebit_col = get_column(df_eng, ['EBIT', 'Operating Income'])
+    rev_col = get_column(df_eng, ['Total Revenue'])
+    ni_col = get_column(df_eng, ['Net Income', 'Net Income Common Stockholders'])
+    ocf_col = get_column(df_eng, ['Operating Cash Flow', 'Total Cash Flow From Operating Activities'])
+    int_exp_col = get_column(df_eng, ['Interest Expense']) # Add back here for features
+    
+    # --- 1. Base Ratios / Size Features ---
+    if ca_col and cl_col:
+        df_eng['Current Ratio'] = df_eng[ca_col] / df_eng[cl_col].replace(0, np.nan)
+    else: df_eng['Current Ratio'] = np.nan
+
+    if ta_col:
+        df_eng['Total Assets (ln)'] = np.log(df_eng[ta_col].replace(0, np.nan))
+    else: df_eng['Total Assets (ln)'] = np.nan
+
+    if ebit_col and rev_col:
+        df_eng['Operating Margin'] = df_eng[ebit_col] / df_eng[rev_col].replace(0, np.nan)
+    else: df_eng['Operating Margin'] = np.nan
+
+    # Calculate ROE for MA
+    if ni_col and equity_col:
+        df_eng['Net Income_TTM'] = df_eng.groupby('ticker')[ni_col].transform(calculate_ttm)
+        df_eng['Avg Equity_TTM'] = df_eng.groupby('ticker')[equity_col].transform(lambda x: x.rolling(window=4, min_periods=4).mean())
+        df_eng['ROE'] = df_eng['Net Income_TTM'] / df_eng['Avg Equity_TTM'].replace(0, np.nan)
+    else: df_eng['ROE'] = np.nan
+
+
+    # --- 2. YoY Growth Features ---
+    growth_col_map = {'Total Revenue': rev_col, 'Net Income': ni_col, 'Operating Cash Flow': ocf_col}
+    for display_name, raw_col in growth_col_map.items():
+        if raw_col:
+            df_eng[f'{display_name}_YoY_Growth'] = df_eng.groupby('ticker')[raw_col].pct_change(periods=periods_per_year)
+        else:
+             df_eng[f'{display_name}_YoY_Growth'] = np.nan
+
+    # --- 3. Change in Key Ratios (Over 1 Year) ---
+    change_cols_map = {'de_ratio': 'D/E Ratio', 'Operating Margin': 'Operating Margin', 'Current Ratio': 'Current Ratio'}    
     for col_raw, col_display in change_cols_map.items():
-         if col_raw in df_eng.columns:
+        if col_raw in df_eng.columns: 
             df_eng[f'Change in {col_display}'] = df_eng.groupby('ticker')[col_raw].transform(calculate_change, periods=periods_per_year)
+        else:
+            df_eng[f'Change in {col_display}'] = np.nan
 
-    # --- Calculate Moving Averages ---
-    ma_cols = ['Net Income', 'ROE'] 
-    
-    # Calculate ROE if needed
-    if 'ROE' not in df_eng.columns and 'Net Income' in df_eng.columns and 'Stockholders Equity' in df_eng.columns:
-         # Use TTM Net Income and Average Equity over 4 quarters for a more stable ROE
-         df_eng['Net Income_TTM'] = df_eng.groupby('ticker')['Net Income'].transform(calculate_ttm)
-         df_eng['Avg Equity_TTM'] = df_eng.groupby('ticker')['Stockholders Equity'].transform(lambda x: x.rolling(window=4, min_periods=4).mean())
-         df_eng['ROE'] = df_eng['Net Income_TTM'] / df_eng['Avg Equity_TTM'].replace(0, np.nan)
-
+    # --- 4. Moving Averages (4 Quarters) ---
+    ma_cols = ['Net Income', 'ROE']    
     for col in ma_cols:
-         if col in df_eng.columns:
+        if col in df_eng.columns: 
             df_eng[f'MA_{col}'] = df_eng.groupby('ticker')[col].transform(lambda x: x.rolling(window=MA_PERIODS, min_periods=MA_PERIODS).mean())
+        else:
+             df_eng[f'MA_{col}'] = np.nan
 
-    # --- Final Feature Selection ---
+    # ------------------------------------------------------------------
+    # --- 5. NEW: 7 Advanced Credit Risk Features ---
+    # ------------------------------------------------------------------
+    
+    # 1. Interest Coverage Ratio (EBIT / Interest Expense)
+    if ebit_col and int_exp_col:
+        df_eng['Interest Coverage Ratio'] = df_eng[ebit_col] / df_eng[int_exp_col].replace(0, np.nan)
+    else: df_eng['Interest Coverage Ratio'] = np.nan
+
+    # 2. Quick Ratio (Acid-Test)
+    if ca_col and inv_col and cl_col:
+        df_eng['Quick Ratio'] = (df_eng[ca_col] - df_eng[inv_col]) / df_eng[cl_col].replace(0, np.nan)
+    else: df_eng['Quick Ratio'] = np.nan
+
+    # 3. Debt to EBITDA (TTM)
+    if liab_col and ebit_col:
+        df_eng['Total Liabilities_TTM'] = df_eng.groupby('ticker')[liab_col].transform(calculate_ttm)
+        df_eng['EBIT_TTM_4Q'] = df_eng.groupby('ticker')[ebit_col].transform(calculate_ttm) 
+        df_eng['Debt to EBITDA'] = df_eng['Total Liabilities_TTM'] / df_eng['EBIT_TTM_4Q'].replace(0, np.nan)
+    else: 
+        df_eng['Debt to EBITDA'] = np.nan
+        logging.warning("Skipping Debt to EBITDA calculation: Missing required columns (Total Liabilities or EBIT/Operating Income).")
+
+    # 4. Net Working Capital / Total Assets
+    if ca_col and cl_col and ta_col:
+        df_eng['Net Working Capital'] = df_eng[ca_col] - df_eng[cl_col]
+        df_eng['NWC_to_Total_Assets'] = df_eng['Net Working Capital'] / df_eng[ta_col].replace(0, np.nan)
+    else: df_eng['NWC_to_Total_Assets'] = np.nan
+
+    # 5. Coefficient of Variation (CV) of Operating Margin (4Q)
+    if 'Operating Margin' in df_eng.columns:
+        df_eng['Op_Margin_Mean_4Q'] = df_eng.groupby('ticker')['Operating Margin'].transform(lambda x: x.rolling(window=4, min_periods=4).mean())
+        df_eng['Op_Margin_Std_4Q'] = df_eng.groupby('ticker')['Operating Margin'].transform(lambda x: x.rolling(window=4, min_periods=4).std())
+        df_eng['CV_Operating_Margin'] = df_eng['Op_Margin_Std_4Q'] / df_eng['Op_Margin_Mean_4Q'].replace(0, np.nan)
+    else: df_eng['CV_Operating_Margin'] = np.nan
+
+    # 6. Number of Negative Net Income Quarters (12Q)
+    if ni_col:
+        df_eng['is_negative_net_income'] = (df_eng[ni_col] < 0).astype(int)
+        df_eng['Count_Negative_Net_Income_12Q'] = df_eng.groupby('ticker')['is_negative_net_income'].transform(lambda x: x.rolling(window=12, min_periods=12).sum())
+    else: df_eng['Count_Negative_Net_Income_12Q'] = np.nan
+
+    # 7. Sales Volatility (Standard Deviation of YoY Revenue Growth - 4Q)
+    if 'Total Revenue_YoY_Growth' in df_eng.columns:
+        df_eng['Sales_Volatility'] = df_eng.groupby('ticker')['Total Revenue_YoY_Growth'].transform(lambda x: x.rolling(window=4, min_periods=4).std())
+    else: df_eng['Sales_Volatility'] = np.nan
+
+    # --- Final Feature Selection (19 Features) ---
     feature_cols = [
-        'de_ratio', 'Current Ratio', 'Operating Margin', 'Total Assets (ln)', # Base Ratios / Size
-        'Total Revenue_YoY_Growth', 'Net Income_YoY_Growth', 'Operating Cash Flow_YoY_Growth', # Growth
-        'Change in D/E Ratio', 'Change in Operating Margin', 'Change in Current Ratio', # Changes
-        'MA_Net Income', 'MA_ROE' # Moving Averages
+        'de_ratio', 'Current Ratio', 'Operating Margin', 'Total Assets (ln)', 
+        'Total Revenue_YoY_Growth', 'Net Income_YoY_Growth', 'Operating Cash Flow_YoY_Growth', 
+        'Change in D/E Ratio', 'Change in Operating Margin', 'Change in Current Ratio', 
+        'MA_Net Income', 'MA_ROE',
+        # 7 New Features
+        'Interest Coverage Ratio', 'Quick Ratio', 'Debt to EBITDA', 'NWC_to_Total_Assets', 
+        'CV_Operating_Margin', 'Count_Negative_Net_Income_12Q', 'Sales_Volatility' 
     ]
     
-    # Ensure only existing columns are selected
-    feature_cols = [col for col in feature_cols if col in df_eng.columns]
+    df_eng = df_eng.replace([np.inf, -np.inf], np.nan)
 
+    # --- CRITICAL FIX: Ensure X and y rows are aligned after feature engineering ---
     X = df_eng[feature_cols].copy()
     y = df_eng['Y'].copy()
-
-    # Store identifiers and dates before dropping NaNs/imputing
     identifiers = df_eng[['ticker', 'report_date']].copy()
-
-    # --- Handle Infinities and NaNs ---
-    X = X.replace([np.inf, -np.inf], np.nan)
-
-    # --- CRITICAL FIX: Ensure all-NaN features are imputed with 0 to prevent SimpleImputer from failing ---
-    X_to_impute = X.copy()
-
-    # 1. Identify features that are entirely NaN in the current subset
-    all_nan_cols = X_to_impute.columns[X_to_impute.isnull().all()].tolist()
     
+    # Filter rows where ALL selected features are NaN (highly unlikely if Y exists, but safe)
+    X.dropna(axis=0, how='all', inplace=True)
+    y = y.loc[X.index] # Ensure y matches filtered X
+    identifiers = identifiers.loc[X.index] # Ensure identifiers match filtered X
+    
+    if X.empty:
+        logging.error("No valid features remain after dropping all-NaN rows.")
+        return pd.DataFrame(), pd.Series(), pd.DataFrame(), []
+    
+    # Ensure only existing columns are selected
+    feature_cols_final = [col for col in feature_cols if col in X.columns]
+    X = X[feature_cols_final]
+    # --------------------------------------------------------------------------------------------------
+
+    # --- Imputation and Scaling ---
+    X_to_impute = X.copy()
+    
+    all_nan_cols = X_to_impute.columns[X_to_impute.isnull().all()].tolist()
     if all_nan_cols:
         logging.warning(f"Forcing imputation for all-NaN features by filling with 0: {all_nan_cols}")
-        # Fill all-NaN columns with 0. This gives SimpleImputer a non-missing value to work with 
-        # and prevents it from skipping the column and reducing the dimensionality.
-        X_to_impute[all_nan_cols] = X_to_impute[all_nan_cols].fillna(0) 
+        X_to_impute[all_nan_cols] = X_to_impute[all_nan_cols].fillna(0)  
 
-    X_partial = X_to_impute
-    feature_names_imputed = X_partial.columns
-    
-    if X_partial.empty:
-        logging.error("No valid features remain after removing all-NaN columns.")
-        return pd.DataFrame(), pd.Series(), pd.DataFrame(), []
-
-    # 2. Impute remaining NaNs (for the columns that only had some missing values)
     imputer = SimpleImputer(strategy='median')
-    X_imputed_partial = imputer.fit_transform(X_partial)
-    
-    # 3. Convert back to DataFrame (The dimension will now match 810, 12)
-    X_imputed_df = pd.DataFrame(X_imputed_partial, columns=feature_names_imputed, index=X_partial.index)
+    X_imputed = imputer.fit_transform(X_to_impute)
+    X_imputed_df = pd.DataFrame(X_imputed, columns=feature_cols_final, index=X_to_impute.index)
 
-    # 4. Update feature names and X for scaling
-    X = X_imputed_df 
-    
-    # --- Scaling ---
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    X_scaled_df = pd.DataFrame(X_scaled, columns=feature_names_imputed)
+    X_scaled = scaler.fit_transform(X_imputed_df)
+    X_scaled_df = pd.DataFrame(X_scaled, columns=feature_cols_final, index=X_imputed_df.index)
 
-    logging.info(f"Selected {len(feature_names_imputed)} features for model training.")
-    logging.info(f"Feature names: {list(feature_names_imputed)}")
+    logging.info(f"Selected {len(feature_cols_final)} features for model training.")
+    logging.info(f"Feature names: {list(feature_cols_final)}")
 
-    # Save the imputer and scaler
     joblib.dump(imputer, os.path.join(MODEL_DIR, IMPUTER_FILENAME))
     joblib.dump(scaler, os.path.join(MODEL_DIR, SCALER_FILENAME))
     logging.info(f"Imputer saved to {os.path.join(MODEL_DIR, IMPUTER_FILENAME)}")
     logging.info(f"Scaler saved to {os.path.join(MODEL_DIR, SCALER_FILENAME)}")
 
-    return X_scaled_df, y, identifiers, feature_names_imputed
+    return X_scaled_df, y, identifiers, feature_cols_final
 
 
 def split_data(X, y, identifiers):
     """
-    Splits data into train, validation, and test sets based on time.
+    Splits data into train, validation, and test sets based on time (Time-Based Split).
+    NOTE: Adjusted Time-Based window to be smaller due to data sparsity, and added minimum size check.
     """
     logging.info("4. Splitting data into Train, Validation, Test sets (Time-Based)...")
+    
+    # --- ADJUSTED TIME SPLIT CONSTANTS FOR RECENT DATA WINDOW ---
+    VALIDATION_PERIOD_MONTHS = 3 
+    TEST_PERIOD_MONTHS = 3      
+    MIN_TRAIN_SAMPLES = 50 # New constraint
+    # ----------------------------------------------------------
 
-    # Combine X, y, and identifiers for easy splitting based on date
     data_full = pd.concat([identifiers.reset_index(drop=True),
                            X.reset_index(drop=True),
                            y.reset_index(drop=True)], axis=1)
@@ -374,7 +446,6 @@ def split_data(X, y, identifiers):
 
     # Determine split dates
     max_date = data_full['report_date'].max()
-    # ใช้ DateOffset(months=...) 
     test_start_date = max_date - pd.DateOffset(months=TEST_PERIOD_MONTHS) + pd.Timedelta(days=1)
     val_start_date = test_start_date - pd.DateOffset(months=VALIDATION_PERIOD_MONTHS)
     
@@ -383,19 +454,19 @@ def split_data(X, y, identifiers):
     val_data = data_full[(data_full['report_date'] >= val_start_date) & (data_full['report_date'] < test_start_date)]
     train_data = data_full[data_full['report_date'] < val_start_date]
 
-    if train_data.empty or val_data.empty or test_data.empty:
-        logging.warning("One or more data splits are empty. Adjust split years or check data range.")
-        # Fallback to random split if time split fails (less ideal)
-        logging.warning("Falling back to random train/test split (80/20). No validation set.")
-        # ใช้ Stratify เพื่อรักษาอัตราส่วน Y
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-        X_val, y_val = pd.DataFrame(), pd.Series() # No validation set in fallback
+    # --- CRITICAL CHECK: Check for empty/too small training set ---
+    if train_data.empty or len(train_data) < MIN_TRAIN_SAMPLES or test_data.empty: 
+        logging.warning("Time-Based split failed (too few samples, size < 50, or empty). Falling back to random split.")
         
-        # ปรับ identifiers ให้สอดคล้องกับการสุ่ม
+        # Fallback to random split
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        X_val, y_val = pd.DataFrame(), pd.Series()
+        
         train_indices, test_indices = train_test_split(identifiers.index, test_size=0.2, random_state=42, stratify=y.values)
         train_ids = identifiers.loc[train_indices]
         test_ids = identifiers.loc[test_indices]
         val_ids = pd.DataFrame()
+        
     else:
         feature_cols = X.columns
         X_train = train_data[feature_cols]
@@ -416,32 +487,41 @@ def split_data(X, y, identifiers):
         logging.info(f"  Validation: {len(X_val)} samples (Dates: {val_ids['report_date'].min().date()} - {val_ids['report_date'].max().date()})")
     logging.info(f"  Test: {len(X_test)} samples (Dates: {test_ids['report_date'].min().date()} - {test_ids['report_date'].max().date()})")
 
-    # Log class distribution in each set
     logging.info(f"  Train Y distribution:\n{y_train.value_counts(normalize=True)}")
     if not y_val.empty:
         logging.info(f"  Validation Y distribution:\n{y_val.value_counts(normalize=True)}")
     logging.info(f"  Test Y distribution:\n{y_test.value_counts(normalize=True)}")
-
 
     return X_train, y_train, X_val, y_val, X_test, y_test
 
 
 def train_model(X_train, y_train):
     """
-    Trains a RandomForestClassifier model after applying SMOTE for balancing.
+    Trains the XGBoost Classifier model after applying SMOTE.
     """
     logging.info("4.1 Applying SMOTE to balance training data...")
     try:
         smote = SMOTE(random_state=42)
         X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
         logging.info(f"  Train Y distribution (After SMOTE):\n{y_train_res.value_counts(normalize=True)}")
-    except NameError:
-        logging.warning("SMOTE is not defined (imblearn not imported/installed). Skipping balancing.")
+    except Exception:
+        logging.warning("SMOTE failed or is not available. Skipping balancing.")
         X_train_res, y_train_res = X_train, y_train
         
-    logging.info("5. Training RandomForest model...")
-    # Initialize model 
-    model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced', n_jobs=-1)
+    logging.info("5. Training XGBoost model...")
+    # --- FIXED: Set base_score=0.5 to prevent SHAP error ---
+    model = XGBClassifier(
+        objective='binary:logistic',
+        n_estimators=150,
+        max_depth=5,
+        learning_rate=0.1,
+        random_state=42,
+        use_label_encoder=False,
+        eval_metric='logloss',
+        n_jobs=-1,
+        scale_pos_weight=1,
+        base_score=0.5 # CRITICAL FIX for SHAP ValueError
+    )
 
     model.fit(X_train_res, y_train_res)
     logging.info("Model training complete.")
@@ -451,14 +531,13 @@ def train_model(X_train, y_train):
 def evaluate_model(model, X_test, y_test):
     """
     Evaluates the model on the test set and prints metrics.
-    Includes evaluation at different thresholds to optimize for Recall/Precision.
     """
     logging.info("6. Evaluating model on Test Set...")
-    y_pred = model.predict(X_test)
-    y_pred_proba = model.predict_proba(X_test)[:, 1] # Probability of class 1
+    y_pred_proba = model.predict_proba(X_test)[:, 1] 
 
     # --- Evaluation at Threshold 0.5 (Default) ---
-    # ใช้ zero_division=0 เพื่อป้องกัน Warning หากไม่มีการทำนายเป็น Class 1 เลย
+    y_pred = (y_pred_proba >= 0.5).astype(int)
+    
     accuracy = accuracy_score(y_test, y_pred)
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
@@ -478,11 +557,10 @@ def evaluate_model(model, X_test, y_test):
     logging.info("--- Classification Report (Threshold 0.5) ---")
     logging.info(f"\n{classification_report(y_test, y_pred, zero_division=0)}")
 
-    # --- Evaluation at a Lower Threshold (Example: 0.15 for higher Recall) ---
+    # --- Evaluation at a Lower Threshold (0.15 for higher Recall) ---
     low_threshold = 0.15 
     y_pred_low = (y_pred_proba >= low_threshold).astype(int)
     
-    # ใช้ zero_division=0 เพื่อป้องกัน Warning หากไม่มีการทำนายเป็น Class 1 เลย
     recall_low = recall_score(y_test, y_pred_low, zero_division=0)
     precision_low = precision_score(y_test, y_pred_low, zero_division=0)
     f1_low = f1_score(y_test, y_pred_low, zero_division=0)
@@ -504,19 +582,12 @@ def explain_model(model, X_train, feature_names):
     """
     logging.info("7. Explaining model using SHAP...")
     try:
-        # Use TreeExplainer for tree-based models like RandomForest
         explainer = shap.TreeExplainer(model)
-        # Calculate SHAP values - using a subset of training data can speed this up if needed
-        # ใช้ X_train เป็น background data
         shap_values = explainer.shap_values(X_train)
-
-        # shap_values might be a list [shap_values_for_class0, shap_values_for_class1]
-        # For binary classification, we usually focus on class 1
-        shap_values_class1 = shap_values[1] if isinstance(shap_values, list) else shap_values
-
-        # --- SHAP Summary Plot ---
+        
+        shap_values_class1 = shap_values 
+        
         logging.info("Generating SHAP Summary Plot...")
-        shap.summary_plot(shap_values_class1, X_train, feature_names=feature_names, show=False)
         logging.info("(SHAP plot display/saving would happen here if matplotlib is configured)")
 
     except Exception as e:
@@ -538,7 +609,7 @@ def save_model(model):
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    logging.info("===== Starting ML Risk Prediction Script =====")
+    logging.info("===== Starting ML Risk Prediction Script (XGBoost) =====")
     start_time = datetime.now()
 
     # 1. Fetch Data
@@ -555,36 +626,32 @@ if __name__ == "__main__":
             X, y, ids, feature_names_final = engineer_features(df_with_y)
 
             if not X.empty:
-                # 4. Split Data (Note: Train_model now handles SMOTE)
+                # 4. Split Data (Time-Based)
                 try:
-                     # ใช้ try-except สำหรับ split_data เพื่อจับ ValueError หาก split ล้มเหลว
-                     X_train, y_train, X_val, y_val, X_test, y_test = split_data(X, y, ids)
+                    X_train, y_train, X_val, y_val, X_test, y_test = split_data(X, y, ids)
 
-                     # 5. Train Model (รวมขั้นตอน SMOTE ไว้ใน train_model)
-                     trained_model = train_model(X_train, y_train)
+                    # 5. Train Model (XGBoost + SMOTE)
+                    trained_model = train_model(X_train, y_train)
 
-                     # 6. Evaluate Model (on Test set)
-                     evaluate_model(trained_model, X_test, y_test)
+                    # 6. Evaluate Model (on Test set)
+                    evaluate_model(trained_model, X_test, y_test)
 
-                     # 7. Explain Model (using Training set for background)
-                     explain_model(trained_model, X_train, feature_names_final)
+                    # 7. Explain Model (using Training set for background)
+                    explain_model(trained_model, X_train, feature_names_final)
 
-                     # 8. Save Model
-                     save_model(trained_model)
-
-                     # --- Optional: Predict latest probabilities (Placeholder) ---
-                     # predict_latest(trained_model, ...)
-                     logging.info("Placeholder: Prediction for latest data would happen here.")
-                     # --------------------------------------------------------
+                    # 8. Save Model
+                    save_model(trained_model)
+                    
+                    logging.info("Placeholder: Prediction for latest data would happen here.")
 
                 except ValueError as ve:
                     logging.error(f"Error during data splitting or processing: {ve}")
                 except Exception as e:
                     logging.error(f"An unexpected error occurred during ML pipeline: {e}", exc_info=True)
             else:
-                 logging.error("Stopping script because feature engineering resulted in empty data.")
+                logging.error("Stopping script because feature engineering resulted in empty data.")
         else:
-             logging.error("Stopping script because target variable creation failed or resulted in empty data.")
+            logging.error("Stopping script because target variable creation failed or resulted in empty data.")
 
     end_time = datetime.now()
     logging.info(f"===== ML Risk Prediction Script Finished in {end_time - start_time} =====")

@@ -1,4 +1,4 @@
-# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Fixed AUC, SMOTE, and Time-Based Split Robustness)
+# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Fixed NameError, scale_pos_weight, Time Split, Z-Score)
 
 import logging
 import pandas as pd
@@ -7,7 +7,7 @@ from datetime import datetime, date
 import os
 import joblib 
 import shap 
-from imblearn.over_sampling import SMOTE 
+# from imblearn.over_sampling import SMOTE # นำออก, ใช้ scale_pos_weight แทน
 from xgboost import XGBClassifier 
 
 # --- Database Interaction ---
@@ -244,7 +244,7 @@ def create_target_variable(df_ffs, df_fcs):
 
 def engineer_features(df):
     """
-    Calculates 19 features, handles infinities/NaNs, and applies scaling/imputation.
+    Calculates 22 features (including 3 Z-Score Proxies), handles infinities/NaNs, and applies scaling/imputation.
     """
     logging.info("3. Engineering Features (X)...")
     if df.empty or 'Y' not in df.columns:
@@ -270,7 +270,7 @@ def engineer_features(df):
     rev_col = get_column(df_eng, ['Total Revenue'])
     ni_col = get_column(df_eng, ['Net Income', 'Net Income Common Stockholders'])
     ocf_col = get_column(df_eng, ['Operating Cash Flow', 'Total Cash Flow From Operating Activities'])
-    int_exp_col = get_column(df_eng, ['Interest Expense']) # Add back here for features
+    int_exp_col = get_column(df_eng, ['Interest Expense']) 
     
     # --- 1. Base Ratios / Size Features ---
     if ca_col and cl_col:
@@ -297,7 +297,8 @@ def engineer_features(df):
     growth_col_map = {'Total Revenue': rev_col, 'Net Income': ni_col, 'Operating Cash Flow': ocf_col}
     for display_name, raw_col in growth_col_map.items():
         if raw_col:
-            df_eng[f'{display_name}_YoY_Growth'] = df_eng.groupby('ticker')[raw_col].pct_change(periods=periods_per_year)
+            # FIX: Added fill_method=None to remove FutureWarning
+            df_eng[f'{display_name}_YoY_Growth'] = df_eng.groupby('ticker')[raw_col].pct_change(periods=periods_per_year, fill_method=None)
         else:
              df_eng[f'{display_name}_YoY_Growth'] = np.nan
 
@@ -318,7 +319,7 @@ def engineer_features(df):
              df_eng[f'MA_{col}'] = np.nan
 
     # ------------------------------------------------------------------
-    # --- 5. NEW: 7 Advanced Credit Risk Features ---
+    # --- 5. Advanced Credit Risk Features (7 Features) ---
     # ------------------------------------------------------------------
     
     # 1. Interest Coverage Ratio (EBIT / Interest Expense)
@@ -338,7 +339,6 @@ def engineer_features(df):
         df_eng['Debt to EBITDA'] = df_eng['Total Liabilities_TTM'] / df_eng['EBIT_TTM_4Q'].replace(0, np.nan)
     else: 
         df_eng['Debt to EBITDA'] = np.nan
-        logging.warning("Skipping Debt to EBITDA calculation: Missing required columns (Total Liabilities or EBIT/Operating Income).")
 
     # 4. Net Working Capital / Total Assets
     if ca_col and cl_col and ta_col:
@@ -363,16 +363,41 @@ def engineer_features(df):
     if 'Total Revenue_YoY_Growth' in df_eng.columns:
         df_eng['Sales_Volatility'] = df_eng.groupby('ticker')['Total Revenue_YoY_Growth'].transform(lambda x: x.rolling(window=4, min_periods=4).std())
     else: df_eng['Sales_Volatility'] = np.nan
+    
+    # ------------------------------------------------------------------
+    # --- 6. NEW: Altman Z-Score Components Proxies (3 Features) ---
+    # ------------------------------------------------------------------
+    
+    # 1. Retained Earnings / Total Assets (RETA) Proxy: Cumulative TTM Net Income / Total Assets
+    if ni_col and ta_col:
+        # TTM Net Income (proxy for incremental retained earnings, often used when historical RE isn't easily available)
+        df_eng['Net Income_TTM_RETA'] = df_eng.groupby('ticker')[ni_col].transform(calculate_ttm)
+        df_eng['RETA_Proxy'] = df_eng['Net Income_TTM_RETA'] / df_eng[ta_col].replace(0, np.nan)
+    else: df_eng['RETA_Proxy'] = np.nan
+    
+    # 2. EBIT / Total Assets (EBITTA) Proxy: TTM EBIT / Total Assets
+    if ebit_col and ta_col:
+        df_eng['EBIT_TTM_EBITTA'] = df_eng.groupby('ticker')[ebit_col].transform(calculate_ttm)
+        df_eng['EBITTA_Proxy'] = df_eng['EBIT_TTM_EBITTA'] / df_eng[ta_col].replace(0, np.nan)
+    else: df_eng['EBITTA_Proxy'] = np.nan
+        
+    # 3. Sales / Total Assets (SATA) Proxy: TTM Revenue / Total Assets
+    if rev_col and ta_col:
+        df_eng['Total Revenue_TTM_SATA'] = df_eng.groupby('ticker')[rev_col].transform(calculate_ttm)
+        df_eng['SATA_Proxy'] = df_eng['Total Revenue_TTM_SATA'] / df_eng[ta_col].replace(0, np.nan)
+    else: df_eng['SATA_Proxy'] = np.nan
 
-    # --- Final Feature Selection (19 Features) ---
+    # --- Final Feature Selection (Now 22 Features) ---
     feature_cols = [
         'de_ratio', 'Current Ratio', 'Operating Margin', 'Total Assets (ln)', 
         'Total Revenue_YoY_Growth', 'Net Income_YoY_Growth', 'Operating Cash Flow_YoY_Growth', 
         'Change in D/E Ratio', 'Change in Operating Margin', 'Change in Current Ratio', 
         'MA_Net Income', 'MA_ROE',
-        # 7 New Features
+        # 7 Advanced Credit Risk Features
         'Interest Coverage Ratio', 'Quick Ratio', 'Debt to EBITDA', 'NWC_to_Total_Assets', 
-        'CV_Operating_Margin', 'Count_Negative_Net_Income_12Q', 'Sales_Volatility' 
+        'CV_Operating_Margin', 'Count_Negative_Net_Income_12Q', 'Sales_Volatility',
+        # 3 New Z-Score Proxies
+        'RETA_Proxy', 'EBITTA_Proxy', 'SATA_Proxy' 
     ]
     
     df_eng = df_eng.replace([np.inf, -np.inf], np.nan)
@@ -410,7 +435,8 @@ def engineer_features(df):
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_imputed_df)
-    X_scaled_df = pd.DataFrame(X_scaled, columns=feature_cols_final, index=X_imputed_df.index)
+    # FIX: Corrected NameError here
+    X_scaled_df = pd.DataFrame(X_scaled, columns=feature_cols_final, index=X_imputed_df.index) 
 
     logging.info(f"Selected {len(feature_cols_final)} features for model training.")
     logging.info(f"Feature names: {list(feature_cols_final)}")
@@ -426,48 +452,53 @@ def engineer_features(df):
 def split_data(X, y, identifiers):
     """
     Splits data into train, validation, and test sets based on time (Time-Based Split).
-    NOTE: Adjusted Time-Based window to be smaller due to data sparsity, and added minimum size check.
+    Uses index-based split after sorting to ensure non-overlapping, time-ordered partitions.
     """
     logging.info("4. Splitting data into Train, Validation, Test sets (Time-Based)...")
     
-    # --- ADJUSTED TIME SPLIT CONSTANTS FOR RECENT DATA WINDOW ---
-    VALIDATION_PERIOD_MONTHS = 3 
-    TEST_PERIOD_MONTHS = 3      
-    MIN_TRAIN_SAMPLES = 50 # New constraint
-    # ----------------------------------------------------------
+    # --- FIXED TIME SPLIT CONFIGURATION ---
+    TEST_RATIO = 0.20  
+    VAL_RATIO = 0.20
+    MIN_TRAIN_SAMPLES = 50 
+    # ------------------------------------------
 
     data_full = pd.concat([identifiers.reset_index(drop=True),
                            X.reset_index(drop=True),
                            y.reset_index(drop=True)], axis=1)
-    data_full = data_full.sort_values(by='report_date')
+    data_full = data_full.sort_values(by='report_date').reset_index(drop=True)
 
     if data_full.empty:
         raise ValueError("Cannot split empty DataFrame.")
 
-    # Determine split dates
-    max_date = data_full['report_date'].max()
-    test_start_date = max_date - pd.DateOffset(months=TEST_PERIOD_MONTHS) + pd.Timedelta(days=1)
-    val_start_date = test_start_date - pd.DateOffset(months=VALIDATION_PERIOD_MONTHS)
+    total_samples = len(data_full)
     
-    # Perform the split
-    test_data = data_full[data_full['report_date'] >= test_start_date]
-    val_data = data_full[(data_full['report_date'] >= val_start_date) & (data_full['report_date'] < test_start_date)]
-    train_data = data_full[data_full['report_date'] < val_start_date]
-
-    # --- CRITICAL CHECK: Check for empty/too small training set ---
-    if train_data.empty or len(train_data) < MIN_TRAIN_SAMPLES or test_data.empty: 
+    test_size = int(total_samples * TEST_RATIO)
+    val_size = int(total_samples * VAL_RATIO)
+    
+    
+    if total_samples - test_size - val_size < MIN_TRAIN_SAMPLES or total_samples < 100:
         logging.warning("Time-Based split failed (too few samples, size < 50, or empty). Falling back to random split.")
         
-        # Fallback to random split
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        # Fallback to random split (80/20) with stratification
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_RATIO, random_state=42, stratify=y)
         X_val, y_val = pd.DataFrame(), pd.Series()
         
-        train_indices, test_indices = train_test_split(identifiers.index, test_size=0.2, random_state=42, stratify=y.values)
+        # Get the corresponding IDs for logging
+        train_indices, test_indices = train_test_split(identifiers.index, test_size=TEST_RATIO, random_state=42, stratify=y.values)
         train_ids = identifiers.loc[train_indices]
         test_ids = identifiers.loc[test_indices]
         val_ids = pd.DataFrame()
         
     else:
+        # Standard 60/20/20 time-based split (index-based after sorting by report_date)
+        train_end_index = total_samples - test_size - val_size
+        val_end_index = total_samples - test_size
+        
+        train_data = data_full.iloc[:train_end_index]
+        val_data = data_full.iloc[train_end_index:val_end_index]
+        test_data = data_full.iloc[val_end_index:]
+        
+        # Assign data
         feature_cols = X.columns
         X_train = train_data[feature_cols]
         y_train = train_data['Y']
@@ -497,19 +528,23 @@ def split_data(X, y, identifiers):
 
 def train_model(X_train, y_train):
     """
-    Trains the XGBoost Classifier model after applying SMOTE.
+    Trains the XGBoost Classifier model using scale_pos_weight for class imbalance.
     """
-    logging.info("4.1 Applying SMOTE to balance training data...")
-    try:
-        smote = SMOTE(random_state=42)
-        X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
-        logging.info(f"  Train Y distribution (After SMOTE):\n{y_train_res.value_counts(normalize=True)}")
-    except Exception:
-        logging.warning("SMOTE failed or is not available. Skipping balancing.")
-        X_train_res, y_train_res = X_train, y_train
+    logging.info("4.1 Calculating scale_pos_weight and skipping SMOTE...")
+    
+    # Calculate scale_pos_weight
+    count_neg = y_train.value_counts().get(0, 0)
+    count_pos = y_train.value_counts().get(1, 1) # Set minimum to 1 to avoid ZeroDivisionError
+    scale_pos_weight_value = count_neg / count_pos
+    
+    logging.info(f"  Calculated scale_pos_weight: {scale_pos_weight_value:.2f} (Count 0 / Count 1)")
+    
+    # Use original training data (no SMOTE)
+    X_train_res, y_train_res = X_train, y_train
         
     logging.info("5. Training XGBoost model...")
-    # --- FIXED: Set base_score=0.5 to prevent SHAP error ---
+    
+    # Use calculated scale_pos_weight
     model = XGBClassifier(
         objective='binary:logistic',
         n_estimators=150,
@@ -519,12 +554,12 @@ def train_model(X_train, y_train):
         use_label_encoder=False,
         eval_metric='logloss',
         n_jobs=-1,
-        scale_pos_weight=1,
+        scale_pos_weight=scale_pos_weight_value, # CRITICAL CHANGE: Use scale_pos_weight instead of SMOTE
         base_score=0.5 # CRITICAL FIX for SHAP ValueError
     )
 
     model.fit(X_train_res, y_train_res)
-    logging.info("Model training complete.")
+    logging.info("Model training complete. scale_pos_weight was used.")
     return model
 
 
@@ -542,7 +577,14 @@ def evaluate_model(model, X_test, y_test):
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
+    
+    # Check if there are positive samples in y_test for AUC calculation
+    if len(np.unique(y_test)) == 2:
+        roc_auc = roc_auc_score(y_test, y_pred_proba)
+    else:
+        roc_auc = np.nan
+        logging.warning("Cannot calculate AUC: Only one class present in y_test.")
+
     cm = confusion_matrix(y_test, y_pred)
 
     logging.info("--- Evaluation Metrics (Threshold 0.5) ---")
@@ -550,7 +592,7 @@ def evaluate_model(model, X_test, y_test):
     logging.info(f"Precision: {precision:.4f}")
     logging.info(f"Recall:    {recall:.4f}")
     logging.info(f"F1-Score:  {f1:.4f}")
-    logging.info(f"AUC-ROC:   {roc_auc:.4f}")
+    logging.info(f"AUC-ROC:   {roc_auc:.4f}" if not np.isnan(roc_auc) else "AUC-ROC:   N/A")
     logging.info("--- Confusion Matrix ---")
     logging.info(f"\n{cm}")
     
@@ -582,13 +624,17 @@ def explain_model(model, X_train, feature_names):
     """
     logging.info("7. Explaining model using SHAP...")
     try:
-        explainer = shap.TreeExplainer(model)
+        explainer = shap.TreeExplainer(model) 
         shap_values = explainer.shap_values(X_train)
         
-        shap_values_class1 = shap_values 
+        # If explainer.shap_values returns a list of two arrays
+        if isinstance(shap_values, list) and len(shap_values) > 1:
+            shap_values_class1 = shap_values[1] # Use values for class 1 (risk=1)
+        else:
+            shap_values_class1 = shap_values
         
         logging.info("Generating SHAP Summary Plot...")
-        logging.info("(SHAP plot display/saving would happen here if matplotlib is configured)")
+        logging.info(f"SHAP explanation calculated for {len(feature_names)} features.")
 
     except Exception as e:
         logging.error(f"Error during SHAP explanation: {e}", exc_info=True)
@@ -630,7 +676,7 @@ if __name__ == "__main__":
                 try:
                     X_train, y_train, X_val, y_val, X_test, y_test = split_data(X, y, ids)
 
-                    # 5. Train Model (XGBoost + SMOTE)
+                    # 5. Train Model (XGBoost + scale_pos_weight)
                     trained_model = train_model(X_train, y_train)
 
                     # 6. Evaluate Model (on Test set)

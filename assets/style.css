@@ -9,8 +9,8 @@
 @media (min-width: 768px) {
   .sidebar-fixed {
     position: fixed !important;
-    top: 80px;
-    height: calc(100vh - 100px);
+    top: 40px;
+    height: calc(100vh - 85px);
     overflow-y: auto;
     z-index: 1020;
     scrollbar-width: none; /* Firefox */

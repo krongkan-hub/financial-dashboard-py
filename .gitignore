@@ -25,6 +25,8 @@ venv/
 .venv/
 env/
 .env/
+venv-py312/
+venv-py314/
 
 IDE specific files
 

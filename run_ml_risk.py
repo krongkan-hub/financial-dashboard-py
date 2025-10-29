@@ -1,4 +1,4 @@
-# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Fixed NameError, scale_pos_weight, Time Split, Z-Score, SHAP base_score error)
+# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Tuned Recall Target and SHAP Robustness)
 
 import logging
 import pandas as pd
@@ -10,18 +10,19 @@ import shap
 # from imblearn.over_sampling import SMOTE # นำออก, ใช้ scale_pos_weight แทน
 from xgboost import XGBClassifier 
 
-# --- Database Interaction ---
+# --- Database Interaction (สมมติว่า import ได้ถูกต้อง) ---
 from app import db, server, FactFinancialStatements, FactCompanySummary
 from sqlalchemy import func, and_
 from sqlalchemy.orm import aliased
 
 # --- Machine Learning ---
-from sklearn.model_selection import train_test_split 
+from sklearn.model_selection import train_test_split, RandomizedSearchCV, StratifiedKFold
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, confusion_matrix, classification_report
+    roc_auc_score, confusion_matrix, classification_report,
+    make_scorer, fbeta_score, precision_recall_curve 
 )
 
 # --- Configuration ---
@@ -435,7 +436,6 @@ def engineer_features(df):
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_imputed_df)
-    # FIX: Corrected NameError here
     X_scaled_df = pd.DataFrame(X_scaled, columns=feature_cols_final, index=X_imputed_df.index) 
 
     logging.info(f"Selected {len(feature_cols_final)} features for model training.")
@@ -458,8 +458,8 @@ def split_data(X, y, identifiers):
     
     # --- FIXED TIME SPLIT CONFIGURATION ---
     TEST_RATIO = 0.20  
-    VAL_RATIO = 0.20
-    MIN_TRAIN_SAMPLES = 50 
+    VAL_RATIO = 0.10
+    MIN_TRAIN_SAMPLES = 70
     # ------------------------------------------
 
     data_full = pd.concat([identifiers.reset_index(drop=True),
@@ -528,9 +528,9 @@ def split_data(X, y, identifiers):
 
 def train_model(X_train, y_train):
     """
-    Trains the XGBoost Classifier model using scale_pos_weight for class imbalance.
+    Trains the XGBoost Classifier model using RandomizedSearchCV and F2-Score for optimization.
     """
-    logging.info("4.1 Calculating scale_pos_weight and skipping SMOTE...")
+    logging.info("4.1 Calculating scale_pos_weight...")
     
     # Calculate scale_pos_weight
     count_neg = y_train.value_counts().get(0, 0)
@@ -539,39 +539,110 @@ def train_model(X_train, y_train):
     
     logging.info(f"  Calculated scale_pos_weight: {scale_pos_weight_value:.2f} (Count 0 / Count 1)")
     
-    # Use original training data (no SMOTE)
     X_train_res, y_train_res = X_train, y_train
         
-    logging.info("5. Training XGBoost model...")
+    logging.info("5. Training XGBoost model using RandomizedSearchCV...")
+
+    # 1. กำหนด Base Model
+    # INCREASE BASE scale_pos_weight for better False Negative penalty
+    base_scale_pos_weight = scale_pos_weight_value * 1.5
     
-    # Use calculated scale_pos_weight
-    model = XGBClassifier(
+    xgb_base = XGBClassifier(
         objective='binary:logistic',
-        n_estimators=150,
-        max_depth=5,
-        learning_rate=0.1,
         random_state=42,
         use_label_encoder=False,
         eval_metric='logloss',
         n_jobs=-1,
-        scale_pos_weight=scale_pos_weight_value, # CRITICAL CHANGE: Use scale_pos_weight instead of SMOTE
-        # base_score=0.5 # <--- CRITICAL FIX: บรรทัดนี้ถูกนำออกเพื่อแก้ปัญหา SHAP Error
+        scale_pos_weight=base_scale_pos_weight, # ใช้ค่าที่ถ่วงน้ำหนักเพิ่มขึ้น
+    )
+    
+    # 2. กำหนด Hyperparameter Space
+    param_grid = {
+        'n_estimators': [100, 200, 300],
+        'max_depth': [3, 4, 5, 6],
+        'learning_rate': [0.05, 0.1, 0.2],
+        'gamma': [0, 0.1, 0.5], 
+        'subsample': [0.7, 0.8, 0.9],
+        # ไม่ค้นหา scale_pos_weight อีกรอบ ให้ใช้ค่า base_scale_pos_weight
+    }
+    
+    # 3. กำหนด Scoring Metric: F2-Score (Recall สำคัญกว่า Precision)
+    f2_scorer = make_scorer(fbeta_score, beta=2, zero_division=0)
+    
+    # 4. กำหนด CV strategy (Stratified K-Fold เหมาะกับ Imbalance Data)
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
+    # 5. รัน Randomized Search
+    random_search = RandomizedSearchCV(
+        estimator=xgb_base,
+        param_distributions=param_grid,
+        scoring=f2_scorer,
+        cv=skf,
+        n_iter=20, # จำนวนการทดลอง
+        verbose=1,
+        random_state=42
     )
 
-    model.fit(X_train_res, y_train_res)
-    logging.info("Model training complete. scale_pos_weight was used.")
-    return model
+    random_search.fit(X_train_res, y_train_res)
+    
+    best_model = random_search.best_estimator_
+    
+    logging.info("Model training complete. Hyperparameter tuning finished.")
+    logging.info(f"Best F2-Score found: {random_search.best_score_:.4f}")
+    logging.info(f"Best Hyperparameters: {random_search.best_params_}")
+    
+    return best_model 
 
-
-def evaluate_model(model, X_test, y_test):
+def optimize_threshold(model, X_val, y_val, min_recall_target=0.60): # <--- เปลี่ยนเป็น 0.60
     """
-    Evaluates the model on the test set and prints metrics.
+    Calculates the optimal threshold from the Validation set based on a minimum Recall target.
+    """
+    if X_val.empty or y_val.empty:
+        logging.warning("Validation set is empty, skipping threshold optimization.")
+        return 0.5, 0.0, 0.0 # Fallback
+
+    logging.info("Optimizing Classification Threshold using Validation Set...")
+    y_pred_proba = model.predict_proba(X_val)[:, 1]
+    
+    precision, recall, thresholds = precision_recall_curve(y_val, y_pred_proba)
+    
+    # Find the threshold that meets the minimum recall target while maintaining precision
+    sufficient_recall_indices = np.where(recall[:-1] >= min_recall_target)[0] # Exclude last point
+    
+    if len(sufficient_recall_indices) == 0:
+        logging.warning(f"  Cannot achieve minimum Recall target of {min_recall_target:.2f}. Using threshold that maximizes F1-Score instead.")
+        
+        f1_scores = 2 * (precision * recall) / (precision + recall + 1e-6)
+        optimal_idx = np.argmax(f1_scores[:-1]) 
+        
+        optimal_precision = precision[optimal_idx]
+        optimal_recall = recall[optimal_idx]
+        optimal_threshold = thresholds[optimal_idx]
+
+    else:
+        # Select the point that maximizes precision among those meeting the minimum recall target
+        optimal_idx = sufficient_recall_indices[np.argmax(precision[sufficient_recall_indices])]
+        
+        optimal_threshold = thresholds[optimal_idx]
+        optimal_precision = precision[optimal_idx]
+        optimal_recall = recall[optimal_idx]
+
+    logging.info(f"  Optimal Threshold found: {optimal_threshold:.4f}")
+    logging.info(f"  Resulting Precision: {optimal_precision:.4f}")
+    logging.info(f"  Resulting Recall: {optimal_recall:.4f}")
+    
+    return optimal_threshold, optimal_recall, optimal_precision
+
+
+def evaluate_model(model, X_test, y_test, optimal_threshold=0.5):
+    """
+    Evaluates the model on the test set and prints metrics, using the optimal_threshold.
     """
     logging.info("6. Evaluating model on Test Set...")
     y_pred_proba = model.predict_proba(X_test)[:, 1] 
 
-    # --- Evaluation at Threshold 0.5 (Default) ---
-    y_pred = (y_pred_proba >= 0.5).astype(int)
+    # --- Evaluation at Optimal Threshold ---
+    y_pred = (y_pred_proba >= optimal_threshold).astype(int)
     
     accuracy = accuracy_score(y_test, y_pred)
     precision = precision_score(y_test, y_pred, zero_division=0)
@@ -587,7 +658,7 @@ def evaluate_model(model, X_test, y_test):
 
     cm = confusion_matrix(y_test, y_pred)
 
-    logging.info("--- Evaluation Metrics (Threshold 0.5) ---")
+    logging.info(f"--- Evaluation Metrics (Threshold {optimal_threshold:.4f}) ---")
     logging.info(f"Accuracy:  {accuracy:.4f}")
     logging.info(f"Precision: {precision:.4f}")
     logging.info(f"Recall:    {recall:.4f}")
@@ -596,35 +667,20 @@ def evaluate_model(model, X_test, y_test):
     logging.info("--- Confusion Matrix ---")
     logging.info(f"\n{cm}")
     
-    logging.info("--- Classification Report (Threshold 0.5) ---")
+    logging.info("--- Classification Report ---")
     logging.info(f"\n{classification_report(y_test, y_pred, zero_division=0)}")
-
-    # --- Evaluation at a Lower Threshold (0.15 for higher Recall) ---
-    low_threshold = 0.15 
-    y_pred_low = (y_pred_proba >= low_threshold).astype(int)
-    
-    recall_low = recall_score(y_test, y_pred_low, zero_division=0)
-    precision_low = precision_score(y_test, y_pred_low, zero_division=0)
-    f1_low = f1_score(y_test, y_pred_low, zero_division=0)
-        
-    cm_low = confusion_matrix(y_test, y_pred_low)
-    
-    logging.info(f"--- Evaluation Metrics (Threshold {low_threshold}) ---")
-    logging.info(f"Recall:    {recall_low:.4f}")
-    logging.info(f"Precision: {precision_low:.4f}")
-    logging.info(f"F1-Score:  {f1_low:.4f}")
-    logging.info(f"Confusion Matrix:\n{cm_low}")
     
     logging.info("--- End Evaluation ---")
 
 
 def explain_model(model, X_train, feature_names):
     """
-    Uses SHAP to explain the model.
+    Uses SHAP to explain the model (Final Fix: Robust TreeExplainer attempt).
     """
     logging.info("7. Explaining model using SHAP...")
     try:
-        explainer = shap.TreeExplainer(model) 
+        # Primary method: Use TreeExplainer (fastest and best for tree models)
+        explainer = shap.TreeExplainer(model, X_train) # Pass X_train as data for robustness
         shap_values = explainer.shap_values(X_train)
         
         # If explainer.shap_values returns a list of two arrays
@@ -637,7 +693,26 @@ def explain_model(model, X_train, feature_names):
         logging.info(f"SHAP explanation calculated for {len(feature_names)} features.")
 
     except Exception as e:
-        logging.error(f"Error during SHAP explanation: {e}", exc_info=True)
+        # Secondary method: Fallback to KernelExplainer by wrapping the predict_proba function
+        logging.error(f"Error during TreeExplainer: {e}. Falling back to KernelExplainer with predict_proba wrapper...", exc_info=True)
+        try:
+             # Use KernelExplainer with a callable function that returns probabilities for class 1
+             # NOTE: This is MUCH slower, but should resolve the 'not callable' issue
+             
+             # Re-initialize the explainer using the probability prediction function
+             explainer = shap.Explainer(lambda X: model.predict_proba(X)[:, 1], X_train)
+             shap_values = explainer(X_train)
+             
+             if hasattr(shap_values, 'values') and isinstance(shap_values.values, np.ndarray):
+                 shap_values_class1 = shap_values.values
+             else:
+                 shap_values_class1 = shap_values
+
+             logging.info("SHAP explanation calculated successfully using secondary (KernelExplainer) method.")
+
+        except Exception as e2:
+            logging.error(f"Error during SHAP explanation (All attempts failed): {e2}", exc_info=True)
+            return
 
 
 def save_model(model):
@@ -655,7 +730,7 @@ def save_model(model):
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    logging.info("===== Starting ML Risk Prediction Script (XGBoost) =====")
+    logging.info("===== Starting ML Risk Prediction Script (XGBoost + Tuned) =====")
     start_time = datetime.now()
 
     # 1. Fetch Data
@@ -676,11 +751,20 @@ if __name__ == "__main__":
                 try:
                     X_train, y_train, X_val, y_val, X_test, y_test = split_data(X, y, ids)
 
-                    # 5. Train Model (XGBoost + scale_pos_weight)
+                    # 5. Train Model (XGBoost + RandomizedSearchCV/F2-Score)
                     trained_model = train_model(X_train, y_train)
 
-                    # 6. Evaluate Model (on Test set)
-                    evaluate_model(trained_model, X_test, y_test)
+                    # **NEW STEP: Optimize Threshold**
+                    if not X_val.empty:
+                        # ลองตั้งเป้า Recall ที่ 60% (ค่าที่สมจริงยิ่งขึ้น)
+                        optimized_threshold, _, _ = optimize_threshold(trained_model, X_val, y_val, min_recall_target=0.60)
+                    else:
+                        optimized_threshold = 0.5 
+                        logging.warning("No Validation set available. Using default threshold 0.5 for evaluation.")
+
+
+                    # 6. Evaluate Model (on Test set) using optimized threshold
+                    evaluate_model(trained_model, X_test, y_test, optimized_threshold)
 
                     # 7. Explain Model (using Training set for background)
                     explain_model(trained_model, X_train, feature_names_final)

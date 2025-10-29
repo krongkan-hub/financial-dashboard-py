@@ -214,39 +214,55 @@ def calculate_drawdown(tickers: tuple, period: str = "1y") -> pd.DataFrame:
         return pd.DataFrame()
 
 # --- [NEW] Logo Fetching Helper (with Rate Limit Handling) ---
-def _get_logo_url(ticker: str) -> Optional[str]:
+# --- [MODIFIED] Logo Fetching Helper (with yfinance Fallback & using info dict) ---
+# Function now accepts the info dictionary fetched by the caller
+def _get_logo_url(ticker: str, info: Optional[dict] = None) -> Optional[str]:
     """
-    Fetches the company logo URL from Finnhub API.
+    Fetches the company logo URL.
+    Tries Finnhub API first. If it fails or returns None,
+    tries to get it from the yfinance info dictionary if provided.
     """
-    if not FINNHUB_API_KEY:
-        logging.warning("FINNHUB_API_KEY not set. Skipping logo fetch.")
-        return None
+    finnhub_logo = None
 
-    try:
-        url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_API_KEY}"
-        r = requests.get(url, timeout=10) # Set timeout
-        r.raise_for_status() # Raise error for bad responses (4xx, 5xx)
-        data = r.json()
-        logo_url = data.get('logo')
+    # 1. Try Finnhub first (เหมือนเดิม)
+    if FINNHUB_API_KEY:
+        try:
+            url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_API_KEY}"
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            finnhub_logo = data.get('logo')
 
-        if logo_url:
-            # logging.info(f"Successfully fetched logo for {ticker}")
-            return logo_url
+            if finnhub_logo:
+                logging.info(f"Successfully fetched logo for {ticker} from Finnhub.")
+                return finnhub_logo # Return immediately if found via Finnhub
+            else:
+                 logging.info(f"No logo URL found in Finnhub data for {ticker}. Will try yfinance fallback if info provided.")
+
+        except requests.exceptions.HTTPError as http_err:
+            if r.status_code == 429:
+                logging.warning(f"Rate limit hit while fetching logo for {ticker} from Finnhub. Trying yfinance fallback.")
+            else:
+                logging.warning(f"HTTP error fetching logo from Finnhub for {ticker}: {http_err}. Trying yfinance fallback.")
+        except requests.exceptions.RequestException as req_err:
+            logging.error(f"Request error fetching logo from Finnhub for {ticker}: {req_err}. Trying yfinance fallback.")
+        except Exception as e:
+            logging.error(f"Unexpected error fetching logo from Finnhub for {ticker}: {e}. Trying yfinance fallback.")
+    else:
+        logging.warning("FINNHUB_API_KEY not set. Skipping Finnhub, trying yfinance fallback.")
+
+    # 2. Fallback to yfinance info dictionary (if info was passed)
+    if info and isinstance(info, dict):
+        yfinance_logo = info.get('logo_url')
+        if yfinance_logo:
+            logging.info(f"Found logo for {ticker} via yfinance info dictionary fallback.")
+            return yfinance_logo
         else:
-            # logging.warning(f"No logo URL found in Finnhub data for {ticker}")
-            return None
-    except requests.exceptions.HTTPError as http_err:
-        if r.status_code == 429:
-            logging.warning(f"Rate limit hit while fetching logo for {ticker}. Skipping.")
-        else:
-            logging.warning(f"HTTP error fetching logo for {ticker}: {http_err}")
-        return None
-    except requests.exceptions.RequestException as req_err:
-        logging.error(f"Request error fetching logo for {ticker}: {req_err}")
-        return None
-    except Exception as e:
-        logging.error(f"An unexpected error occurred fetching logo for {ticker}: {e}")
-        return None
+             logging.info(f"No logo_url key found in yfinance info dictionary for {ticker}.")
+
+    # 3. If neither worked, return None
+    logging.warning(f"Could not retrieve logo for {ticker} from any source.")
+    return None
 
 # --- [END Logo Helper] ---
 
@@ -267,7 +283,7 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
 
             logging.info(f"({i+1}/{total}) Fetching data for {ticker}...")
 
-            logo_url = _get_logo_url(info) # <<< Use the existing helper
+            logo_url = _get_logo_url(ticker, info) # <<< Use the existing helper
             # Use financials/cashflow from the same tkr object to reduce API calls
             fin, cf = tkr.financials, tkr.cashflow
 

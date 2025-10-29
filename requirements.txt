@@ -17,3 +17,4 @@ scikit-learn==1.7.2
 kneed==0.8.5
 numpy
 sqlalchemy
+matplotlib

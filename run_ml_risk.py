@@ -1,4 +1,4 @@
-# run_ml_risk.py
+# run_ml_risk.py (เวอร์ชันแก้ไขชื่อเมตริกแล้ว)
 
 import logging
 import pandas as pd
@@ -70,11 +70,11 @@ def fetch_data(start_year=2015):
 
     # Metrics needed from FactFinancialStatements
     required_metrics = [
-        # For Target Variable
-        'Total Equity', 'EBIT', 'Interest Expense', 'Net Income',
-        # For Features
-        'Total Revenue', 'Operating Cash Flow', 'Total Current Assets',
-        'Total Current Liabilities', 'Inventory', 'Total Assets'
+        # For Target Variable (แก้ไขชื่อเมตริกให้ถูกต้อง)
+        'Stockholders Equity', 'EBIT', 'Interest Expense', 'Net Income',
+        # For Features (แก้ไขชื่อเมตริกให้ถูกต้อง)
+        'Total Revenue', 'Operating Cash Flow', 'Current Assets', 
+        'Current Liabilities', 'Inventory', 'Total Assets'
         # Add more base metrics if needed for other features
     ]
 
@@ -108,7 +108,7 @@ def fetch_data(start_year=2015):
 
             # Query FactCompanySummary for D/E Ratio (use latest available per quarter end)
             # Find the closest summary date *before or on* the report_date
-            FCS = aliased(FactCompanySummary) #********************************
+            FCS = aliased(FactCompanySummary)
             # --- MODIFICATION START ---
             quarter_group = (func.strftime('%Y', FCS.date_updated) + '-' +
                              ((func.strftime('%m', FCS.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
@@ -200,8 +200,8 @@ def create_target_variable(df_ffs, df_fcs):
         lambda x: x.rolling(window=CONSECUTIVE_LOSS_PERIODS, min_periods=CONSECUTIVE_LOSS_PERIODS).sum()
     )
 
-    # Negative Equity
-    df['is_negative_equity'] = (df['Total Equity'] < 0).astype(int)
+    # Negative Equity (แก้ไขชื่อเมตริกที่นี่)
+    df['is_negative_equity'] = (df['Stockholders Equity'] < 0).astype(int)
 
     # Merge D/E Ratio (approximate merge based on quarter end)
     df['report_date_approx'] = df['report_date'] + pd.offsets.QuarterEnd(0)
@@ -243,6 +243,7 @@ def create_target_variable(df_ffs, df_fcs):
 def engineer_features(df):
     """
     Calculates trend/change features, handles missing values, and scales data.
+    (แก้ไข: ปรับชื่อเมตริกและแก้ปัญหา Dimensionality Mismatch ใน Imputer)
     """
     logging.info("3. Engineering Features (X)...")
     if df.empty or 'Y' not in df.columns:
@@ -253,8 +254,8 @@ def engineer_features(df):
     df_eng = df_eng.sort_values(by=['ticker', 'report_date']).reset_index(drop=True)
     periods_per_year = 4
 
-    # --- Calculate Base Ratios (if not already present) ---
-    df_eng['Current Ratio'] = df_eng['Total Current Assets'] / df_eng['Total Current Liabilities'].replace(0, np.nan)
+    # --- Calculate Base Ratios (แก้ไขชื่อเมตริก) ---
+    df_eng['Current Ratio'] = df_eng['Current Assets'] / df_eng['Current Liabilities'].replace(0, np.nan)
     # Add other base ratios as needed
 
     # --- Calculate YoY Growth Features ---
@@ -275,11 +276,11 @@ def engineer_features(df):
 
     # --- Calculate Moving Averages ---
     ma_cols = ['Net Income', 'ROE'] # Need ROE base calculation first
-    # Example: Calculate ROE if needed
-    if 'ROE' not in df_eng.columns and 'Net Income' in df_eng.columns and 'Total Equity' in df_eng.columns:
+    # Example: Calculate ROE if needed (แก้ไขชื่อเมตริก)
+    if 'ROE' not in df_eng.columns and 'Net Income' in df_eng.columns and 'Stockholders Equity' in df_eng.columns:
          # Use TTM Net Income and Average Equity over 4 quarters for a more stable ROE
          df_eng['Net Income_TTM'] = df_eng.groupby('ticker')['Net Income'].transform(calculate_ttm)
-         df_eng['Avg Equity_TTM'] = df_eng.groupby('ticker')['Total Equity'].transform(lambda x: x.rolling(window=4, min_periods=4).mean())
+         df_eng['Avg Equity_TTM'] = df_eng.groupby('ticker')['Stockholders Equity'].transform(lambda x: x.rolling(window=4, min_periods=4).mean())
          df_eng['ROE'] = df_eng['Net Income_TTM'] / df_eng['Avg Equity_TTM'].replace(0, np.nan)
 
     for col in ma_cols:
@@ -287,15 +288,11 @@ def engineer_features(df):
             df_eng[f'MA_{col}'] = df_eng.groupby('ticker')[col].transform(lambda x: x.rolling(window=MA_PERIODS, min_periods=MA_PERIODS).mean())
 
     # --- Final Feature Selection ---
-    # Define the list of features to use (base ratios + engineered features)
-    # Be careful with columns that might have been used for intermediate calcs (like TTM sums)
     feature_cols = [
         'de_ratio', 'Current Ratio', # Base Ratios
         'Total Revenue_YoY_Growth', 'Net Income_YoY_Growth', 'Operating Cash Flow_YoY_Growth', # Growth
         'Change in D/E Ratio', 'Change in Operating Margin', 'Change in Current Ratio', # Changes
         'MA_Net Income', 'MA_ROE' # Moving Averages
-        # Add other base ratios from df_ffs_wide or df_fcs that you want to include directly
-        # e.g., 'ROE', 'Operating Margin' (the base values themselves)
     ]
     # Ensure only existing columns are selected
     feature_cols = [col for col in feature_cols if col in df_eng.columns]
@@ -309,22 +306,36 @@ def engineer_features(df):
     # --- Handle Infinities and NaNs ---
     X = X.replace([np.inf, -np.inf], np.nan)
 
-    # Add indicator columns for NaNs before imputation (can sometimes help model)
-    # for col in X.columns:
-    #     if X[col].isnull().any():
-    #         X[f'{col}_isnull'] = X[col].isnull().astype(int)
+    # --- FIX: Dimensionality Mismatch in Imputation ---
+    X_to_impute = X.copy()
 
-    # --- Imputation ---
+    # 1. Identify and drop features that are completely NaN (เพื่อป้องกัน Imputer คืนค่ามิติผิดพลาด)
+    all_nan_cols = X_to_impute.columns[X_to_impute.isnull().all()].tolist()
+    
+    if all_nan_cols:
+        logging.warning(f"Dropping all-NaN features before imputation: {all_nan_cols}")
+    
+    X_partial = X_to_impute.drop(columns=all_nan_cols)
+
+    if X_partial.empty:
+        logging.error("No valid features remain after removing all-NaN columns.")
+        return pd.DataFrame(), pd.Series(), pd.DataFrame(), []
+
+    # 2. Impute remaining columns
     imputer = SimpleImputer(strategy='median')
-    X_imputed = imputer.fit_transform(X)
-    # Get feature names after imputation (might include _isnull cols if added)
-    feature_names_imputed = X.columns # Adjust if isnull cols were added
+    X_imputed_partial = imputer.fit_transform(X_partial)
+    
+    # 3. Convert back to DataFrame (ใช้คอลัมน์ที่เหลืออยู่)
+    X_imputed_df = pd.DataFrame(X_imputed_partial, columns=X_partial.columns, index=X_partial.index)
 
-    X_imputed_df = pd.DataFrame(X_imputed, columns=feature_names_imputed)
-
+    # 4. Update feature names and X for scaling
+    feature_names_imputed = X_partial.columns 
+    X = X_imputed_df 
+    # --- END FIX ---
+    
     # --- Scaling ---
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_imputed_df)
+    X_scaled = scaler.fit_transform(X)
     X_scaled_df = pd.DataFrame(X_scaled, columns=feature_names_imputed)
 
     logging.info(f"Selected {len(feature_names_imputed)} features for model training.")
@@ -336,7 +347,7 @@ def engineer_features(df):
     logging.info(f"Imputer saved to {os.path.join(MODEL_DIR, IMPUTER_FILENAME)}")
     logging.info(f"Scaler saved to {os.path.join(MODEL_DIR, SCALER_FILENAME)}")
 
-    return X_scaled_df, y, identifiers, feature_names_imputed # Return feature names
+    return X_scaled_df, y, identifiers, feature_names_imputed
 
 
 def split_data(X, y, identifiers):

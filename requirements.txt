@@ -18,3 +18,4 @@ kneed==0.8.5
 numpy
 sqlalchemy
 matplotlib
+imbalanced-learn

@@ -33,6 +33,7 @@ jobs:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
           NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         # รันสคริปต์ ETL ของเรา
         run: python run_etl_manually.py
 

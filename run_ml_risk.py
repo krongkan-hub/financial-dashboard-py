@@ -71,7 +71,7 @@ def fetch_data(start_year=2015):
     # Metrics needed from FactFinancialStatements
     required_metrics = [
         # For Target Variable
-        'total equity', 'EBIT', 'Interest Expense', 'Net Income',
+        'Total Equity', 'EBIT', 'Interest Expense', 'Net Income',
         # For Features
         'Total Revenue', 'Operating Cash Flow', 'Total Current Assets',
         'Total Current Liabilities', 'Inventory', 'Total Assets'

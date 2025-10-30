@@ -592,16 +592,15 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
 # --- [NEW] SECTION: ML Risk Model V2.0 Data Fetching ---
 # ==============================================================================
 
-def get_ml_risk_raw_data(tickers: Optional[List[str]] = None) -> pd.DataFrame:
+def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 2010) -> pd.DataFrame:
     """
     Fetches the raw, combined data required for the ML-Based Credit Risk Model (V2.0).
-    The resulting DataFrame is indexed by (ticker, report_date) and contains:
-    1. Financial Metrics (Accumulated_Deficit, Current_Ratio, Total_Equity)
-    2. Credit Rating (from DimCompany, broadcasted to all quarters)
-    3. Market Data (closing_price at quarter-end)
-    4. Market Cap & Shares Outstanding (Latest value, broadcasted to all quarters)
+    ...
     """
     logging.info("Starting to fetch raw data for ML Risk Model V2.0...")
+    
+    # NEW: กำหนด start_date
+    start_date = datetime(start_year, 1, 1).date() 
     
     with server.app_context():
         # 1. Fetch Financial Metrics (for Target Solvency & P/B Feature)
@@ -618,7 +617,8 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None) -> pd.DataFrame:
             FactFinancialStatements.metric_value
         ).filter(
             FactFinancialStatements.metric_name.in_(required_fin_metrics),
-            FactFinancialStatements.statement_type.in_(['income', 'balance', 'cashflow']) # ดึง statement type ที่เกี่ยวข้อง
+            FactFinancialStatements.statement_type.in_(['income', 'balance', 'cashflow']),
+            FactFinancialStatements.report_date >= start_date # <--- ใช้ Filter จาก start_date
         )
         
         if tickers:
@@ -662,16 +662,14 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None) -> pd.DataFrame:
             how='left'
         )
 
-        # 3. Fetch all Market Data (Daily Prices)
-        # Determine the earliest date we need price data for
-        min_date = df_financials_wide['report_date'].min() if not df_financials_wide.empty else datetime.now() - timedelta(days=5*365)
-
+       # 3. Fetch all Market Data (Daily Prices)
+        # ใช้ start_date เดียวกันในการกรอง
         price_query = db.session.query(
             FactDailyPrices.ticker,
-            FactDailyPrices.date.label('price_date'), # Rename for clarity
+            FactDailyPrices.date.label('price_date'), 
             FactDailyPrices.close.label('closing_price')
         ).filter(
-            FactDailyPrices.date >= min_date.date() # Compare with date object
+            FactDailyPrices.date >= start_date # <--- ใช้ Filter จาก start_date
         )
         if tickers:
             price_query = price_query.filter(FactDailyPrices.ticker.in_(tickers))

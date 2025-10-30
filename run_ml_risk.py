@@ -8,6 +8,7 @@ import os
 import joblib 
 import shap 
 from xgboost import XGBClassifier 
+from data_handler import get_ml_risk_raw_data
 
 # --- Database Interaction ---
 # NOTE: ต้องมั่นใจว่า app.py, FactFinancialStatements, FactCompanySummary ได้ถูก import อย่างถูกต้องในสภาพแวดล้อมของคุณ
@@ -72,95 +73,6 @@ def get_column(df, possible_names):
     return None 
 
 # --- Core Functions ---
-
-def fetch_data(start_year=2015):
-    """Fetches required financial data from the database. (Unchanged logic)"""
-    logging.info(f"1. Fetching data from database starting from year {start_year}...")
-    start_date = date(start_year, 1, 1)
-
-    required_metrics = [
-        'Total Stockholders Equity', 'Stockholders Equity', 'Total Assets',
-        'Total Liabilities', 'Total Liab', 'Total Liabilities Net Minority Interest',
-        'EBIT', 'Operating Income', 
-        'Interest Expense', 'Net Income', 'Total Revenue', 'Operating Cash Flow',
-        'Current Assets', 'Current Liabilities', 'Inventory', 
-        # New Metrics for CCC
-        'Accounts Receivable', 'Accounts Payable', 'Cost Of Revenue', 'Sales',
-    ]
-
-    try:
-        with server.app_context():
-            stmt_ffs = db.session.query(
-                FactFinancialStatements.ticker,
-                FactFinancialStatements.report_date,
-                FactFinancialStatements.metric_name,
-                FactFinancialStatements.metric_value
-            ).filter(
-                FactFinancialStatements.report_date >= start_date,
-                FactFinancialStatements.metric_name.in_(required_metrics)
-            ).statement
-
-            df_ffs_long = pd.read_sql(stmt_ffs, db.engine)
-            df_ffs_long['report_date'] = pd.to_datetime(df_ffs_long['report_date'])
-
-            if df_ffs_long.empty:
-                logging.error("No data found in FactFinancialStatements for the specified period.")
-                return pd.DataFrame(), pd.DataFrame()
-
-            df_ffs_wide = df_ffs_long.pivot_table(
-                index=['ticker', 'report_date'],
-                columns='metric_name',
-                values='metric_value'
-            ).reset_index()
-            df_ffs_wide = df_ffs_wide.sort_values(by=['ticker', 'report_date'])
-
-            FCS = aliased(FactCompanySummary)
-            
-            quarter_group = (func.strftime('%Y', FCS.date_updated) + '-' +
-                             ((func.strftime('%m', FCS.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
-                             ).label('year_quarter')
-
-            subquery = db.session.query(
-                FCS.ticker,
-                quarter_group, 
-                func.max(FCS.date_updated).label('max_summary_date')
-            ).group_by(FCS.ticker, quarter_group).subquery() 
-
-            stmt_fcs = db.session.query(
-                FactCompanySummary.ticker,
-                FactCompanySummary.date_updated.label('summary_date'),
-                (func.strftime('%Y', FactCompanySummary.date_updated) + '-' +
-                 ((func.strftime('%m', FactCompanySummary.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
-                 ).label('year_quarter'), 
-                FactCompanySummary.de_ratio
-            ).join(
-                subquery,
-                and_(
-                    FactCompanySummary.ticker == subquery.c.ticker,
-                    FactCompanySummary.date_updated == subquery.c.max_summary_date 
-                )
-            ).filter(FactCompanySummary.date_updated >= start_date).statement 
-            
-            df_fcs = pd.read_sql(stmt_fcs, db.engine) 
-            
-            df_fcs[['Year', 'Quarter']] = df_fcs['year_quarter'].str.split('-', expand=True)
-            df_fcs['Quarter_Start_Month'] = (df_fcs['Quarter'].astype(float).astype(int) - 1) * 3 + 1
-            df_fcs['Quarter_Start_Date'] = pd.to_datetime(
-                df_fcs['Year'].astype(str) + '-' + df_fcs['Quarter_Start_Month'].astype(str) + '-01',
-                errors='coerce'
-            )
-            df_fcs['report_date_approx'] = df_fcs['Quarter_Start_Date'] + pd.offsets.QuarterEnd(0)
-            df_fcs = df_fcs.drop(columns=['Year', 'Quarter', 'Quarter_Start_Month', 'Quarter_Start_Date', 'year_quarter', 'summary_date'])
-            df_fcs = df_fcs.sort_values(by=['ticker', 'report_date_approx'])
-            
-            logging.info(f"Fetched {len(df_ffs_wide)} wide financial statement records.")
-            logging.info(f"Fetched {len(df_fcs)} D/E ratio records.")
-            return df_ffs_wide, df_fcs
-
-    except Exception as e:
-        logging.error(f"Error fetching data: {e}", exc_info=True)
-        return pd.DataFrame(), pd.DataFrame()
-
 
 def create_target_variable(df_ffs, df_fcs): # df_fcs is now largely unused for V2.0 target logic
     """Creates the binary target variable (Y) based on defined V2.0 risk criteria: 
@@ -768,13 +680,19 @@ if __name__ == "__main__":
     start_time = datetime.now()
 
     # 1. Fetch Data
-    df_financials, df_summary_de = fetch_data(start_year=2010) 
+    logging.info("1. Fetching comprehensive ML raw data from database starting from year 2010...")
+    
+    # ❌ ลบ/คอมเมนต์ บรรทัดเก่า: df_financials, df_summary_de = fetch_data(start_year=2010)
+    # ✅ เรียกใช้ฟังก์ชันใหม่
+    df_raw_data = get_ml_risk_raw_data(start_year=2010) 
 
-    if df_financials.empty:
+    if df_raw_data.empty:
         logging.error("Stopping script because no financial data could be fetched.")
     else:
         # 2. Create Target Variable (Uses Stricter Constants)
-        df_with_y = create_target_variable(df_financials, df_summary_de)
+        # ปรับการเรียกใช้: ใช้ df_raw_data.reset_index() และส่ง DataFrame ว่างไปแทน df_summary_de
+        df_financials_reset = df_raw_data.reset_index()
+        df_with_y = create_target_variable(df_financials_reset, pd.DataFrame()) 
 
         if not df_with_y.empty:
             # 3. Engineer Features (includes CCC and fixed indicator feature)

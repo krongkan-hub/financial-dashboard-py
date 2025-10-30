@@ -1,4 +1,4 @@
-# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Tuned Recall Target and SHAP Robustness)
+# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Removed D/E Ratio, 70/10/20 Split, Added L1/L2 Reg)
 
 import logging
 import pandas as pd
@@ -7,10 +7,9 @@ from datetime import datetime, date
 import os
 import joblib 
 import shap 
-# from imblearn.over_sampling import SMOTE # นำออก, ใช้ scale_pos_weight แทน
 from xgboost import XGBClassifier 
 
-# --- Database Interaction (สมมติว่า import ได้ถูกต้อง) ---
+# --- Database Interaction ---
 from app import db, server, FactFinancialStatements, FactCompanySummary
 from sqlalchemy import func, and_
 from sqlalchemy.orm import aliased
@@ -215,6 +214,7 @@ def create_target_variable(df_ffs, df_fcs):
 
     # --- Apply Risk Rules ---
     rule1 = df['is_negative_equity'] == 1
+    # WARNING: de_ratio is 100% missing, Rule 2 will be useless noise.
     rule2 = (df['de_ratio'] > DE_RATIO_THRESHOLD) & (df['TTM_ICR'] < ICR_THRESHOLD)
     rule3 = df['consecutive_losses'] >= CONSECUTIVE_LOSS_PERIODS
 
@@ -305,10 +305,11 @@ def engineer_features(df):
 
     # --- 3. Change in Key Ratios (Over 1 Year) ---
     change_cols_map = {'de_ratio': 'D/E Ratio', 'Operating Margin': 'Operating Margin', 'Current Ratio': 'Current Ratio'}    
+    # WARNING: de_ratio removed from feature engineering process below
     for col_raw, col_display in change_cols_map.items():
-        if col_raw in df_eng.columns: 
+        if col_raw in df_eng.columns and col_raw != 'de_ratio': 
             df_eng[f'Change in {col_display}'] = df_eng.groupby('ticker')[col_raw].transform(calculate_change, periods=periods_per_year)
-        else:
+        elif col_raw != 'de_ratio':
             df_eng[f'Change in {col_display}'] = np.nan
 
     # --- 4. Moving Averages (4 Quarters) ---
@@ -371,7 +372,6 @@ def engineer_features(df):
     
     # 1. Retained Earnings / Total Assets (RETA) Proxy: Cumulative TTM Net Income / Total Assets
     if ni_col and ta_col:
-        # TTM Net Income (proxy for incremental retained earnings, often used when historical RE isn't easily available)
         df_eng['Net Income_TTM_RETA'] = df_eng.groupby('ticker')[ni_col].transform(calculate_ttm)
         df_eng['RETA_Proxy'] = df_eng['Net Income_TTM_RETA'] / df_eng[ta_col].replace(0, np.nan)
     else: df_eng['RETA_Proxy'] = np.nan
@@ -388,11 +388,11 @@ def engineer_features(df):
         df_eng['SATA_Proxy'] = df_eng['Total Revenue_TTM_SATA'] / df_eng[ta_col].replace(0, np.nan)
     else: df_eng['SATA_Proxy'] = np.nan
 
-    # --- Final Feature Selection (Now 22 Features) ---
+    # --- Final Feature Selection (Now 20 Features, removed de_ratio and Change in D/E Ratio) ---
     feature_cols = [
-        'de_ratio', 'Current Ratio', 'Operating Margin', 'Total Assets (ln)', 
+        'Current Ratio', 'Operating Margin', 'Total Assets (ln)', 
         'Total Revenue_YoY_Growth', 'Net Income_YoY_Growth', 'Operating Cash Flow_YoY_Growth', 
-        'Change in D/E Ratio', 'Change in Operating Margin', 'Change in Current Ratio', 
+        'Change in Operating Margin', 'Change in Current Ratio', # Removed Change in D/E Ratio
         'MA_Net Income', 'MA_ROE',
         # 7 Advanced Credit Risk Features
         'Interest Coverage Ratio', 'Quick Ratio', 'Debt to EBITDA', 'NWC_to_Total_Assets', 
@@ -452,14 +452,14 @@ def engineer_features(df):
 def split_data(X, y, identifiers):
     """
     Splits data into train, validation, and test sets based on time (Time-Based Split).
-    Uses index-based split after sorting to ensure non-overlapping, time-ordered partitions.
+    *** UPDATED: Now uses 70/10/20 split ***
     """
     logging.info("4. Splitting data into Train, Validation, Test sets (Time-Based)...")
     
-    # --- FIXED TIME SPLIT CONFIGURATION ---
+    # --- FIXED TIME SPLIT CONFIGURATION (70/10/20) ---
     TEST_RATIO = 0.20  
-    VAL_RATIO = 0.10
-    MIN_TRAIN_SAMPLES = 70
+    VAL_RATIO = 0.10  # <-- CHANGED 
+    MIN_TRAIN_SAMPLES = 50 
     # ------------------------------------------
 
     data_full = pd.concat([identifiers.reset_index(drop=True),
@@ -490,7 +490,7 @@ def split_data(X, y, identifiers):
         val_ids = pd.DataFrame()
         
     else:
-        # Standard 60/20/20 time-based split (index-based after sorting by report_date)
+        # Standard 70/10/20 time-based split 
         train_end_index = total_samples - test_size - val_size
         val_end_index = total_samples - test_size
         
@@ -528,13 +528,13 @@ def split_data(X, y, identifiers):
 
 def train_model(X_train, y_train):
     """
-    Trains the XGBoost Classifier model using RandomizedSearchCV and F2-Score for optimization.
+    Trains the XGBoost Classifier model using RandomizedSearchCV, F2-Score, and L1/L2 Regularization.
     """
     logging.info("4.1 Calculating scale_pos_weight...")
     
     # Calculate scale_pos_weight
     count_neg = y_train.value_counts().get(0, 0)
-    count_pos = y_train.value_counts().get(1, 1) # Set minimum to 1 to avoid ZeroDivisionError
+    count_pos = y_train.value_counts().get(1, 1) 
     scale_pos_weight_value = count_neg / count_pos
     
     logging.info(f"  Calculated scale_pos_weight: {scale_pos_weight_value:.2f} (Count 0 / Count 1)")
@@ -544,7 +544,7 @@ def train_model(X_train, y_train):
     logging.info("5. Training XGBoost model using RandomizedSearchCV...")
 
     # 1. กำหนด Base Model
-    # INCREASE BASE scale_pos_weight for better False Negative penalty
+    # INCREASE BASE scale_pos_weight by 1.5x for stronger False Negative penalty
     base_scale_pos_weight = scale_pos_weight_value * 1.5
     
     xgb_base = XGBClassifier(
@@ -563,7 +563,8 @@ def train_model(X_train, y_train):
         'learning_rate': [0.05, 0.1, 0.2],
         'gamma': [0, 0.1, 0.5], 
         'subsample': [0.7, 0.8, 0.9],
-        # ไม่ค้นหา scale_pos_weight อีกรอบ ให้ใช้ค่า base_scale_pos_weight
+        'reg_lambda': [0.1, 1, 10],   # <-- L2 Regularization
+        'reg_alpha': [0, 0.1, 1],     # <-- L1 Regularization
     }
     
     # 3. กำหนด Scoring Metric: F2-Score (Recall สำคัญกว่า Precision)
@@ -578,7 +579,7 @@ def train_model(X_train, y_train):
         param_distributions=param_grid,
         scoring=f2_scorer,
         cv=skf,
-        n_iter=20, # จำนวนการทดลอง
+        n_iter=20, 
         verbose=1,
         random_state=42
     )
@@ -593,7 +594,7 @@ def train_model(X_train, y_train):
     
     return best_model 
 
-def optimize_threshold(model, X_val, y_val, min_recall_target=0.60): # <--- เปลี่ยนเป็น 0.60
+def optimize_threshold(model, X_val, y_val, min_recall_target=0.60): 
     """
     Calculates the optimal threshold from the Validation set based on a minimum Recall target.
     """
@@ -607,7 +608,7 @@ def optimize_threshold(model, X_val, y_val, min_recall_target=0.60): # <--- เ�
     precision, recall, thresholds = precision_recall_curve(y_val, y_pred_proba)
     
     # Find the threshold that meets the minimum recall target while maintaining precision
-    sufficient_recall_indices = np.where(recall[:-1] >= min_recall_target)[0] # Exclude last point
+    sufficient_recall_indices = np.where(recall[:-1] >= min_recall_target)[0] 
     
     if len(sufficient_recall_indices) == 0:
         logging.warning(f"  Cannot achieve minimum Recall target of {min_recall_target:.2f}. Using threshold that maximizes F1-Score instead.")
@@ -680,7 +681,7 @@ def explain_model(model, X_train, feature_names):
     logging.info("7. Explaining model using SHAP...")
     try:
         # Primary method: Use TreeExplainer (fastest and best for tree models)
-        explainer = shap.TreeExplainer(model, X_train) # Pass X_train as data for robustness
+        explainer = shap.TreeExplainer(model, X_train) 
         shap_values = explainer.shap_values(X_train)
         
         # If explainer.shap_values returns a list of two arrays

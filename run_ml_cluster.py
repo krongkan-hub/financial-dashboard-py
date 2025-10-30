@@ -239,39 +239,65 @@ def check_clustering_reasonableness(df_results: pd.DataFrame, total_stocks: int)
 
 # --- ฟังก์ชันบันทึกผล (เหมือนเดิม) ---
 def update_cluster_ids_in_db(df_results: pd.DataFrame):
-    """อัปเดตค่า peer_cluster_id กลับลงฐานข้อมูล"""
+    """อัปเดตค่า peer_cluster_id กลับลงฐานข้อมูล โดยอัปเดตแถวที่มี date_updated ล่าสุดสำหรับแต่ละ Ticker"""
     if df_results.empty:
         logging.warning("No clustering results to update in the database.")
         return
-    logging.info(f"Updating {len(df_results)} cluster IDs in the database...")
-    update_count = 0; error_count = 0
+    
+    # 1. เตรียมข้อมูลที่จะอัปเดตเป็น Dict of Dicts (Ticker -> Cluster ID)
+    # ใช้ .apply(int) เพื่อให้แน่ใจว่าเป็น Integer (จาก numpy.int64)
+    ticker_to_cluster = df_results.set_index('ticker')['peer_cluster_id'].apply(int).to_dict()
+    
+    logging.info(f"Updating {len(ticker_to_cluster)} cluster IDs in the database...")
+    update_count = 0
+    
     try:
         with server.app_context():
-            latest_date = db.session.query(func.max(FactCompanySummary.date_updated)).scalar()
-            if not latest_date: logging.error("Cannot determine latest date for update."); return
+            
+            # 2. สร้าง Subquery เพื่อหาแถวที่ล่าสุด (MAX(date_updated)) สำหรับ Ticker ที่ต้องการอัปเดต
+            # Query หา Max Date สำหรับ Tickers ที่มีผลลัพธ์ Clustering
+            latest_date_subquery = db.session.query(
+                FactCompanySummary.ticker,
+                func.max(FactCompanySummary.date_updated).label('max_date')
+            ).filter(
+                FactCompanySummary.ticker.in_(list(ticker_to_cluster.keys()))
+            ).group_by(FactCompanySummary.ticker).subquery()
+            
+            # ดึง Max Date สำหรับ Tickers ทั้งหมดในครั้งเดียว
+            max_dates_result = db.session.query(
+                latest_date_subquery.c.ticker,
+                latest_date_subquery.c.max_date
+            ).all()
+            
+            ticker_to_max_date = {t: d for t, d in max_dates_result}
 
-            logging.info(f"Clearing previous cluster IDs for date {latest_date}...")
-            clear_stmt = update(FactCompanySummary).where(FactCompanySummary.date_updated == latest_date).values(peer_cluster_id=None)
-            db.session.execute(clear_stmt)
-
-            for index, row in df_results.iterrows():
-                try:
-                    stmt = update(FactCompanySummary).where(FactCompanySummary.ticker == row['ticker']).where(FactCompanySummary.date_updated == latest_date).values(peer_cluster_id=int(row['peer_cluster_id']))
-                    db.session.execute(stmt)
-                    update_count += 1
-                except Exception as e_row:
-                    logging.error(f"Error updating cluster ID for {row['ticker']}: {e_row}")
-                    error_count += 1; db.session.rollback(); continue
-
-            if error_count == 0:
-                db.session.commit()
-                logging.info(f"Successfully updated {update_count} cluster IDs.")
-            else:
-                logging.warning(f"Finished updating with {error_count} errors. Rolling back all updates for this run.")
-                db.session.rollback()
+            # 3. วนลูปและรัน UPDATE โดยเจาะจง Ticker และ MAX(date_updated) ของ Ticker นั้น
+            for ticker, cluster_id in ticker_to_cluster.items():
+                latest_date = ticker_to_max_date.get(ticker)
+                
+                if latest_date is None:
+                    logging.warning(f"Could not find latest update date for {ticker}. Skipping update.")
+                    continue
+                
+                # สร้างคำสั่ง UPDATE โดยเจาะจงที่ Ticker และ MAX(date_updated) ของ Ticker นั้น
+                stmt = update(FactCompanySummary).where(
+                    FactCompanySummary.ticker == ticker
+                ).where(
+                    FactCompanySummary.date_updated == latest_date
+                ).values(
+                    peer_cluster_id=cluster_id
+                )
+                db.session.execute(stmt)
+                update_count += 1
+            
+            # 4. Commit ครั้งเดียว เพื่อให้ Transaction รวดเร็วที่สุด
+            db.session.commit()
+            logging.info(f"Successfully updated {update_count} cluster IDs on their respective latest dates.")
+            
     except Exception as e:
         logging.error(f"Critical error during database update: {e}", exc_info=True)
-        with server.app_context(): db.session.rollback()
+        with server.app_context(): 
+            db.session.rollback()
 
 # --- [ปรับปรุง] ส่วนหลัก (Main Execution) ---
 if __name__ == "__main__":

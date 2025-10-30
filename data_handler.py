@@ -841,7 +841,8 @@ def get_deep_dive_header_data(ticker: str) -> dict:
                 FactCompanySummary.price, FactCompanySummary.market_cap,
                 FactCompanySummary.analyst_target_price, FactCompanySummary.pe_ratio,
                 FactCompanySummary.forward_pe, FactCompanySummary.long_business_summary,
-                FactCompanySummary.beta
+                FactCompanySummary.beta,
+                FactCompanySummary.peer_cluster_id
             ).outerjoin( # Use outerjoin in case DimCompany exists but summary doesn't yet
                 FactCompanySummary,
                 (DimCompany.ticker == FactCompanySummary.ticker) &
@@ -883,6 +884,7 @@ def get_deep_dive_header_data(ticker: str) -> dict:
                 'forward_pe': db_result.forward_pe,
                 'long_business_summary': db_result.long_business_summary,
                 'beta': db_result.beta,
+                'peer_cluster_id': db_result.peer_cluster_id,
                 # Add other necessary fields if needed
             })
             # Check if essential data like price is present

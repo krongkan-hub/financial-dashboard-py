@@ -1,4 +1,4 @@
-# run_ml_risk.py (เวอร์ชัน FINAL-FIX: Removed D/E Ratio, 70/10/20 Split, Added L1/L2 Reg)
+# run_ml_risk.py (เวอร์ชัน FINAL-FIX V4: Recall Boost & SHAP Fix)
 
 import logging
 import pandas as pd
@@ -43,17 +43,14 @@ IMPUTER_FILENAME = "imputer.joblib"
 
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# --- Helper Functions ---
+# --- Helper Functions (Unchanged) ---
 def calculate_ttm(series):
-    """Calculates Trailing Twelve Months sum for a pandas Series grouped by ticker."""
     return series.rolling(window=4, min_periods=4).sum()
 
 def calculate_change(series, periods):
-    """Calculates the change over a number of periods."""
     return series.diff(periods=periods)
 
 def get_column(df, possible_names):
-    """NEW HELPER: Finds the first existing column from a list of possible names."""
     for name in possible_names:
         if name in df.columns:
             return name
@@ -62,22 +59,18 @@ def get_column(df, possible_names):
 # --- Core Functions ---
 
 def fetch_data(start_year=2015):
-    """
-    Fetches required financial data from the database.
-    """
+    """Fetches required financial data from the database. (Unchanged logic)"""
     logging.info(f"1. Fetching data from database starting from year {start_year}...")
     start_date = date(start_year, 1, 1)
 
-    # UPDATED: รวมชื่อ Metric ที่เป็นไปได้ทั้งหมดจากการสังเกตข้อมูล YFinance/ETL
     required_metrics = [
-        # Base/Target Metrics (High Ambiguity)
         'Total Stockholders Equity', 'Stockholders Equity', 'Total Assets',
         'Total Liabilities', 'Total Liab', 'Total Liabilities Net Minority Interest',
         'EBIT', 'Operating Income', 
-        
-        # Base/Target Metrics (Low Ambiguity)
         'Interest Expense', 'Net Income', 'Total Revenue', 'Operating Cash Flow',
         'Current Assets', 'Current Liabilities', 'Inventory', 
+        # New Metrics for CCC
+        'Accounts Receivable', 'Accounts Payable', 'Cost Of Revenue', 'Sales',
     ]
 
     try:
@@ -99,7 +92,6 @@ def fetch_data(start_year=2015):
                 logging.error("No data found in FactFinancialStatements for the specified period.")
                 return pd.DataFrame(), pd.DataFrame()
 
-            # Pivot to wide format
             df_ffs_wide = df_ffs_long.pivot_table(
                 index=['ticker', 'report_date'],
                 columns='metric_name',
@@ -107,10 +99,8 @@ def fetch_data(start_year=2015):
             ).reset_index()
             df_ffs_wide = df_ffs_wide.sort_values(by=['ticker', 'report_date'])
 
-            # Query FactCompanySummary for D/E Ratio (using original logic)
             FCS = aliased(FactCompanySummary)
             
-            # ... (unchanged logic for querying FactCompanySummary) ...
             quarter_group = (func.strftime('%Y', FCS.date_updated) + '-' +
                              ((func.strftime('%m', FCS.date_updated).cast(db.Integer) + 2) / 3).cast(db.String)
                              ).label('year_quarter')
@@ -138,7 +128,6 @@ def fetch_data(start_year=2015):
             
             df_fcs = pd.read_sql(stmt_fcs, db.engine) 
             
-            # Approximate date calculation (original logic)
             df_fcs[['Year', 'Quarter']] = df_fcs['year_quarter'].str.split('-', expand=True)
             df_fcs['Quarter_Start_Month'] = (df_fcs['Quarter'].astype(float).astype(int) - 1) * 3 + 1
             df_fcs['Quarter_Start_Date'] = pd.to_datetime(
@@ -159,9 +148,7 @@ def fetch_data(start_year=2015):
 
 
 def create_target_variable(df_ffs, df_fcs):
-    """
-    Creates the binary target variable (Y) based on defined risk criteria.
-    """
+    """Creates the binary target variable (Y) based on defined risk criteria. (Unchanged logic)"""
     logging.info("2. Creating Target Variable (Y)...")
     if df_ffs.empty:
         logging.warning("Financial statement data is empty, cannot create target variable.")
@@ -170,16 +157,12 @@ def create_target_variable(df_ffs, df_fcs):
     df = df_ffs.copy()
     df = df.sort_values(by=['ticker', 'report_date']).reset_index(drop=True)
 
-    # --- Use Robust Column Selection for Ambiguous Metrics ---
-    
     equity_col = get_column(df, ['Stockholders Equity', 'Total Stockholders Equity'])
     ebit_col = get_column(df, ['EBIT', 'Operating Income'])
     interest_col = get_column(df, ['Interest Expense'])
     net_income_col = get_column(df, ['Net Income', 'Net Income Common Stockholders'])
 
     # --- Calculate necessary components for Y ---
-    
-    # TTM ICR
     if ebit_col and interest_col:
         df['EBIT_TTM'] = df.groupby('ticker')[ebit_col].transform(calculate_ttm)
         df['Interest Expense_TTM'] = df.groupby('ticker')[interest_col].transform(lambda x: x.rolling(window=4, min_periods=4).sum().replace(0, np.nan))
@@ -188,7 +171,6 @@ def create_target_variable(df_ffs, df_fcs):
     else:
         df['TTM_ICR'] = np.nan
         
-    # Consecutive Net Losses
     if net_income_col:
         df['is_loss'] = (df.get(net_income_col, pd.Series()) < 0).astype(int)
         df['consecutive_losses'] = df.groupby('ticker')['is_loss'].transform(
@@ -197,13 +179,11 @@ def create_target_variable(df_ffs, df_fcs):
     else:
         df['consecutive_losses'] = np.nan
 
-    # Negative Equity
     if equity_col:
         df['is_negative_equity'] = (df.get(equity_col, pd.Series()) < 0).astype(int)
     else:
         df['is_negative_equity'] = 0 
 
-    # Merge D/E Ratio (using original merge logic)
     df['report_date_approx'] = df['report_date'] + pd.offsets.QuarterEnd(0)
     df = pd.merge_asof(df.sort_values('report_date_approx'),
                        df_fcs[['ticker', 'report_date_approx', 'de_ratio']].sort_values('report_date_approx'),
@@ -214,7 +194,6 @@ def create_target_variable(df_ffs, df_fcs):
 
     # --- Apply Risk Rules ---
     rule1 = df['is_negative_equity'] == 1
-    # WARNING: de_ratio is 100% missing, Rule 2 will be useless noise.
     rule2 = (df['de_ratio'] > DE_RATIO_THRESHOLD) & (df['TTM_ICR'] < ICR_THRESHOLD)
     rule3 = df['consecutive_losses'] >= CONSECUTIVE_LOSS_PERIODS
 
@@ -231,7 +210,6 @@ def create_target_variable(df_ffs, df_fcs):
     logging.info(f"Created Y for {len(df_final)} data points.")
     logging.info(f"Distribution of Y: \n{df_final['Y'].value_counts(normalize=True)}")
 
-    # --- Robust column selection: Keep all financial metrics and calculated Y/de_ratio ---
     explicit_cols = ['ticker', 'report_date', 'Y', 'de_ratio']
     cols_to_keep_from_original = [col for col in df_ffs.columns if col not in ['ticker', 'report_date']]
     
@@ -245,7 +223,8 @@ def create_target_variable(df_ffs, df_fcs):
 
 def engineer_features(df):
     """
-    Calculates 22 features (including 3 Z-Score Proxies), handles infinities/NaNs, and applies scaling/imputation.
+    Calculates 20+ features, handles infinities/NaNs, and applies scaling/imputation 
+    WITH INDICATOR FEATURE FIX.
     """
     logging.info("3. Engineering Features (X)...")
     if df.empty or 'Y' not in df.columns:
@@ -256,173 +235,156 @@ def engineer_features(df):
     df_eng = df_eng.sort_values(by=['ticker', 'report_date']).reset_index(drop=True)
     periods_per_year = 4
     
-    # --- Use Robust Column Selection for all raw metrics ---
-    
-    # Financial/Balance Sheet Components
+    # --- Robust Column Selection ---
     ca_col = get_column(df_eng, ['Current Assets'])
     cl_col = get_column(df_eng, ['Current Liabilities'])
     ta_col = get_column(df_eng, ['Total Assets'])
     inv_col = get_column(df_eng, ['Inventory'])
     liab_col = get_column(df_eng, ['Total Liabilities', 'Total Liab', 'Total Liabilities Net Minority Interest'])
     equity_col = get_column(df_eng, ['Stockholders Equity', 'Total Stockholders Equity'])
-    
-    # Income/Cash Flow Components
     ebit_col = get_column(df_eng, ['EBIT', 'Operating Income'])
-    rev_col = get_column(df_eng, ['Total Revenue'])
+    rev_col = get_column(df_eng, ['Total Revenue', 'Sales'])
     ni_col = get_column(df_eng, ['Net Income', 'Net Income Common Stockholders'])
     ocf_col = get_column(df_eng, ['Operating Cash Flow', 'Total Cash Flow From Operating Activities'])
     int_exp_col = get_column(df_eng, ['Interest Expense']) 
+    ar_col = get_column(df_eng, ['Accounts Receivable'])
+    ap_col = get_column(df_eng, ['Accounts Payable'])
+    cor_col = get_column(df_eng, ['Cost Of Revenue', 'Cost Of Goods Sold'])
+    
     
     # --- 1. Base Ratios / Size Features ---
-    if ca_col and cl_col:
-        df_eng['Current Ratio'] = df_eng[ca_col] / df_eng[cl_col].replace(0, np.nan)
+    if ca_col and cl_col: df_eng['Current Ratio'] = df_eng[ca_col] / df_eng[cl_col].replace(0, np.nan)
     else: df_eng['Current Ratio'] = np.nan
-
-    if ta_col:
-        df_eng['Total Assets (ln)'] = np.log(df_eng[ta_col].replace(0, np.nan))
+    if ta_col: df_eng['Total Assets (ln)'] = np.log(df_eng[ta_col].replace(0, np.nan))
     else: df_eng['Total Assets (ln)'] = np.nan
-
-    if ebit_col and rev_col:
-        df_eng['Operating Margin'] = df_eng[ebit_col] / df_eng[rev_col].replace(0, np.nan)
+    if ebit_col and rev_col: df_eng['Operating Margin'] = df_eng[ebit_col] / df_eng[rev_col].replace(0, np.nan)
     else: df_eng['Operating Margin'] = np.nan
-
-    # Calculate ROE for MA
     if ni_col and equity_col:
         df_eng['Net Income_TTM'] = df_eng.groupby('ticker')[ni_col].transform(calculate_ttm)
         df_eng['Avg Equity_TTM'] = df_eng.groupby('ticker')[equity_col].transform(lambda x: x.rolling(window=4, min_periods=4).mean())
         df_eng['ROE'] = df_eng['Net Income_TTM'] / df_eng['Avg Equity_TTM'].replace(0, np.nan)
     else: df_eng['ROE'] = np.nan
 
-
     # --- 2. YoY Growth Features ---
     growth_col_map = {'Total Revenue': rev_col, 'Net Income': ni_col, 'Operating Cash Flow': ocf_col}
     for display_name, raw_col in growth_col_map.items():
-        if raw_col:
-            # FIX: Added fill_method=None to remove FutureWarning
-            df_eng[f'{display_name}_YoY_Growth'] = df_eng.groupby('ticker')[raw_col].pct_change(periods=periods_per_year, fill_method=None)
-        else:
-             df_eng[f'{display_name}_YoY_Growth'] = np.nan
+        if raw_col: df_eng[f'{display_name}_YoY_Growth'] = df_eng.groupby('ticker')[raw_col].pct_change(periods=periods_per_year, fill_method=None)
+        else: df_eng[f'{display_name}_YoY_Growth'] = np.nan
 
     # --- 3. Change in Key Ratios (Over 1 Year) ---
-    change_cols_map = {'de_ratio': 'D/E Ratio', 'Operating Margin': 'Operating Margin', 'Current Ratio': 'Current Ratio'}    
-    # WARNING: de_ratio removed from feature engineering process below
+    change_cols_map = {'Operating Margin': 'Operating Margin', 'Current Ratio': 'Current Ratio'}    
     for col_raw, col_display in change_cols_map.items():
-        if col_raw in df_eng.columns and col_raw != 'de_ratio': 
-            df_eng[f'Change in {col_display}'] = df_eng.groupby('ticker')[col_raw].transform(calculate_change, periods=periods_per_year)
-        elif col_raw != 'de_ratio':
-            df_eng[f'Change in {col_display}'] = np.nan
+        if col_raw in df_eng.columns: df_eng[f'Change in {col_display}'] = df_eng.groupby('ticker')[col_raw].transform(calculate_change, periods=periods_per_year)
+        else: df_eng[f'Change in {col_display}'] = np.nan
 
     # --- 4. Moving Averages (4 Quarters) ---
     ma_cols = ['Net Income', 'ROE']    
     for col in ma_cols:
-        if col in df_eng.columns: 
-            df_eng[f'MA_{col}'] = df_eng.groupby('ticker')[col].transform(lambda x: x.rolling(window=MA_PERIODS, min_periods=MA_PERIODS).mean())
-        else:
-             df_eng[f'MA_{col}'] = np.nan
+        if col in df_eng.columns: df_eng[f'MA_{col}'] = df_eng.groupby('ticker')[col].transform(lambda x: x.rolling(window=MA_PERIODS, min_periods=MA_PERIODS).mean())
+        else: df_eng[f'MA_{col}'] = np.nan
 
-    # ------------------------------------------------------------------
     # --- 5. Advanced Credit Risk Features (7 Features) ---
-    # ------------------------------------------------------------------
-    
-    # 1. Interest Coverage Ratio (EBIT / Interest Expense)
-    if ebit_col and int_exp_col:
-        df_eng['Interest Coverage Ratio'] = df_eng[ebit_col] / df_eng[int_exp_col].replace(0, np.nan)
+    if ebit_col and int_exp_col: df_eng['Interest Coverage Ratio'] = df_eng[ebit_col] / df_eng[int_exp_col].replace(0, np.nan)
     else: df_eng['Interest Coverage Ratio'] = np.nan
-
-    # 2. Quick Ratio (Acid-Test)
-    if ca_col and inv_col and cl_col:
-        df_eng['Quick Ratio'] = (df_eng[ca_col] - df_eng[inv_col]) / df_eng[cl_col].replace(0, np.nan)
+    if ca_col and inv_col and cl_col: df_eng['Quick Ratio'] = (df_eng[ca_col] - df_eng[inv_col]) / df_eng[cl_col].replace(0, np.nan)
     else: df_eng['Quick Ratio'] = np.nan
-
-    # 3. Debt to EBITDA (TTM)
     if liab_col and ebit_col:
         df_eng['Total Liabilities_TTM'] = df_eng.groupby('ticker')[liab_col].transform(calculate_ttm)
         df_eng['EBIT_TTM_4Q'] = df_eng.groupby('ticker')[ebit_col].transform(calculate_ttm) 
         df_eng['Debt to EBITDA'] = df_eng['Total Liabilities_TTM'] / df_eng['EBIT_TTM_4Q'].replace(0, np.nan)
-    else: 
-        df_eng['Debt to EBITDA'] = np.nan
-
-    # 4. Net Working Capital / Total Assets
+    else: df_eng['Debt to EBITDA'] = np.nan
     if ca_col and cl_col and ta_col:
         df_eng['Net Working Capital'] = df_eng[ca_col] - df_eng[cl_col]
         df_eng['NWC_to_Total_Assets'] = df_eng['Net Working Capital'] / df_eng[ta_col].replace(0, np.nan)
     else: df_eng['NWC_to_Total_Assets'] = np.nan
-
-    # 5. Coefficient of Variation (CV) of Operating Margin (4Q)
     if 'Operating Margin' in df_eng.columns:
         df_eng['Op_Margin_Mean_4Q'] = df_eng.groupby('ticker')['Operating Margin'].transform(lambda x: x.rolling(window=4, min_periods=4).mean())
         df_eng['Op_Margin_Std_4Q'] = df_eng.groupby('ticker')['Operating Margin'].transform(lambda x: x.rolling(window=4, min_periods=4).std())
         df_eng['CV_Operating_Margin'] = df_eng['Op_Margin_Std_4Q'] / df_eng['Op_Margin_Mean_4Q'].replace(0, np.nan)
     else: df_eng['CV_Operating_Margin'] = np.nan
-
-    # 6. Number of Negative Net Income Quarters (12Q)
     if ni_col:
         df_eng['is_negative_net_income'] = (df_eng[ni_col] < 0).astype(int)
         df_eng['Count_Negative_Net_Income_12Q'] = df_eng.groupby('ticker')['is_negative_net_income'].transform(lambda x: x.rolling(window=12, min_periods=12).sum())
     else: df_eng['Count_Negative_Net_Income_12Q'] = np.nan
-
-    # 7. Sales Volatility (Standard Deviation of YoY Revenue Growth - 4Q)
     if 'Total Revenue_YoY_Growth' in df_eng.columns:
         df_eng['Sales_Volatility'] = df_eng.groupby('ticker')['Total Revenue_YoY_Growth'].transform(lambda x: x.rolling(window=4, min_periods=4).std())
     else: df_eng['Sales_Volatility'] = np.nan
     
-    # ------------------------------------------------------------------
-    # --- 6. NEW: Altman Z-Score Components Proxies (3 Features) ---
-    # ------------------------------------------------------------------
-    
-    # 1. Retained Earnings / Total Assets (RETA) Proxy: Cumulative TTM Net Income / Total Assets
+    # --- 6. Altman Z-Score Components Proxies (3 Features) ---
     if ni_col and ta_col:
         df_eng['Net Income_TTM_RETA'] = df_eng.groupby('ticker')[ni_col].transform(calculate_ttm)
         df_eng['RETA_Proxy'] = df_eng['Net Income_TTM_RETA'] / df_eng[ta_col].replace(0, np.nan)
     else: df_eng['RETA_Proxy'] = np.nan
-    
-    # 2. EBIT / Total Assets (EBITTA) Proxy: TTM EBIT / Total Assets
     if ebit_col and ta_col:
         df_eng['EBIT_TTM_EBITTA'] = df_eng.groupby('ticker')[ebit_col].transform(calculate_ttm)
         df_eng['EBITTA_Proxy'] = df_eng['EBIT_TTM_EBITTA'] / df_eng[ta_col].replace(0, np.nan)
     else: df_eng['EBITTA_Proxy'] = np.nan
-        
-    # 3. Sales / Total Assets (SATA) Proxy: TTM Revenue / Total Assets
     if rev_col and ta_col:
         df_eng['Total Revenue_TTM_SATA'] = df_eng.groupby('ticker')[rev_col].transform(calculate_ttm)
         df_eng['SATA_Proxy'] = df_eng['Total Revenue_TTM_SATA'] / df_eng[ta_col].replace(0, np.nan)
     else: df_eng['SATA_Proxy'] = np.nan
+    
+    # --- 7. Working Capital Turnover (WCT) (Included in previous log) ---
+    if 'Net Working Capital' in df_eng.columns and rev_col:
+        df_eng['Total Revenue_TTM'] = df_eng.groupby('ticker')[rev_col].transform(calculate_ttm)
+        df_eng['WCT'] = df_eng['Total Revenue_TTM'] / (df_eng['Net Working Capital'].replace(0, np.nan) + 1e-6)
+    else:
+        df_eng['WCT'] = np.nan
 
-    # --- Final Feature Selection (Now 20 Features, removed de_ratio and Change in D/E Ratio) ---
+    # --- 8. NEW: Cash Conversion Cycle (CCC) ---
+    # Need 4 quarters of Cost of Revenue (COR_TTM) and Revenue (REV_TTM)
+    if cor_col and inv_col:
+        df_eng['COR_TTM'] = df_eng.groupby('ticker')[cor_col].transform(calculate_ttm)
+        df_eng['Avg_Inventory'] = df_eng.groupby('ticker')[inv_col].transform(lambda x: x.rolling(window=2, min_periods=2).mean())
+        df_eng['DIO'] = (df_eng['Avg_Inventory'] / df_eng['COR_TTM'].replace(0, np.nan)) * 365
+    else: df_eng['DIO'] = np.nan
+
+    if ar_col and rev_col:
+        df_eng['REV_TTM'] = df_eng.groupby('ticker')[rev_col].transform(calculate_ttm)
+        df_eng['Avg_AR'] = df_eng.groupby('ticker')[ar_col].transform(lambda x: x.rolling(window=2, min_periods=2).mean())
+        df_eng['DSO'] = (df_eng['Avg_AR'] / df_eng['REV_TTM'].replace(0, np.nan)) * 365
+    else: df_eng['DSO'] = np.nan
+
+    if ap_col and cor_col:
+        df_eng['COR_TTM_AP'] = df_eng.groupby('ticker')[cor_col].transform(calculate_ttm)
+        df_eng['Avg_AP'] = df_eng.groupby('ticker')[ap_col].transform(lambda x: x.rolling(window=2, min_periods=2).mean())
+        df_eng['DPO'] = (df_eng['Avg_AP'] / df_eng['COR_TTM_AP'].replace(0, np.nan)) * 365
+    else: df_eng['DPO'] = np.nan
+    
+    df_eng['CCC'] = df_eng['DSO'] + df_eng['DIO'] - df_eng['DPO']
+
+    # --- Final Feature Selection ---
     feature_cols = [
         'Current Ratio', 'Operating Margin', 'Total Assets (ln)', 
         'Total Revenue_YoY_Growth', 'Net Income_YoY_Growth', 'Operating Cash Flow_YoY_Growth', 
-        'Change in Operating Margin', 'Change in Current Ratio', # Removed Change in D/E Ratio
+        'Change in Operating Margin', 'Change in Current Ratio', 
         'MA_Net Income', 'MA_ROE',
-        # 7 Advanced Credit Risk Features
         'Interest Coverage Ratio', 'Quick Ratio', 'Debt to EBITDA', 'NWC_to_Total_Assets', 
         'CV_Operating_Margin', 'Count_Negative_Net_Income_12Q', 'Sales_Volatility',
-        # 3 New Z-Score Proxies
-        'RETA_Proxy', 'EBITTA_Proxy', 'SATA_Proxy' 
+        'RETA_Proxy', 'EBITTA_Proxy', 'SATA_Proxy',
+        'WCT', 
+        'CCC' # <-- NEW FEATURE (22 base features)
     ]
     
     df_eng = df_eng.replace([np.inf, -np.inf], np.nan)
 
-    # --- CRITICAL FIX: Ensure X and y rows are aligned after feature engineering ---
     X = df_eng[feature_cols].copy()
     y = df_eng['Y'].copy()
     identifiers = df_eng[['ticker', 'report_date']].copy()
     
-    # Filter rows where ALL selected features are NaN (highly unlikely if Y exists, but safe)
     X.dropna(axis=0, how='all', inplace=True)
-    y = y.loc[X.index] # Ensure y matches filtered X
-    identifiers = identifiers.loc[X.index] # Ensure identifiers match filtered X
+    y = y.loc[X.index] 
+    identifiers = identifiers.loc[X.index] 
     
     if X.empty:
         logging.error("No valid features remain after dropping all-NaN rows.")
         return pd.DataFrame(), pd.Series(), pd.DataFrame(), []
     
-    # Ensure only existing columns are selected
     feature_cols_final = [col for col in feature_cols if col in X.columns]
     X = X[feature_cols_final]
-    # --------------------------------------------------------------------------------------------------
+    
 
-    # --- Imputation and Scaling ---
+    # --- Imputation and Scaling (FIX: Add Indicator) ---
     X_to_impute = X.copy()
     
     all_nan_cols = X_to_impute.columns[X_to_impute.isnull().all()].tolist()
@@ -430,37 +392,39 @@ def engineer_features(df):
         logging.warning(f"Forcing imputation for all-NaN features by filling with 0: {all_nan_cols}")
         X_to_impute[all_nan_cols] = X_to_impute[all_nan_cols].fillna(0)  
 
-    imputer = SimpleImputer(strategy='median')
-    X_imputed = imputer.fit_transform(X_to_impute)
-    X_imputed_df = pd.DataFrame(X_imputed, columns=feature_cols_final, index=X_to_impute.index)
+    # FIX 1: Implement Median Imputation with Indicator Feature
+    imputer = SimpleImputer(strategy='median', add_indicator=True) 
+    X_imputed_array = imputer.fit_transform(X_to_impute)
+    
+    feature_names_out = list(feature_cols_final)
+    missing_features_indices = imputer.indicator_.features_
+    indicator_feature_names = [f'Missing_{feature_names_out[i]}' for i in missing_features_indices]
+    final_feature_names = feature_names_out + indicator_feature_names
+
+    X_imputed_df = pd.DataFrame(X_imputed_array, columns=final_feature_names, index=X_to_impute.index)
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_imputed_df)
-    X_scaled_df = pd.DataFrame(X_scaled, columns=feature_cols_final, index=X_imputed_df.index) 
+    X_scaled_df = pd.DataFrame(X_scaled, columns=final_feature_names, index=X_imputed_df.index) 
 
-    logging.info(f"Selected {len(feature_cols_final)} features for model training.")
-    logging.info(f"Feature names: {list(feature_cols_final)}")
+    logging.info(f"Selected {len(final_feature_names)} features (including indicators) for model training.")
+    logging.info(f"Feature names: {list(final_feature_names)}")
 
     joblib.dump(imputer, os.path.join(MODEL_DIR, IMPUTER_FILENAME))
     joblib.dump(scaler, os.path.join(MODEL_DIR, SCALER_FILENAME))
     logging.info(f"Imputer saved to {os.path.join(MODEL_DIR, IMPUTER_FILENAME)}")
     logging.info(f"Scaler saved to {os.path.join(MODEL_DIR, SCALER_FILENAME)}")
 
-    return X_scaled_df, y, identifiers, feature_cols_final
+    return X_scaled_df, y, identifiers, final_feature_names
 
 
 def split_data(X, y, identifiers):
-    """
-    Splits data into train, validation, and test sets based on time (Time-Based Split).
-    *** UPDATED: Now uses 70/10/20 split ***
-    """
+    """Splits data into train, validation, and test sets based on time. (Unchanged logic)"""
     logging.info("4. Splitting data into Train, Validation, Test sets (Time-Based)...")
     
-    # --- FIXED TIME SPLIT CONFIGURATION (70/10/20) ---
     TEST_RATIO = 0.20  
-    VAL_RATIO = 0.10  # <-- CHANGED 
+    VAL_RATIO = 0.10  
     MIN_TRAIN_SAMPLES = 50 
-    # ------------------------------------------
 
     data_full = pd.concat([identifiers.reset_index(drop=True),
                            X.reset_index(drop=True),
@@ -475,22 +439,18 @@ def split_data(X, y, identifiers):
     test_size = int(total_samples * TEST_RATIO)
     val_size = int(total_samples * VAL_RATIO)
     
-    
     if total_samples - test_size - val_size < MIN_TRAIN_SAMPLES or total_samples < 100:
-        logging.warning("Time-Based split failed (too few samples, size < 50, or empty). Falling back to random split.")
+        logging.warning("Time-Based split failed. Falling back to random split.")
         
-        # Fallback to random split (80/20) with stratification
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=TEST_RATIO, random_state=42, stratify=y)
         X_val, y_val = pd.DataFrame(), pd.Series()
         
-        # Get the corresponding IDs for logging
         train_indices, test_indices = train_test_split(identifiers.index, test_size=TEST_RATIO, random_state=42, stratify=y.values)
         train_ids = identifiers.loc[train_indices]
         test_ids = identifiers.loc[test_indices]
         val_ids = pd.DataFrame()
         
     else:
-        # Standard 70/10/20 time-based split 
         train_end_index = total_samples - test_size - val_size
         val_end_index = total_samples - test_size
         
@@ -498,7 +458,6 @@ def split_data(X, y, identifiers):
         val_data = data_full.iloc[train_end_index:val_end_index]
         test_data = data_full.iloc[val_end_index:]
         
-        # Assign data
         feature_cols = X.columns
         X_train = train_data[feature_cols]
         y_train = train_data['Y']
@@ -527,23 +486,19 @@ def split_data(X, y, identifiers):
 
 
 def train_model(X_train, y_train):
-    """
-    Trains the XGBoost Classifier model using RandomizedSearchCV, F2-Score, and L1/L2 Regularization.
-    """
+    """Trains the XGBoost Classifier using calculated scale_pos_weight (No SMOTE). (Unchanged logic)"""
     logging.info("4.1 Calculating scale_pos_weight...")
     
-    # Calculate scale_pos_weight
     count_neg = y_train.value_counts().get(0, 0)
     count_pos = y_train.value_counts().get(1, 1) 
     scale_pos_weight_value = count_neg / count_pos
     
     logging.info(f"  Calculated scale_pos_weight: {scale_pos_weight_value:.2f} (Count 0 / Count 1)")
     
-    X_train_res, y_train_res = X_train, y_train
+    X_train_final, y_train_final = X_train, y_train
         
     logging.info("5. Training XGBoost model using RandomizedSearchCV...")
 
-    # 1. กำหนด Base Model
     # INCREASE BASE scale_pos_weight by 1.5x for stronger False Negative penalty
     base_scale_pos_weight = scale_pos_weight_value * 1.5
     
@@ -553,27 +508,23 @@ def train_model(X_train, y_train):
         use_label_encoder=False,
         eval_metric='logloss',
         n_jobs=-1,
-        scale_pos_weight=base_scale_pos_weight, # ใช้ค่าที่ถ่วงน้ำหนักเพิ่มขึ้น
+        scale_pos_weight=base_scale_pos_weight, 
     )
     
-    # 2. กำหนด Hyperparameter Space
     param_grid = {
         'n_estimators': [100, 200, 300],
         'max_depth': [3, 4, 5, 6],
         'learning_rate': [0.05, 0.1, 0.2],
         'gamma': [0, 0.1, 0.5], 
         'subsample': [0.7, 0.8, 0.9],
-        'reg_lambda': [0.1, 1, 10],   # <-- L2 Regularization
-        'reg_alpha': [0, 0.1, 1],     # <-- L1 Regularization
+        'reg_lambda': [0.1, 1, 10],   
+        'reg_alpha': [0, 0.1, 1],     
     }
     
-    # 3. กำหนด Scoring Metric: F2-Score (Recall สำคัญกว่า Precision)
     f2_scorer = make_scorer(fbeta_score, beta=2, zero_division=0)
     
-    # 4. กำหนด CV strategy (Stratified K-Fold เหมาะกับ Imbalance Data)
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     
-    # 5. รัน Randomized Search
     random_search = RandomizedSearchCV(
         estimator=xgb_base,
         param_distributions=param_grid,
@@ -584,7 +535,7 @@ def train_model(X_train, y_train):
         random_state=42
     )
 
-    random_search.fit(X_train_res, y_train_res)
+    random_search.fit(X_train_final, y_train_final) 
     
     best_model = random_search.best_estimator_
     
@@ -594,55 +545,60 @@ def train_model(X_train, y_train):
     
     return best_model 
 
-def optimize_threshold(model, X_val, y_val, min_recall_target=0.60): 
+def optimize_threshold(model, X_val, y_val, beta=2.0): # FIX 3: Changed default beta back to 2.0
     """
-    Calculates the optimal threshold from the Validation set based on a minimum Recall target.
+    FIX 3: Calculates the optimal threshold from the Validation set by explicitly maximizing F-beta score (F2-Score).
     """
     if X_val.empty or y_val.empty:
         logging.warning("Validation set is empty, skipping threshold optimization.")
-        return 0.5, 0.0, 0.0 # Fallback
+        return 0.5, 0.0, 0.0 
 
     logging.info("Optimizing Classification Threshold using Validation Set...")
     y_pred_proba = model.predict_proba(X_val)[:, 1]
     
     precision, recall, thresholds = precision_recall_curve(y_val, y_pred_proba)
     
-    # Find the threshold that meets the minimum recall target while maintaining precision
-    sufficient_recall_indices = np.where(recall[:-1] >= min_recall_target)[0] 
+    # Calculate F-beta scores (F2-Score) for all thresholds
+    fbeta_scores = (1 + beta**2) * (precision * recall) / ((beta**2 * precision) + recall + 1e-6)
     
-    if len(sufficient_recall_indices) == 0:
-        logging.warning(f"  Cannot achieve minimum Recall target of {min_recall_target:.2f}. Using threshold that maximizes F1-Score instead.")
+    # Constraint: Only consider thresholds where Precision is at least 0.15 (Our new minimum acceptable level)
+    MIN_PRECISION = 0.15
+    constrained_indices = np.where(precision[:-1] >= MIN_PRECISION)[0]
+    
+    if len(constrained_indices) > 0:
+        # Among those that meet min Precision, maximize F2-Score
+        optimal_idx = constrained_indices[np.argmax(fbeta_scores[constrained_indices])]
         
-        f1_scores = 2 * (precision * recall) / (precision + recall + 1e-6)
-        optimal_idx = np.argmax(f1_scores[:-1]) 
-        
+        optimal_threshold = thresholds[optimal_idx]
         optimal_precision = precision[optimal_idx]
         optimal_recall = recall[optimal_idx]
-        optimal_threshold = thresholds[optimal_idx]
-
+        optimal_fbeta = fbeta_scores[optimal_idx]
+        
     else:
-        # Select the point that maximizes precision among those meeting the minimum recall target
-        optimal_idx = sufficient_recall_indices[np.argmax(precision[sufficient_recall_indices])]
+        # Fallback to pure F2-Score maximization (if no point meets MIN_PRECISION)
+        optimal_idx = np.argmax(fbeta_scores[:-1])
         
         optimal_threshold = thresholds[optimal_idx]
         optimal_precision = precision[optimal_idx]
         optimal_recall = recall[optimal_idx]
+        optimal_fbeta = fbeta_scores[optimal_idx]
+        logging.warning(f"  Cannot meet minimum Precision target of {MIN_PRECISION:.2f}. Falling back to pure F{beta}-Score maximization.")
 
+
+    logging.info(f"  Optimization Goal: Maximize F{beta}-Score (Min Precision 0.15).")
     logging.info(f"  Optimal Threshold found: {optimal_threshold:.4f}")
     logging.info(f"  Resulting Precision: {optimal_precision:.4f}")
     logging.info(f"  Resulting Recall: {optimal_recall:.4f}")
+    logging.info(f"  Resulting F{beta}-Score: {optimal_fbeta:.4f}")
     
     return optimal_threshold, optimal_recall, optimal_precision
 
 
 def evaluate_model(model, X_test, y_test, optimal_threshold=0.5):
-    """
-    Evaluates the model on the test set and prints metrics, using the optimal_threshold.
-    """
+    """Evaluates the model on the test set and prints metrics. (Unchanged logic)"""
     logging.info("6. Evaluating model on Test Set...")
     y_pred_proba = model.predict_proba(X_test)[:, 1] 
 
-    # --- Evaluation at Optimal Threshold ---
     y_pred = (y_pred_proba >= optimal_threshold).astype(int)
     
     accuracy = accuracy_score(y_test, y_pred)
@@ -650,7 +606,6 @@ def evaluate_model(model, X_test, y_test, optimal_threshold=0.5):
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
     
-    # Check if there are positive samples in y_test for AUC calculation
     if len(np.unique(y_test)) == 2:
         roc_auc = roc_auc_score(y_test, y_pred_proba)
     else:
@@ -676,40 +631,72 @@ def evaluate_model(model, X_test, y_test, optimal_threshold=0.5):
 
 def explain_model(model, X_train, feature_names):
     """
-    Uses SHAP to explain the model (Final Fix: Robust TreeExplainer attempt).
+    FIX 4: Uses SHAP to explain the model and prints the analysis hint for Missing Indicators.
     """
     logging.info("7. Explaining model using SHAP...")
+    
+    # Use a small sample of training data for SHAP background/speed
+    X_train_sample = X_train.sample(min(200, len(X_train)), random_state=42)
+
     try:
-        # Primary method: Use TreeExplainer (fastest and best for tree models)
-        explainer = shap.TreeExplainer(model, X_train) 
-        shap_values = explainer.shap_values(X_train)
+        # Primary method: Use TreeExplainer (will likely fail, but we try first)
+        explainer = shap.TreeExplainer(model, X_train_sample) 
+        shap_values = explainer.shap_values(X_train_sample)
         
-        # If explainer.shap_values returns a list of two arrays
         if isinstance(shap_values, list) and len(shap_values) > 1:
-            shap_values_class1 = shap_values[1] # Use values for class 1 (risk=1)
+            shap_values_class1 = shap_values[1] 
         else:
             shap_values_class1 = shap_values
         
-        logging.info("Generating SHAP Summary Plot...")
-        logging.info(f"SHAP explanation calculated for {len(feature_names)} features.")
+        logging.info(f"SHAP explanation calculated for {len(feature_names)} features using TreeExplainer.")
+        
+        # --- SHAP Analysis Hint ---
+        if isinstance(shap_values_class1, np.ndarray):
+            X_train_sample_df = pd.DataFrame(X_train_sample, columns=feature_names, index=X_train_sample.index)
+            missing_feature_cols = [col for col in X_train_sample_df.columns if col.startswith('Missing_')]
+            
+            if missing_feature_cols:
+                missing_indices = [X_train_sample_df.columns.get_loc(col) for col in missing_feature_cols]
+
+                mean_abs_shap_missing = np.mean(np.abs(shap_values_class1[:, missing_indices]))
+                mean_abs_shap_all = np.mean(np.abs(shap_values_class1))
+                
+                logging.info(f"SHAP Analysis Hint: Mean Absolute SHAP for Missing Indicators: {mean_abs_shap_missing:.4f}")
+                logging.info(f"SHAP Analysis Hint: Mean Absolute SHAP for All Features: {mean_abs_shap_all:.4f}")
+                if mean_abs_shap_all > 1e-6:
+                    logging.info(f"SHAP Analysis Hint: Missing Indicators are {(mean_abs_shap_missing/mean_abs_shap_all):.1%} of the total feature importance.")
+                else:
+                    logging.info("SHAP Analysis Hint: Total importance too small to calculate ratio.")
+        # --- End SHAP Analysis Hint ---
 
     except Exception as e:
-        # Secondary method: Fallback to KernelExplainer by wrapping the predict_proba function
+        # Secondary method: Fallback to KernelExplainer (will capture the hint via the outer logic on next run)
         logging.error(f"Error during TreeExplainer: {e}. Falling back to KernelExplainer with predict_proba wrapper...", exc_info=True)
         try:
-             # Use KernelExplainer with a callable function that returns probabilities for class 1
-             # NOTE: This is MUCH slower, but should resolve the 'not callable' issue
+             explainer = shap.Explainer(lambda X: model.predict_proba(X)[:, 1], X_train_sample)
+             shap_values_kernel = explainer(X_train_sample)
              
-             # Re-initialize the explainer using the probability prediction function
-             explainer = shap.Explainer(lambda X: model.predict_proba(X)[:, 1], X_train)
-             shap_values = explainer(X_train)
-             
-             if hasattr(shap_values, 'values') and isinstance(shap_values.values, np.ndarray):
-                 shap_values_class1 = shap_values.values
-             else:
-                 shap_values_class1 = shap_values
-
              logging.info("SHAP explanation calculated successfully using secondary (KernelExplainer) method.")
+             
+             # Re-try printing the hint using KernelExplainer results
+             if hasattr(shap_values_kernel, 'values') and isinstance(shap_values_kernel.values, np.ndarray):
+                shap_values_class1 = shap_values_kernel.values
+                X_train_sample_df = pd.DataFrame(X_train_sample, columns=feature_names, index=X_train_sample.index)
+                missing_feature_cols = [col for col in X_train_sample_df.columns if col.startswith('Missing_')]
+            
+                if missing_feature_cols:
+                    missing_indices = [X_train_sample_df.columns.get_loc(col) for col in missing_feature_cols]
+
+                    mean_abs_shap_missing = np.mean(np.abs(shap_values_class1[:, missing_indices]))
+                    mean_abs_shap_all = np.mean(np.abs(shap_values_class1))
+                    
+                    logging.info(f"SHAP Analysis Hint (Fallback): Mean Absolute SHAP for Missing Indicators: {mean_abs_shap_missing:.4f}")
+                    logging.info(f"SHAP Analysis Hint (Fallback): Mean Absolute SHAP for All Features: {mean_abs_shap_all:.4f}")
+                    if mean_abs_shap_all > 1e-6:
+                        logging.info(f"SHAP Analysis Hint (Fallback): Missing Indicators are {(mean_abs_shap_missing/mean_abs_shap_all):.1%} of the total feature importance.")
+                    else:
+                        logging.info("SHAP Analysis Hint (Fallback): Total importance too small to calculate ratio.")
+
 
         except Exception as e2:
             logging.error(f"Error during SHAP explanation (All attempts failed): {e2}", exc_info=True)
@@ -717,9 +704,7 @@ def explain_model(model, X_train, feature_names):
 
 
 def save_model(model):
-    """
-    Saves the trained model to a file using joblib.
-    """
+    """Saves the trained model to a file using joblib. (Unchanged logic)"""
     logging.info("8. Saving the trained model...")
     model_path = os.path.join(MODEL_DIR, MODEL_FILENAME)
     try:
@@ -731,7 +716,7 @@ def save_model(model):
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    logging.info("===== Starting ML Risk Prediction Script (XGBoost + Tuned) =====")
+    logging.info("===== Starting ML Risk Prediction Script (XGBoost + Tuned + Aggressive FN Penalty + Max F2 Threshold) =====")
     start_time = datetime.now()
 
     # 1. Fetch Data
@@ -744,7 +729,7 @@ if __name__ == "__main__":
         df_with_y = create_target_variable(df_financials, df_summary_de)
 
         if not df_with_y.empty:
-            # 3. Engineer Features
+            # 3. Engineer Features (includes CCC and fixed indicator feature)
             X, y, ids, feature_names_final = engineer_features(df_with_y)
 
             if not X.empty:
@@ -752,22 +737,21 @@ if __name__ == "__main__":
                 try:
                     X_train, y_train, X_val, y_val, X_test, y_test = split_data(X, y, ids)
 
-                    # 5. Train Model (XGBoost + RandomizedSearchCV/F2-Score)
+                    # 5. Train Model (uses calculated scale_pos_weight * 1.5)
                     trained_model = train_model(X_train, y_train)
 
-                    # **NEW STEP: Optimize Threshold**
+                    # **FIXED STEP: Optimize Threshold for F2-Score**
                     if not X_val.empty:
-                        # ลองตั้งเป้า Recall ที่ 60% (ค่าที่สมจริงยิ่งขึ้น)
-                        optimized_threshold, _, _ = optimize_threshold(trained_model, X_val, y_val, min_recall_target=0.60)
+                        # Maximize F2-Score (Beta=2.0) with Min Precision 0.15 constraint
+                        optimized_threshold, _, _ = optimize_threshold(trained_model, X_val, y_val, beta=2.0)
                     else:
                         optimized_threshold = 0.5 
                         logging.warning("No Validation set available. Using default threshold 0.5 for evaluation.")
 
-
                     # 6. Evaluate Model (on Test set) using optimized threshold
                     evaluate_model(trained_model, X_test, y_test, optimized_threshold)
 
-                    # 7. Explain Model (using Training set for background)
+                    # 7. Explain Model (with SHAP analysis hint)
                     explain_model(trained_model, X_train, feature_names_final)
 
                     # 8. Save Model

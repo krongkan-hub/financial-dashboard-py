@@ -2,7 +2,7 @@
 # This file centralizes all static configuration data for the application.
 
 import plotly.express as px
-from datetime import date
+from datetime import date, datetime
 
 HISTORICAL_START_DATE = datetime(2010, 1, 1)
 

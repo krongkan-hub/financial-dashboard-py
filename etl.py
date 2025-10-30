@@ -316,7 +316,7 @@ def process_single_ticker_prices(data_tuple):
 # --- [END NEW HELPER FUNCTION FOR OOM FIX] ---
 
 # --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 500 LIMIT) ---
-def update_daily_prices(days_back=5*365, tickers_list_override: Optional[List[str]] = None):
+def update_daily_prices(days_back=16*365, tickers_list_override: Optional[List[str]] = None):
     job_name = "Job 2: Update Daily Prices (Top 500)"
     if sql_insert is None:
         logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
@@ -420,15 +420,22 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
         try:
             logging.info(f"[{job_name}] Fetching financial statements directly for {ticker} using yfinance...")
             tkr = yf.Ticker(ticker)
-            statements = {'income': tkr.quarterly_financials, 'balance': tkr.quarterly_balance_sheet, 'cashflow': tkr.quarterly_cashflow}
+            statements_data = {
+                'income_q': tkr.quarterly_financials, 
+                'balance_q': tkr.quarterly_balance_sheet, 
+                'cashflow_q': tkr.quarterly_cashflow,
+                'income_a': tkr.financials,            # Annual Income Statement
+                'balance_a': tkr.balance_sheet,        # Annual Balance Sheet
+                'cashflow_a': tkr.cashflow             # Annual Cash Flow
+            }
             if not any(df is not None and not df.empty for df in statements.values()):
                 logging.warning(f"[{job_name}] No financial statement data found via yfinance for {ticker}.")
                 time.sleep(0.8)
                 return
 
-            all_statements_data = []
-            for statement_type in ['income', 'balance', 'cashflow']:
-                df = statements.get(statement_type)
+            all_statements_data = [] 
+            # --- START MODIFICATION: Loop over the new dictionary keys (statement_key = 'income_q', 'balance_a', etc.) ---
+            for statement_key, df in statements_data.items(): 
                 if df is None or df.empty: continue
                 if df.index.name is None: df.index.name = 'metric_name'
                 try:
@@ -436,19 +443,22 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
                     non_date_column_names = [col for col in df.columns if col not in date_columns]
                     df.columns = non_date_column_names + date_columns.tolist()
                 except Exception as date_err:
-                    logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_type}: {date_err}. Skipping this statement.")
+                    # ใช้ statement_key ใน Log แทน statement_type เดิม
+                    logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_key}: {date_err}. Skipping this statement.")
                     continue
 
                 df_to_melt = df.reset_index()
                 df_long = df_to_melt.melt(id_vars='metric_name', var_name='report_date', value_name='metric_value')
                 df_long['ticker'] = ticker
-                df_long['statement_type'] = statement_type
+                # ใช้ statement_key เป็น statement_type เพื่อแยก Annual ('_a') และ Quarterly ('_q') ใน DB
+                df_long['statement_type'] = statement_key 
                 df_long['report_date'] = pd.to_datetime(df_long['report_date']).dt.date
                 df_long.dropna(subset=['metric_value'], inplace=True)
                 df_long['metric_value'] = pd.to_numeric(df_long['metric_value'], errors='coerce').astype(float)
                 df_long.dropna(subset=['metric_value'], inplace=True)
                 df_long['metric_name'] = df_long['metric_name'].astype(str).str.strip()
                 all_statements_data.extend(df_long.to_dict('records'))
+            # --- END MODIFICATION ---
 
             if all_statements_data:
                 with server.app_context():

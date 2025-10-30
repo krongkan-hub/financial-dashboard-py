@@ -588,6 +588,154 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         return dcf_base
 # --- [END NEW HELPER FUNCTION] ---
 
+# ==============================================================================
+# --- [NEW] SECTION: ML Risk Model V2.0 Data Fetching ---
+# ==============================================================================
+
+def get_ml_risk_raw_data(tickers: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Fetches the raw, combined data required for the ML-Based Credit Risk Model (V2.0).
+    The resulting DataFrame is indexed by (ticker, report_date) and contains:
+    1. Financial Metrics (Accumulated_Deficit, Current_Ratio, Total_Equity)
+    2. Credit Rating (from DimCompany, broadcasted to all quarters)
+    3. Market Data (closing_price at quarter-end)
+    4. Market Cap & Shares Outstanding (Latest value, broadcasted to all quarters)
+    """
+    logging.info("Starting to fetch raw data for ML Risk Model V2.0...")
+    
+    with server.app_context():
+        # 1. Fetch Financial Metrics (for Target Solvency & P/B Feature)
+        required_fin_metrics = [
+            'Accumulated Deficit',  # สำหรับ Y_Solvency
+            'Current Ratio',        # สำหรับ Y_Solvency
+            'Total Equity'          # สำหรับ P/B Feature
+        ]
+        
+        fin_query = db.session.query(
+            FactFinancialStatements.ticker,
+            FactFinancialStatements.report_date,
+            FactFinancialStatements.metric_name,
+            FactFinancialStatements.metric_value
+        ).filter(
+            FactFinancialStatements.metric_name.in_(required_fin_metrics),
+            FactFinancialStatements.statement_type.in_(['income', 'balance', 'cashflow']) # ดึง statement type ที่เกี่ยวข้อง
+        )
+        
+        if tickers:
+            fin_query = fin_query.filter(FactFinancialStatements.ticker.in_(tickers))
+
+        df_financials_long = pd.read_sql(fin_query.statement, db.engine)
+        
+        if df_financials_long.empty:
+            logging.warning("No financial statement data found for required metrics.")
+            return pd.DataFrame()
+
+        # Pivot financial data to wide format
+        df_financials_wide = df_financials_long.pivot_table(
+            index=['ticker', 'report_date'], 
+            columns='metric_name', 
+            values='metric_value'
+        ).reset_index()
+        
+        df_financials_wide.columns.name = None
+        df_financials_wide.rename(columns={
+            'Accumulated Deficit': 'Accumulated_Deficit',
+            'Current Ratio': 'Current_Ratio',
+            'Total Equity': 'Total_Equity'
+        }, inplace=True)
+        
+        # 2. Fetch Credit Rating (DimCompany - Latest Rating)
+        rating_query = db.session.query(
+            DimCompany.ticker,
+            DimCompany.credit_rating
+        )
+        if tickers:
+            rating_query = rating_query.filter(DimCompany.ticker.in_(tickers))
+        
+        df_rating = pd.read_sql(rating_query.statement, db.engine)
+        
+        # Merge rating (Broadcasts latest rating to all report_dates)
+        df_merged = pd.merge(
+            df_financials_wide, 
+            df_rating, 
+            on='ticker', 
+            how='left'
+        )
+
+        # 3. Fetch all Market Data (Daily Prices)
+        # Determine the earliest date we need price data for
+        min_date = df_financials_wide['report_date'].min() if not df_financials_wide.empty else datetime.now() - timedelta(days=5*365)
+
+        price_query = db.session.query(
+            FactDailyPrices.ticker,
+            FactDailyPrices.date.label('price_date'), # Rename for clarity
+            FactDailyPrices.close.label('closing_price')
+        ).filter(
+            FactDailyPrices.date >= min_date.date() # Compare with date object
+        )
+        if tickers:
+            price_query = price_query.filter(FactDailyPrices.ticker.in_(tickers))
+
+        df_prices = pd.read_sql(price_query.statement, db.engine)
+        
+        # 4. Fetch Market Cap & Shares Outstanding Proxy (Latest from FactCompanySummary)
+        summary_subquery = db.session.query(
+            FactCompanySummary.ticker, 
+            func.max(FactCompanySummary.date_updated).label('max_date')
+        ).group_by(FactCompanySummary.ticker).subquery()
+
+        summary_query = db.session.query(
+            FactCompanySummary.ticker,
+            FactCompanySummary.price, 
+            FactCompanySummary.market_cap 
+        ).join(
+            summary_subquery,
+            (FactCompanySummary.ticker == summary_subquery.c.ticker) & 
+            (FactCompanySummary.date_updated == summary_subquery.c.max_date)
+        )
+        if tickers:
+            summary_query = summary_query.filter(FactCompanySummary.ticker.in_(tickers))
+        
+        df_summary = pd.read_sql(summary_query.statement, db.engine)
+        
+        # Calculate shares_outstanding
+        df_summary['shares_outstanding'] = df_summary['market_cap'] / df_summary['price'].replace(0, np.nan)
+        df_summary.drop(columns=['price'], inplace=True) 
+        
+        # Merge shares_outstanding and market_cap (Broadcasts latest to all report_dates)
+        df_merged = pd.merge(
+            df_merged,
+            df_summary[['ticker', 'market_cap', 'shares_outstanding']],
+            on='ticker',
+            how='left'
+        )
+        
+        # --- Post-Processing in Pandas for Price Matching (Time-Series Join) ---
+        # ต้องใช้ pd.merge_asof เพื่อหา closing_price ที่ใกล้เคียงที่สุด (และก่อนหน้า) วันที่รายงานผลประกอบการ
+        
+        # 1. เตรียมข้อมูล
+        df_merged.rename(columns={'report_date': 'date'}, inplace=True)
+        df_merged.sort_values(['ticker', 'date'], inplace=True)
+        
+        df_prices.rename(columns={'price_date': 'date'}, inplace=True)
+        df_prices.sort_values(['ticker', 'date'], inplace=True)
+        
+        # 2. Join ด้วย merge_asof
+        df_final = pd.merge_asof(
+            df_merged,
+            df_prices[['ticker', 'date', 'closing_price']],
+            on='date',
+            by='ticker',
+            direction='backward' # หาข้อมูลราคาที่เกิดขึ้นก่อนหรือในวันที่ report_date
+        )
+
+        # Final Cleaning
+        df_final.rename(columns={'date': 'report_date'}, inplace=True)
+        df_final.set_index(['ticker', 'report_date'], inplace=True)
+        df_final.sort_index(inplace=True)
+        
+        logging.info(f"Finished fetching raw data. Shape: {df_final.shape}")
+        return df_final
 
 # --- [MODIFIED] calculate_monte_carlo_dcf ---
 @lru_cache(maxsize=32)

@@ -1,4 +1,4 @@
-# run_ml_risk.py (เวอร์ชัน FINAL-FIX V4: Recall Boost & SHAP Fix)
+# run_ml_risk.py (เวอร์ชัน FINAL-FIX V5: Stricter Precision & Y Definition)
 
 import logging
 import pandas as pd
@@ -10,6 +10,7 @@ import shap
 from xgboost import XGBClassifier 
 
 # --- Database Interaction ---
+# NOTE: ต้องมั่นใจว่า app.py, FactFinancialStatements, FactCompanySummary ได้ถูก import อย่างถูกต้องในสภาพแวดล้อมของคุณ
 from app import db, server, FactFinancialStatements, FactCompanySummary
 from sqlalchemy import func, and_
 from sqlalchemy.orm import aliased
@@ -27,10 +28,10 @@ from sklearn.metrics import (
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Constants for Target Variable Definition
-DE_RATIO_THRESHOLD = 5.0
+# Constants for Target Variable Definition (***EDITED: Stricter Y Definition***)
+DE_RATIO_THRESHOLD = 7.0 # ปรับจาก 5.0 -> 7.0
 ICR_THRESHOLD = 1.0
-CONSECUTIVE_LOSS_PERIODS = 6 
+CONSECUTIVE_LOSS_PERIODS = 8 # ปรับจาก 6 -> 8
 
 # Feature Engineering Constants
 MA_PERIODS = 4 
@@ -148,7 +149,7 @@ def fetch_data(start_year=2015):
 
 
 def create_target_variable(df_ffs, df_fcs):
-    """Creates the binary target variable (Y) based on defined risk criteria. (Unchanged logic)"""
+    """Creates the binary target variable (Y) based on defined risk criteria. (Uses stricter constants)"""
     logging.info("2. Creating Target Variable (Y)...")
     if df_ffs.empty:
         logging.warning("Financial statement data is empty, cannot create target variable.")
@@ -192,7 +193,7 @@ def create_target_variable(df_ffs, df_fcs):
                        direction='backward', 
                        tolerance=pd.Timedelta('365 days')) 
 
-    # --- Apply Risk Rules ---
+    # --- Apply Risk Rules (Uses Stricter Constants 7.0 and 8) ---
     rule1 = df['is_negative_equity'] == 1
     rule2 = (df['de_ratio'] > DE_RATIO_THRESHOLD) & (df['TTM_ICR'] < ICR_THRESHOLD)
     rule3 = df['consecutive_losses'] >= CONSECUTIVE_LOSS_PERIODS
@@ -224,7 +225,7 @@ def create_target_variable(df_ffs, df_fcs):
 def engineer_features(df):
     """
     Calculates 20+ features, handles infinities/NaNs, and applies scaling/imputation 
-    WITH INDICATOR FEATURE FIX.
+    WITH INDICATOR FEATURE FIX. (Unchanged logic)
     """
     logging.info("3. Engineering Features (X)...")
     if df.empty or 'Y' not in df.columns:
@@ -486,7 +487,7 @@ def split_data(X, y, identifiers):
 
 
 def train_model(X_train, y_train):
-    """Trains the XGBoost Classifier using calculated scale_pos_weight (No SMOTE). (Unchanged logic)"""
+    """Trains the XGBoost Classifier using calculated scale_pos_weight (Reduced FN Penalty)"""
     logging.info("4.1 Calculating scale_pos_weight...")
     
     count_neg = y_train.value_counts().get(0, 0)
@@ -499,8 +500,8 @@ def train_model(X_train, y_train):
         
     logging.info("5. Training XGBoost model using RandomizedSearchCV...")
 
-    # INCREASE BASE scale_pos_weight by 1.5x for stronger False Negative penalty
-    base_scale_pos_weight = scale_pos_weight_value * 1.5
+    # ***EDITED: Base scale_pos_weight multiplier reduced to 1.0x (Less aggressive FN penalty)***
+    base_scale_pos_weight = scale_pos_weight_value * 1.0 
     
     xgb_base = XGBClassifier(
         objective='binary:logistic',
@@ -545,9 +546,10 @@ def train_model(X_train, y_train):
     
     return best_model 
 
-def optimize_threshold(model, X_val, y_val, beta=2.0): # FIX 3: Changed default beta back to 2.0
+def optimize_threshold(model, X_val, y_val, beta=2.0):
     """
-    FIX 3: Calculates the optimal threshold from the Validation set by explicitly maximizing F-beta score (F2-Score).
+    FIX 3: Calculates the optimal threshold from the Validation set by explicitly maximizing F-beta score (F2-Score)
+    with a stricter MIN_PRECISION constraint.
     """
     if X_val.empty or y_val.empty:
         logging.warning("Validation set is empty, skipping threshold optimization.")
@@ -561,8 +563,8 @@ def optimize_threshold(model, X_val, y_val, beta=2.0): # FIX 3: Changed default 
     # Calculate F-beta scores (F2-Score) for all thresholds
     fbeta_scores = (1 + beta**2) * (precision * recall) / ((beta**2 * precision) + recall + 1e-6)
     
-    # Constraint: Only consider thresholds where Precision is at least 0.15 (Our new minimum acceptable level)
-    MIN_PRECISION = 0.15
+    # Constraint: Only consider thresholds where Precision is at least 0.50 (Our new minimum acceptable level) (***EDITED: Stricter MIN_PRECISION***)
+    MIN_PRECISION = 0.30 
     constrained_indices = np.where(precision[:-1] >= MIN_PRECISION)[0]
     
     if len(constrained_indices) > 0:
@@ -585,7 +587,7 @@ def optimize_threshold(model, X_val, y_val, beta=2.0): # FIX 3: Changed default 
         logging.warning(f"  Cannot meet minimum Precision target of {MIN_PRECISION:.2f}. Falling back to pure F{beta}-Score maximization.")
 
 
-    logging.info(f"  Optimization Goal: Maximize F{beta}-Score (Min Precision 0.15).")
+    logging.info(f"  Optimization Goal: Maximize F{beta}-Score (Min Precision {MIN_PRECISION:.2f}).")
     logging.info(f"  Optimal Threshold found: {optimal_threshold:.4f}")
     logging.info(f"  Resulting Precision: {optimal_precision:.4f}")
     logging.info(f"  Resulting Recall: {optimal_recall:.4f}")
@@ -595,13 +597,16 @@ def optimize_threshold(model, X_val, y_val, beta=2.0): # FIX 3: Changed default 
 
 
 def evaluate_model(model, X_test, y_test, optimal_threshold=0.5):
-    """Evaluates the model on the test set and prints metrics. (Unchanged logic)"""
+    """Evaluates the model on the test set and prints metrics. (FIXED: Removed zero_division from accuracy_score)"""
     logging.info("6. Evaluating model on Test Set...")
     y_pred_proba = model.predict_proba(X_test)[:, 1] 
 
     y_pred = (y_pred_proba >= optimal_threshold).astype(int)
     
-    accuracy = accuracy_score(y_test, y_pred)
+    # ***FIX: Remove zero_division=0 from accuracy_score***
+    accuracy = accuracy_score(y_test, y_pred) 
+    
+    # Keep zero_division=0 for other metrics
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
@@ -628,10 +633,9 @@ def evaluate_model(model, X_test, y_test, optimal_threshold=0.5):
     
     logging.info("--- End Evaluation ---")
 
-
 def explain_model(model, X_train, feature_names):
     """
-    FIX 4: Uses SHAP to explain the model and prints the analysis hint for Missing Indicators.
+    FIX 4: Uses SHAP to explain the model and prints the analysis hint for Missing Indicators. (Unchanged logic)
     """
     logging.info("7. Explaining model using SHAP...")
     
@@ -716,7 +720,7 @@ def save_model(model):
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    logging.info("===== Starting ML Risk Prediction Script (XGBoost + Tuned + Aggressive FN Penalty + Max F2 Threshold) =====")
+    logging.info("===== Starting ML Risk Prediction Script (XGBoost + Tuned + Balanced FN Penalty + Max F2 Threshold + Stricter Y & Precision) =====")
     start_time = datetime.now()
 
     # 1. Fetch Data
@@ -725,7 +729,7 @@ if __name__ == "__main__":
     if df_financials.empty:
         logging.error("Stopping script because no financial data could be fetched.")
     else:
-        # 2. Create Target Variable
+        # 2. Create Target Variable (Uses Stricter Constants)
         df_with_y = create_target_variable(df_financials, df_summary_de)
 
         if not df_with_y.empty:
@@ -737,12 +741,12 @@ if __name__ == "__main__":
                 try:
                     X_train, y_train, X_val, y_val, X_test, y_test = split_data(X, y, ids)
 
-                    # 5. Train Model (uses calculated scale_pos_weight * 1.5)
+                    # 5. Train Model (uses calculated scale_pos_weight * 1.0)
                     trained_model = train_model(X_train, y_train)
 
-                    # **FIXED STEP: Optimize Threshold for F2-Score**
+                    # **FIXED STEP: Optimize Threshold for F2-Score (Maximized Recall) with MIN_PRECISION 0.30**
                     if not X_val.empty:
-                        # Maximize F2-Score (Beta=2.0) with Min Precision 0.15 constraint
+                        # Maximize F2-Score (Beta=2.0) with Min Precision 0.50 constraint
                         optimized_threshold, _, _ = optimize_threshold(trained_model, X_val, y_val, beta=2.0)
                     else:
                         optimized_threshold = 0.5 

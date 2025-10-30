@@ -321,7 +321,7 @@ def process_single_ticker_prices(data_tuple):
 # --- [END NEW HELPER FUNCTION FOR OOM FIX] ---
 
 # --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 500 LIMIT) ---
-def update_daily_prices(days_back=16*365, tickers_list_override: Optional[List[str]] = None):
+def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
     job_name = "Job 2: Update Daily Prices (Top 500)"
     if sql_insert is None:
         logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
@@ -433,7 +433,7 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
                 'balance_a': tkr.balance_sheet,        # Annual Balance Sheet
                 'cashflow_a': tkr.cashflow             # Annual Cash Flow
             }
-            if not any(df is not None and not df.empty for df in statements.values()):
+            if not any(df is not None and not df.empty for df in statements_data.values()): # <-- FIX: ใช้ statements_data
                 logging.warning(f"[{job_name}] No financial statement data found via yfinance for {ticker}.")
                 time.sleep(0.8)
                 return

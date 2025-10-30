@@ -33,6 +33,20 @@ DE_RATIO_THRESHOLD = 7.0 # ปรับจาก 5.0 -> 7.0
 ICR_THRESHOLD = 1.0
 CONSECUTIVE_LOSS_PERIODS = 8 # ปรับจาก 6 -> 8
 
+# --- V2.0 RATING MAP ---
+# Rating Mapping (Simplified S&P/Fitch Scale) - Higher number = Higher Risk (Worse Rating)
+RATING_MAP = {
+    'AAA': 1, 'AA+': 2, 'AA': 3, 'AA-': 4,
+    'A+': 5, 'A': 6, 'A-': 7,
+    'BBB+': 8, 'BBB': 9, 'BBB-': 10,
+    'BB+': 11, 'BB': 12, 'BB-': 13,
+    'B+': 14, 'B': 15, 'B-': 16,
+    'CCC+': 17, 'CCC': 18, 'CCC-': 19,
+    'CC': 20, 'C': 21, 'D': 22, # Default/Worst Rating
+    'NR': 99, 'N/A': 99, np.nan: 99, 'None': 99, '': 99 # Not Rated / Missing
+}
+# --- END V2.0 RATING MAP ---
+
 # Feature Engineering Constants
 MA_PERIODS = 4 
 
@@ -148,62 +162,54 @@ def fetch_data(start_year=2015):
         return pd.DataFrame(), pd.DataFrame()
 
 
-def create_target_variable(df_ffs, df_fcs):
-    """Creates the binary target variable (Y) based on defined risk criteria. (Uses stricter constants)"""
-    logging.info("2. Creating Target Variable (Y)...")
+def create_target_variable(df_ffs, df_fcs): # df_fcs is now largely unused for V2.0 target logic
+    """Creates the binary target variable (Y) based on defined V2.0 risk criteria: 
+    Y_Rating (Downgrade) OR Y_Solvency (Accumulated Deficit > 0 AND Current Ratio < 1.0)."""
+    logging.info("2. Creating Target Variable (Y) using V2.0 Solvency and Rating Downgrade criteria...")
     if df_ffs.empty:
         logging.warning("Financial statement data is empty, cannot create target variable.")
         return pd.DataFrame()
 
     df = df_ffs.copy()
+    # เนื่องจาก `df_ffs` ใน V2.0 มาจาก get_ml_risk_raw_data ซึ่งควรมีข้อมูลดิบทั้งหมดแล้ว
     df = df.sort_values(by=['ticker', 'report_date']).reset_index(drop=True)
 
-    equity_col = get_column(df, ['Stockholders Equity', 'Total Stockholders Equity'])
-    ebit_col = get_column(df, ['EBIT', 'Operating Income'])
-    interest_col = get_column(df, ['Interest Expense'])
-    net_income_col = get_column(df, ['Net Income', 'Net Income Common Stockholders'])
-
-    # --- Calculate necessary components for Y ---
-    if ebit_col and interest_col:
-        df['EBIT_TTM'] = df.groupby('ticker')[ebit_col].transform(calculate_ttm)
-        df['Interest Expense_TTM'] = df.groupby('ticker')[interest_col].transform(lambda x: x.rolling(window=4, min_periods=4).sum().replace(0, np.nan))
-        df['TTM_ICR'] = df['EBIT_TTM'] / df['Interest Expense_TTM'].replace(0, np.nan)
-        df['TTM_ICR'] = df['TTM_ICR'].replace([np.inf, -np.inf], np.nan)
-    else:
-        df['TTM_ICR'] = np.nan
+    # --- V2.0 Target 1: Y_Rating (Downgrade in next 4 quarters) ---
+    if 'credit_rating' in df.columns:
+        # 1. Convert rating string to numerical risk score (ใช้ RATING_MAP ที่เพิ่มด้านบน)
+        df['rating_score'] = df['credit_rating'].astype(str).str.upper().map(RATING_MAP).fillna(99)
         
-    if net_income_col:
-        df['is_loss'] = (df.get(net_income_col, pd.Series()) < 0).astype(int)
-        df['consecutive_losses'] = df.groupby('ticker')['is_loss'].transform(
-            lambda x: x.rolling(window=CONSECUTIVE_LOSS_PERIODS, min_periods=CONSECUTIVE_LOSS_PERIODS).sum()
-        )
+        # 2. Shift score back 4 periods to get the future rating score for the current date
+        df['future_rating_score'] = df.groupby('ticker')['rating_score'].shift(-4)
+        
+        # 3. Y_Rating = 1 ถ้ามีการ Downgrade (future_score > current_score) และไม่ใช่ "Not Rated"
+        # The higher the score, the worse the rating (e.g., A (6) -> A- (7) is a downgrade)
+        rule_rating_downgrade = (df['future_rating_score'] > df['rating_score']) & (df['rating_score'] < 99)
+        df['Y_Rating_raw'] = rule_rating_downgrade.astype(int)
     else:
-        df['consecutive_losses'] = np.nan
+        logging.warning("Missing 'credit_rating' column. Y_Rating cannot be calculated.")
+        df['Y_Rating_raw'] = 0
 
-    if equity_col:
-        df['is_negative_equity'] = (df.get(equity_col, pd.Series()) < 0).astype(int)
+    # --- V2.0 Target 2: Y_Solvency (Accumulated Deficit > 0 AND Current Ratio < 1.0) ---
+    # ใช้ชื่อคอลัมน์ที่ถูก Pivot แล้วใน data_handler.py
+    accumulated_deficit_col = get_column(df, ['Accumulated Deficit', 'Accumulated_Deficit'])
+    current_ratio_col = get_column(df, ['Current Ratio', 'Current_Ratio'])
+    
+    if accumulated_deficit_col and current_ratio_col:
+        # Rule Solvency: (Accumulated Deficit > 0) AND (Current Ratio < 1.0)
+        rule_solvency = (df[accumulated_deficit_col] > 0) & (df[current_ratio_col] < 1.0)
+        df['Y_Solvency_raw'] = rule_solvency.astype(int)
     else:
-        df['is_negative_equity'] = 0 
+        logging.warning("Missing 'Accumulated Deficit' or 'Current Ratio' columns. Y_Solvency cannot be calculated.")
+        df['Y_Solvency_raw'] = 0
 
-    df['report_date_approx'] = df['report_date'] + pd.offsets.QuarterEnd(0)
-    df = pd.merge_asof(df.sort_values('report_date_approx'),
-                       df_fcs[['ticker', 'report_date_approx', 'de_ratio']].sort_values('report_date_approx'),
-                       on='report_date_approx',
-                       by='ticker',
-                       direction='backward', 
-                       tolerance=pd.Timedelta('365 days')) 
+    # --- Final Target (Y) using OR logic ---
+    df['Y_raw_v2'] = ((df['Y_Rating_raw'] == 1) | (df['Y_Solvency_raw'] == 1)).astype(int)
 
-    # --- Apply Risk Rules (Uses Stricter Constants 7.0 and 8) ---
-    rule1 = df['is_negative_equity'] == 1
-    rule2 = (df['de_ratio'] > DE_RATIO_THRESHOLD) & (df['TTM_ICR'] < ICR_THRESHOLD)
-    rule3 = df['consecutive_losses'] >= CONSECUTIVE_LOSS_PERIODS
-
-    df['Y_raw'] = ((rule1) | (rule2) | (rule3)).astype(int)
-
-    # --- Introduce Time Lag (4 quarters) ---
+    # Introduce Time Lag (4 quarters) - Y_raw_v2 is the combined target
     lag_periods = 4
-    df['Y'] = df.groupby('ticker')['Y_raw'].shift(-lag_periods)
-    logging.info(f"Target variable Y created with a lag of {lag_periods} quarters.")
+    df['Y'] = df.groupby('ticker')['Y_raw_v2'].shift(-lag_periods) 
+    logging.info(f"Target variable Y (V2.0) created with a lag of {lag_periods} quarters.")
 
     df_final = df.dropna(subset=['Y']).copy()
     df_final['Y'] = df_final['Y'].astype(int)
@@ -211,14 +217,20 @@ def create_target_variable(df_ffs, df_fcs):
     logging.info(f"Created Y for {len(df_final)} data points.")
     logging.info(f"Distribution of Y: \n{df_final['Y'].value_counts(normalize=True)}")
 
-    explicit_cols = ['ticker', 'report_date', 'Y', 'de_ratio']
+    # Cleanup temporary columns and ensure correct columns are passed to the next stage (engineer_features)
+    explicit_cols = ['ticker', 'report_date', 'Y']
+    # Keep all raw financial/market data columns from the original input
     cols_to_keep_from_original = [col for col in df_ffs.columns if col not in ['ticker', 'report_date']]
     
     cols_to_keep = explicit_cols + cols_to_keep_from_original
     cols_to_keep = [col for col in cols_to_keep if col in df_final.columns]
 
     df_final = df_final[cols_to_keep]
+    # Drop temporary columns used only for calculation
+    df_final = df_final.drop(columns=['rating_score', 'future_rating_score', 'Y_Rating_raw', 'Y_Solvency_raw', 'Y_raw_v2'], errors='ignore') 
 
+    # Note: If 'de_ratio' exists in df_ffs (from the raw data merge), it will be kept, which is fine for feature engineering in the next step.
+    
     return df_final
 
 
@@ -252,7 +264,12 @@ def engineer_features(df):
     ap_col = get_column(df_eng, ['Accounts Payable'])
     cor_col = get_column(df_eng, ['Cost Of Revenue', 'Cost Of Goods Sold'])
     
-    
+    # --- [NEW V2.0 Market Data Columns] ---
+    price_col = get_column(df_eng, ['closing_price']) 
+    mc_col = get_column(df_eng, ['market_cap'])
+    so_col = get_column(df_eng, ['shares_outstanding'])
+    # --- [END NEW V2.0 Market Data Columns] ---
+
     # --- 1. Base Ratios / Size Features ---
     if ca_col and cl_col: df_eng['Current Ratio'] = df_eng[ca_col] / df_eng[cl_col].replace(0, np.nan)
     else: df_eng['Current Ratio'] = np.nan
@@ -353,6 +370,33 @@ def engineer_features(df):
     else: df_eng['DPO'] = np.nan
     
     df_eng['CCC'] = df_eng['DSO'] + df_eng['DIO'] - df_eng['DPO']
+
+    # --- 9. NEW V2.0: Market-Based Features (4 Features) ---
+    # Market Cap (ln)
+    if mc_col:
+        df_eng['Market Cap (ln)'] = np.log(df_eng[mc_col].replace(0, np.nan))
+    else:
+        df_eng['Market Cap (ln)'] = np.nan
+        
+    # P/B Ratio (Market Cap / Total Equity)
+    if mc_col and equity_col:
+        df_eng['P/B Ratio'] = df_eng[mc_col] / df_eng[equity_col].replace(0, np.nan)
+    else:
+        df_eng['P/B Ratio'] = np.nan
+        
+    # Stock Return (3-Month) - ใช้ closing_price และ pct_change ย้อนหลัง 1 ไตรมาส (3 เดือน/1 period)
+    if price_col:
+        df_eng['Stock_Return_3M'] = df_eng.groupby('ticker')[price_col].pct_change(periods=1, fill_method=None)
+    else:
+        df_eng['Stock_Return_3M'] = np.nan
+        
+    # Return Volatility (Std Dev of Stock Return over 4 Quarters)
+    if 'Stock_Return_3M' in df_eng.columns:
+        df_eng['Return_Volatility_4Q'] = df_eng.groupby('ticker')['Stock_Return_3M'].transform(lambda x: x.rolling(window=4, min_periods=4).std())
+    else:
+        df_eng['Return_Volatility_4Q'] = np.nan
+        
+    # --- END NEW V2.0 Market-Based Features ---
 
     # --- Final Feature Selection ---
     feature_cols = [

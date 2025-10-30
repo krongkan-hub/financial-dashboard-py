@@ -2,9 +2,8 @@ name: Daily ETL Job Runner
 
 on:
   # ตั้งเวลาให้รัน (Cron)
-  # '0 11 * * *' คือ 18:00 เวลาไทย (ถ้า UTC+7)
   schedule:
-    - cron: '0 11 * * *'
+    - cron: '0 22 * * *'  # 22:00 น. UTC = 05:00 น. เวลาไทย (UTC+7)
   
   # เพิ่ม "workflow_dispatch" เพื่อให้คุณสามารถกดรัน Manual เองได้จากหน้า GitHub
   workflow_dispatch:

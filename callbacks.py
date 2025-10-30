@@ -756,7 +756,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
                     if peers_to_show:
                         peer_options = [{'label': p, 'value': p} for p in peers_to_show] # สร้าง options จาก list ที่ sort แล้ว
-                        status_message = f"Found {len(peers_to_show)} potential peers for {reference_ticker} (sorted by Mkt Cap diff)."
+                        status_message = f"Found {len(peers_to_show)} potential peers for {reference_ticker}."
                     else:
                         status_message = f"No *new* peers found for {reference_ticker} in Cluster {ref_cluster_id}."
                 else:

@@ -2,6 +2,9 @@
 # This file centralizes all static configuration data for the application.
 
 import plotly.express as px
+from datetime import date
+
+HISTORICAL_START_DATE = datetime(2010, 1, 1)
 
 # --- [NEW] Top 5 Tickers for default view ---
 TOP_5_DEFAULT_TICKERS = ['NVDA', 'AAPL', 'MSFT', 'GOOGL', 'GOOG']

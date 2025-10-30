@@ -319,6 +319,7 @@ def get_competitor_data(tickers: tuple) -> pd.DataFrame:
                 "company_name": info.get('longName'), # <--- Added for DimCompany
                 "sector": info.get('sector'), # <--- Added for DimCompany
                 "logo_url": logo_url,
+                "credit_rating": info.get('creditRating', None),
                 "Price": info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose'),
                 "Market Cap": info.get("marketCap"),
                 "Beta": info.get("beta"),

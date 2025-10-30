@@ -164,7 +164,8 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                 'ticker': row['Ticker'],
                 'company_name': row.get('company_name'),
                 'logo_url': row.get('logo_url'), # <<< ดึงโลโก้มาตามปกติก่อน
-                'sector': row.get('sector')
+                'sector': row.get('sector'),
+                'credit_rating': row.get('credit_rating')
             }
             fact_data = {
                 'ticker': row['Ticker'], 'date_updated': today,
@@ -207,7 +208,7 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                     stmt_dim = sql_insert(DimCompany).values(dim_data)
 
                     # --- [ปรับปรุง] สร้าง set_ dynamically ---
-                    dim_columns_to_update = ['company_name', 'logo_url', 'sector']
+                    dim_columns_to_update = ['company_name', 'logo_url', 'sector', 'credit_rating']
                     dim_set_ = {
                         col: getattr(stmt_dim.excluded, col)
                         for col in dim_columns_to_update if col in dim_data

@@ -93,6 +93,7 @@ class DimCompany(db.Model):
     company_name = db.Column(db.String(255), nullable=True)
     logo_url = db.Column(db.String(500), nullable=True)
     sector = db.Column(db.String(100), nullable=True) 
+    credit_rating = db.Column(db.String(32), nullable=True)
     
     # สร้างความสัมพันธ์ (Relationships) เพื่อให้ query ง่ายขึ้น
     summaries = db.relationship('FactCompanySummary', backref='company', lazy=True)
@@ -145,6 +146,7 @@ class FactCompanySummary(db.Model):
     forward_pe = db.Column(db.Float, nullable=True)
     analyst_target_price = db.Column(db.Float, nullable=True)
     long_business_summary = db.Column(db.Text, nullable=True) # db.Text สำหรับข้อความยาว
+    credit_rating = db.Column(db.String(20), nullable=True)
     # (สามารถเพิ่มคอลัมน์อื่นๆ ที่ดึงจาก tkr.info ได้ที่นี่)
 
     peer_cluster_id = db.Column(db.Integer, nullable=True, index=True)

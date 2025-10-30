@@ -12,7 +12,7 @@ from sqlalchemy import func # Import SQL functions for MAX()
 from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
 # --- [แก้ไข] ลบ get_competitor_data ออกจาก import นี้ เพราะจะใช้จาก data_handler โดยตรง ---
 from data_handler import get_news_and_sentiment, get_competitor_data 
-from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME # <<< [เพิ่ม] Import ALL_TICKERS_SORTED_BY_MC
+from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE # <<< [เพิ่ม] Import ALL_TICKERS_SORTED_BY_MC
 
 # Import สำหรับ UPSERT
 try:
@@ -122,6 +122,11 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     job_name = "Job 1: Update Summaries"
     tickers_to_process = tickers_list_override if tickers_list_override is not None else ALL_TICKERS_SORTED_BY_MC
     today = datetime.utcnow().date()
+
+    # --- [START FIX: กำหนดวันที่เริ่มต้นถาวร 2010-01-01] ---
+    FIXED_FULL_HISTORY_START_DATE = datetime(2010, 1, 1).date()
+    logging.info(f"Starting ETL Job: [{job_name}] for fixed start date {FIXED_FULL_HISTORY_START_DATE}, implementing GAP FILLING...")
+    # --- [END FIX] ---
 
     with server.app_context():
         max_date_results = db.session.query(
@@ -345,7 +350,7 @@ def update_daily_prices(days_back=16*365, tickers_list_override: Optional[List[s
         is_monday = today.weekday() == 0
         required_days_back = 3 if is_monday else 1
         ticker_tuples_to_process = []
-        full_history_start_date = today - timedelta(days=days_back)
+        full_history_start_date = HISTORICAL_START_DATE
 
         for ticker in tickers_list:
             latest_date_in_db = max_dates.get(ticker)

@@ -410,9 +410,6 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
     tickers_to_fetch = []
     for ticker in tickers_to_process:
         latest_summary_date = max_dates.get(ticker)
-        if latest_summary_date == today:
-             logging.info(f"[{job_name}] Skipping {ticker}: FactCompanySummary was updated today ({latest_summary_date}). Assuming Job 3 ran recently.")
-             continue
         tickers_to_fetch.append(ticker)
 
     if not tickers_to_fetch:

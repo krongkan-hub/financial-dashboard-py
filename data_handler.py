@@ -604,11 +604,20 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
     
     with server.app_context():
         # 1. Fetch Financial Metrics (for Target Solvency & P/B Feature)
-        required_fin_metrics = [
-            'Accumulated Deficit',  # สำหรับ Y_Solvency
-            'Current Ratio',        # สำหรับ Y_Solvency
-            'Total Equity'          # สำหรับ P/B Feature
+        
+        # --- [FIX] ใช้ชื่อเมตริกทางเลือก (อ้างอิงจาก run_ml_risk.py) ---
+        required_fin_metrics_alternatives = [
+            # For Y_Solvency
+            'Accumulated Deficit',
+            'Accumulated_Deficit',
+            'Current Ratio',
+            'Current_Ratio',
+            # For P/B Feature (from engineer_features)
+            'Total Equity',
+            'Stockholders Equity',
+            'Total Stockholders Equity'
         ]
+        # --- [END FIX] ---
         
         fin_query = db.session.query(
             FactFinancialStatements.ticker,
@@ -616,7 +625,7 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
             FactFinancialStatements.metric_name,
             FactFinancialStatements.metric_value
         ).filter(
-            FactFinancialStatements.metric_name.in_(required_fin_metrics),
+            FactFinancialStatements.metric_name.in_(required_fin_metrics_alternatives), # <-- ใช้ List ใหม่ที่ยืดหยุ่น
             FactFinancialStatements.statement_type.in_(['income', 'balance', 'cashflow']),
             FactFinancialStatements.report_date >= start_date # <--- ใช้ Filter จาก start_date
         )
@@ -630,6 +639,23 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
             logging.warning("No financial statement data found for required metrics.")
             return pd.DataFrame()
 
+        # --- [FIX] Normalize ชื่อเมตริกก่อน Pivot ---
+        # สร้าง Mapping เพื่อให้ชื่อเป็นมาตรฐานเดียวกัน
+        def normalize_metric_name(name):
+            if name in ['Accumulated Deficit', 'Accumulated_Deficit']:
+                return 'Accumulated_Deficit'
+            if name in ['Current Ratio', 'Current_Ratio']:
+                return 'Current_Ratio'
+            if name in ['Total Equity', 'Stockholders Equity', 'Total Stockholders Equity']:
+                return 'Total_Equity'
+            return name
+        
+        df_financials_long['metric_name'] = df_financials_long['metric_name'].apply(normalize_metric_name)
+        
+        # ลบข้อมูลซ้ำซ้อน หาก 1 ticker มีหลายชื่อสำหรับเมตริกเดียวกันในวันเดียวกัน
+        df_financials_long = df_financials_long.drop_duplicates(subset=['ticker', 'report_date', 'metric_name'], keep='first')
+        # --- [END FIX] ---
+
         # Pivot financial data to wide format
         df_financials_wide = df_financials_long.pivot_table(
             index=['ticker', 'report_date'], 
@@ -638,11 +664,19 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
         ).reset_index()
         
         df_financials_wide.columns.name = None
-        df_financials_wide.rename(columns={
-            'Accumulated Deficit': 'Accumulated_Deficit',
-            'Current Ratio': 'Current_Ratio',
-            'Total Equity': 'Total_Equity'
-        }, inplace=True)
+        
+        # ตรวจสอบว่าคอลัมน์ที่จำเป็นจริงๆ (ที่ Normalize แล้ว) อยู่ใน DataFrame หลัง Pivot หรือไม่
+        required_pivoted_cols = ['Accumulated_Deficit', 'Current_Ratio', 'Total_Equity']
+        missing_cols = [col for col in required_pivoted_cols if col not in df_financials_wide.columns]
+        
+        if missing_cols:
+            logging.warning(f"After querying and pivoting, the following essential metrics are still missing: {missing_cols}. Filling with NaN.")
+            # เติมคอลัมน์ที่ขาดหายไปด้วย NaN เพื่อให้ Merge ทำงานต่อได้
+            for col in missing_cols:
+                df_financials_wide[col] = np.nan
+        
+        # (ส่วนนี้ไม่จำเป็นแล้ว เพราะเรา Normalize ชื่อก่อน Pivot)
+        # df_financials_wide.rename(columns={...}, inplace=True)
         
         # 2. Fetch Credit Rating (DimCompany - Latest Rating)
         rating_query = db.session.query(
@@ -663,6 +697,7 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
         )
 
        # 3. Fetch all Market Data (Daily Prices)
+        # ... (ส่วนที่เหลือของฟังก์ชันเหมือนเดิม) ...
         # ใช้ start_date เดียวกันในการกรอง
         price_query = db.session.query(
             FactDailyPrices.ticker,

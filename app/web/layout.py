@@ -3,7 +3,8 @@
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 from flask_login import current_user
-from constants import SECTORS
+from ..constants import SECTORS
+from .auth import create_login_modal
 
 # --- Dictionary for Metric Definitions (FIXED) ---
 METRIC_DEFINITIONS = {
@@ -300,7 +301,7 @@ def create_definitions_modal():
 
 def build_layout():
     """Builds the main dashboard layout."""
-    from auth import create_login_modal
+    from app.web.auth import create_login_modal
     return html.Div([
         dcc.Store(id='user-selections-store', storage_type='memory'),
         dcc.Store(id='forecast-assumptions-store', storage_type='memory'),

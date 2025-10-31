@@ -9,10 +9,13 @@ from typing import Dict, List, Optional
 from sqlalchemy import func # Import SQL functions for MAX()
 
 # Import สิ่งที่จำเป็นจากโปรเจกต์ของเรา
-from app import db, server, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
-# --- [แก้ไข] ลบ get_competitor_data ออกจาก import นี้ เพราะจะใช้จาก data_handler โดยตรง ---
-from data_handler import get_news_and_sentiment, get_competitor_data 
-from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE # <<< [เพิ่ม] Import ALL_TICKERS_SORTED_BY_MC
+# [CHANGED]
+from . import db, server
+from .models import DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
+
+# [CHANGED]
+from .data_handler import get_news_and_sentiment, get_competitor_data 
+from .constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
 
 # Import สำหรับ UPSERT
 try:

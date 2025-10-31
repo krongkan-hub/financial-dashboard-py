@@ -16,16 +16,20 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import requests
 import os
-import time # Import time for delays
-# --- [NEW IMPORTS FOR DB DCF & FALLBACK] ---
-from app import db, server, FactFinancialStatements, FactCompanySummary, DimCompany, FactDailyPrices # <<< Added FactDailyPrices
-from sqlalchemy import func, distinct, text, desc # <<< Added desc
-# --- [END NEW IMPORTS] ---
+import time
+from . import db, server 
+from .models import FactFinancialStatements, FactCompanySummary, DimCompany, FactDailyPrices
+from sqlalchemy import func, distinct, text, desc
+from .config import Config 
+from .constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
+
+
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 warnings.filterwarnings("ignore", category=UserWarning)
 
-from config import Config
+
 from newsapi import NewsApiClient
 
 load_dotenv()

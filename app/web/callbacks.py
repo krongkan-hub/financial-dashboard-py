@@ -16,29 +16,29 @@ import logging
 from flask_login import current_user
 
 # Import core app objects from app.py
-from app import app, db, server, User, UserSelection, UserAssumptions
+from .. import app, db, server
 # --- [REFACTOR STEP 4 IMPORTS] ---
 # Import models ใหม่ที่เราจะใช้ Query
-from app import DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements # <<< [UPDATE: Added FactFinancialStatements]
-from sqlalchemy import func, distinct # <<< [MODIFIED] Import SQL functions (added distinct)
+from ..models import User, UserSelection, UserAssumptions, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements # <<< [UPDATE: Added FactFinancialStatements]
+from sqlalchemy import func, distinct
+from .layout import build_layout, create_navbar
 from datetime import datetime, timedelta # Import datetime
 # --- [END REFACTOR STEP 4 IMPORTS] ---
 
 # Import layout components from layout.py
-from layout import build_layout, create_navbar
+from app.web.layout import build_layout, create_navbar
 
 # Import helpers and other page layouts
-from data_handler import (
-    # calculate_drawdown, get_scatter_data, (ถูกลบออก)
-    # calculate_exit_multiple_valuation, (ถูกลบออก)
-    calculate_monte_carlo_dcf # ถูกปรับปรุงให้ใช้ DB ภายใน
+from ..data_handler import (
+    calculate_monte_carlo_dcf
 )
-from pages import deep_dive
-from constants import (
+
+from .pages import deep_dive
+from ..constants import (
     INDEX_TICKER_TO_NAME, SECTOR_TO_INDEX_MAPPING, COLOR_DISCRETE_MAP, SECTORS,
     TOP_5_DEFAULT_TICKERS, ALL_TICKERS_SORTED_BY_MC
 )
-from auth import create_register_layout
+from .auth import create_register_layout
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 

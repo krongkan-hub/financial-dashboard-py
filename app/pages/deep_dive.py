@@ -15,19 +15,17 @@ from itertools import groupby
 import logging
 
 # --- Imports ---
-from data_handler import (
+from ...data_handler import (
     get_technical_analysis_data,
     get_news_and_sentiment,
-    # --- [NEW] Import Fallback Functions ---
     get_deep_dive_header_data,
     get_historical_prices,
     get_quarterly_financials
-    # --- [END NEW] ---
 )
 # --- [เพิ่ม Imports ใหม่] ---
-from app import db, server
-from app import FactNewsSentiment # <<< เฉพาะ News ที่ยัง Query ตรง
-from constants import ALL_TICKERS_SORTED_BY_MC # <<< [เพิ่ม] สำหรับเช็ค Top 20 (ยังคงใช้กับ News)
+from ... import db, server
+from ...models import FactNewsSentiment # <<< เฉพาะ News ที่ยัง Query ตรง
+from ...constants import ALL_TICKERS_SORTED_BY_MC # <<< [เพิ่ม] สำหรับเช็ค Top 20 (ยังคงใช้กับ News)
 # --- End Imports ---
 
 # ตั้งค่า logging (ถ้าต้องการให้ log แสดงผล)

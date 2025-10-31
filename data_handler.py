@@ -745,29 +745,46 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
 
         # --- [FINAL-FIX-V2: แก้ Error 'left keys must be sorted'] ---
         
+        # [FIX V2.1] บังคับแปลง None (จาก DB NULL) ให้เป็น np.nan ก่อน
+        # เพื่อให้ .dropna() ทำงานกับ NULL จาก DB ได้ด้วย
+        df_merged['ticker'] = df_merged['ticker'].replace([None], np.nan)
+        df_prices['ticker'] = df_prices['ticker'].replace([None], np.nan)
+
         # 1. ลบแถวที่ 'date' หรือ 'ticker' เป็นค่าว่าง (NaT/NaN) *ก่อน*
-        df_merged = df_merged.dropna(subset=['date', 'ticker'])
+        df_merged = df_merged.dropna(subset=['date', 'ticker']) # <--- (บรรทัด 754 เดิม)
         df_prices = df_prices.dropna(subset=['date', 'ticker'])
 
-        # 2. บังคับ 'ticker' ให้เป็น string *หลัง* จากลบ NaN แล้ว
-        df_merged['ticker'] = df_merged['ticker'].astype(str)
-        df_prices['ticker'] = df_prices['ticker'].astype(str)
+       # 3. บังคับ Sort ทั้งสองตาราง (วิธีที่ทนทานกว่า)
+        # 3a. ตั้ง Index ให้เป็นคีย์ที่จะ Sort
+        # (ขั้นตอนนี้จะล้มเหลวทันทีถ้ามี Ticker/Date ที่ซ้ำกัน ซึ่งไม่ควรเกิด)
+        try:
+            df_merged = df_merged.set_index(['ticker', 'date'])
+            df_prices = df_prices.set_index(['ticker', 'date'])
+        except Exception as set_idx_e:
+            logging.error(f"Failed to set_index before sort. Duplicates? {set_idx_e}")
+            # ถ้า set_index ล้มเหลว (เพราะมี duplicate keys) ให้กลับไปใช้ sort_values
+            # แต่เพิ่ม .copy() เพื่อบังคับให้สร้าง DF ใหม่
+            logging.warning("Falling back to sort_values() with .copy()")
+            df_merged = df_merged.sort_values(by=['ticker', 'date']).copy()
+            df_prices = df_prices.sort_values(by=['ticker', 'date']).copy()
+        else:
+            # 3b. Sort ที่ตัว Index (ถ้า set_index สำเร็จ)
+            df_merged = df_merged.sort_index()
+            df_prices = df_prices.sort_index()
 
-        # 3. บังคับ Sort ทั้งสองตาราง (ตอนนี้ข้อมูลสะอาด 100%)
-        df_merged = df_merged.sort_values(by=['ticker', 'date'])
-        df_prices = df_prices.sort_values(by=['ticker', 'date'])
+        # 3c. ดึง Index กลับมาเป็นคอลัมน์ (เพื่อให้ merge_asof ใช้ได้)
+        # ไม่ว่าข้างบนจะใช้ .set_index หรือ .sort_values, เราต้อง reset index อยู่ดี
+        df_merged = df_merged.reset_index()
+        df_prices = df_prices.reset_index()
 
-        # 4. [!!!! THE REAL FIX !!!!] 
-        # ลบ Index เก่าที่ยุ่งเหยิงทิ้ง และสร้าง Index ใหม่ที่เรียงลำดับ
-        df_merged = df_merged.reset_index(drop=True)
-        df_prices = df_prices.reset_index(drop=True)
-        # --- [END FINAL-FIX-V2] ---
+        # 4. (ไม่จำเป็นต้องมีแล้ว เพราะ reset_index() ได้สร้าง Index ที่เรียงลำดับให้ใหม่แล้ว)
+        # --- [END FINAL-FIX-V3] ---
         
         if df_merged.empty or df_prices.empty:
             logging.warning("No data left in financials or prices after date conversion/cleaning. Cannot merge.")
             return pd.DataFrame()
 
-        # 2. Join ด้วย merge_asof
+        # 2. Join ด้วย merge_asof (โค้ดเดิม)
         df_final = pd.merge_asof(
             df_merged,
             df_prices[['ticker', 'date', 'closing_price']],

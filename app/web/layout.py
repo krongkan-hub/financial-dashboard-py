@@ -301,7 +301,6 @@ def create_definitions_modal():
 
 def build_layout():
     """Builds the main dashboard layout."""
-    from app.web.auth import create_login_modal
     return html.Div([
         dcc.Store(id='user-selections-store', storage_type='memory'),
         dcc.Store(id='forecast-assumptions-store', storage_type='memory'),

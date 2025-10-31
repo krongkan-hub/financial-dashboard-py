@@ -3,10 +3,8 @@ import time
 import logging
 
 from app import server
-# Import job ทั้งสองตัว
-from etl import update_company_summaries, update_daily_prices, update_financial_statements, update_news_sentiment
-# --- [NEW IMPORT] ---
-from constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
+from app.etl import update_company_summaries, update_daily_prices, update_financial_statements, update_news_sentiment
+from app.constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
 # --- [END NEW IMPORT] ---
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

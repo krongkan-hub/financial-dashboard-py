@@ -26,7 +26,6 @@ from datetime import datetime, timedelta # Import datetime
 # --- [END REFACTOR STEP 4 IMPORTS] ---
 
 # Import layout components from layout.py
-from app.web.layout import build_layout, create_navbar
 
 # Import helpers and other page layouts
 from ..data_handler import (

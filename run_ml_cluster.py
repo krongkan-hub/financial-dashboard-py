@@ -12,7 +12,8 @@ from sklearn.impute import SimpleImputer
 from kneed import KneeLocator # ใช้หา "ข้อศอก" อัตโนมัติ
 
 # --- Database Interaction ---
-from app import db, server, FactCompanySummary
+from app import db, server
+from app.models import FactCompanySummary
 from sqlalchemy import func, update
 
 # ตั้งค่า Logging

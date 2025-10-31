@@ -8,7 +8,7 @@ from pprint import pformat # ใช้ pprint เพื่อจัด format di
 # --- Import from project files ---
 # ตรวจสอบให้แน่ใจว่า data_handler.py อยู่ใน path เดียวกัน
 try:
-    from data_handler import get_competitor_data
+    from app.data_handler import get_competitor_data
 except ImportError:
     print("Error: Could not import get_competitor_data from data_handler.py")
     print("Please run this script from the root directory of the project.")
@@ -16,7 +16,7 @@ except ImportError:
     
 # Import ข้อมูลเดิมจาก constants.py
 try:
-    from constants import SECTORS, INDEX_TICKER_TO_NAME, SECTOR_TO_INDEX_MAPPING
+    from app.constants import SECTORS, INDEX_TICKER_TO_NAME, SECTOR_TO_INDEX_MAPPING
 except ImportError:
     print("Error: Could not import from constants.py")
     print("Make sure constants.py exists in the same directory.")

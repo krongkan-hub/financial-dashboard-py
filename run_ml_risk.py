@@ -8,11 +8,12 @@ import os
 import joblib 
 import shap 
 from xgboost import XGBClassifier 
-from data_handler import get_ml_risk_raw_data
+from app.data_handler import get_ml_risk_raw_data
 
 # --- Database Interaction ---
 # NOTE: ต้องมั่นใจว่า app.py, FactFinancialStatements, FactCompanySummary ได้ถูก import อย่างถูกต้องในสภาพแวดล้อมของคุณ
-from app import db, server, FactFinancialStatements, FactCompanySummary
+from app import db, server
+from app.models import FactFinancialStatements, FactCompanySummary
 from sqlalchemy import func, and_
 from sqlalchemy.orm import aliased
 

@@ -1,4 +1,4 @@
-# etl.py (FINAL VERSION - Fixed UnboundLocalError, implemented Smart Weekend Buffer, Limited Job 2 & 3 to Top 500, Skip Logo Update)
+# etl.py (FINAL VERSION - Fixed UnboundLocalError, implemented Smart Weekend Buffer, Limited Job 2 to Top 1500, Job 3 to Top 500, Skip Logo Update)
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -320,10 +320,10 @@ def process_single_ticker_prices(data_tuple):
         raise e
 # --- [END NEW HELPER FUNCTION FOR OOM FIX] ---
 
-# --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 500 LIMIT) ---
+# --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 1500 LIMIT) ---
 def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
     days_back = 5475
-    job_name = "Job 2: Update Daily Prices (Top 500)"
+    job_name = "Job 2: Update Daily Prices (Top 1500)" # <<< แก้ไข Log Name
     if sql_insert is None:
         logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
         return
@@ -336,10 +336,14 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             tickers_list = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_list)} tickers.")
         else:
-            top_500_tickers = ALL_TICKERS_SORTED_BY_MC[:1500] #**********************************************************************************************************************************************************************************************************
+            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:1500] # <<< แก้ไขตัวแปรและตั้งค่าเป็น 1500
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
-            tickers_list = list(set(top_500_tickers + index_tickers))
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 500 Market Cap + Index tickers ({len(tickers_list)} total unique).")
+            tickers_list = list(set(tickers_for_price_update + index_tickers))
+            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1500 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< แก้ไข Log
+        
+        # ถ้ายืนยันว่า ALL_TICKERS_SORTED_BY_MC[:500] คือสิ่งที่ถูกรันจริง ๆ, 
+        # การแก้ไข 1500 นี้จะทำให้อัปเดตเป็น 1500 (+16 index tickers) ซึ่งจะมีจำนวนประมาณ 1516 ตัว
+        # ดังนั้น log ที่ขึ้นต้นว่า 1/509 จะเปลี่ยนเป็น 1/1516 โดยประมาณ
 
         if not tickers_list:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping price update.")
@@ -420,7 +424,7 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
     def process_single_ticker_financials(ticker):
         job_name = "Job 3: Update Financials (Top 500)"
         if sql_insert is None:
-            logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
+            logging.error(f"[{job_name}] cannot run because insert statement is not available.")
             return
 
         try:

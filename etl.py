@@ -322,6 +322,7 @@ def process_single_ticker_prices(data_tuple):
 
 # --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 500 LIMIT) ---
 def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
+    days_back = 5475
     job_name = "Job 2: Update Daily Prices (Top 500)"
     if sql_insert is None:
         logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
@@ -335,7 +336,7 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             tickers_list = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_list)} tickers.")
         else:
-            top_500_tickers = ALL_TICKERS_SORTED_BY_MC[:500]
+            top_500_tickers = ALL_TICKERS_SORTED_BY_MC[:1500] #**********************************************************************************************************************************************************************************************************
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
             tickers_list = list(set(top_500_tickers + index_tickers))
             logging.info(f"ETL Job: [{job_name}] Defaulting to Top 500 Market Cap + Index tickers ({len(tickers_list)} total unique).")
@@ -362,7 +363,7 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             else:
                 new_start_date = full_history_start_date
 
-            if new_start_date >= today:
+            if new_start_date.date() >= today:
                 logging.info(f"[{job_name}] Skipping {ticker}: Already up-to-date or start date is in the future (Start: {new_start_date}).")
                 continue
             fetch_end_date = today

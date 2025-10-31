@@ -595,29 +595,33 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
 def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 2010) -> pd.DataFrame:
     """
     Fetches the raw, combined data required for the ML-Based Credit Risk Model (V2.0).
-    ...
+    (FIXED: Calculates missing 'Current Ratio' and robustly sorts keys for merge_asof)
     """
     logging.info("Starting to fetch raw data for ML Risk Model V2.0...")
     
-    # NEW: กำหนด start_date
     start_date = datetime(start_year, 1, 1).date() 
     
     with server.app_context():
-        # 1. Fetch Financial Metrics (for Target Solvency & P/B Feature)
         
-        # --- [FIX] ใช้ชื่อเมตริกทางเลือก (อ้างอิงจาก run_ml_risk.py) ---
+        # --- [FIX 1: เพิ่ม Metrics ทั้งหมดที่ X และ Y ต้องการ] ---
         required_fin_metrics_alternatives = [
-            # For Y_Solvency
-            'Accumulated Deficit',
-            'Accumulated_Deficit',
-            'Current Ratio',
-            'Current_Ratio',
-            # For P/B Feature (from engineer_features)
-            'Total Equity',
-            'Stockholders Equity',
-            'Total Stockholders Equity'
+            'Accumulated Deficit', 'Accumulated_Deficit', 'Retained Earnings',
+            'Current Ratio', 'Current_Ratio',
+            'Total Equity', 'Stockholders Equity', 'Total Stockholders Equity',
+            'Current Assets',
+            'Current Liabilities',
+            'Total Assets',
+            'Inventory',
+            'Total Liabilities', 'Total Liab', 'Total Liabilities Net Minority Interest',
+            'EBIT', 'Operating Income',
+            'Total Revenue', 'Sales', 'Revenues',
+            'Net Income', 'Net Income Common Stockholders',
+            'Operating Cash Flow', 'Total Cash Flow From Operating Activities',
+            'Interest Expense',
+            'Accounts Receivable',
+            'Accounts Payable',
+            'Cost Of Revenue', 'Cost Of Goods Sold',
         ]
-        # --- [END FIX] ---
         
         fin_query = db.session.query(
             FactFinancialStatements.ticker,
@@ -625,9 +629,9 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
             FactFinancialStatements.metric_name,
             FactFinancialStatements.metric_value
         ).filter(
-            FactFinancialStatements.metric_name.in_(required_fin_metrics_alternatives), # <-- ใช้ List ใหม่ที่ยืดหยุ่น
-            FactFinancialStatements.statement_type.in_(['income', 'balance', 'cashflow']),
-            FactFinancialStatements.report_date >= start_date # <--- ใช้ Filter จาก start_date
+            FactFinancialStatements.metric_name.in_(required_fin_metrics_alternatives),
+            FactFinancialStatements.statement_type.in_(['income_a', 'income_q', 'balance_a', 'balance_q', 'cashflow_a', 'cashflow_q']),
+            FactFinancialStatements.report_date >= start_date
         )
         
         if tickers:
@@ -639,24 +643,40 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
             logging.warning("No financial statement data found for required metrics.")
             return pd.DataFrame()
 
-        # --- [FIX] Normalize ชื่อเมตริกก่อน Pivot ---
-        # สร้าง Mapping เพื่อให้ชื่อเป็นมาตรฐานเดียวกัน
+        # --- [FIX 2: สร้าง Normalize Function ที่สมบูรณ์] ---
         def normalize_metric_name(name):
-            if name in ['Accumulated Deficit', 'Accumulated_Deficit']:
-                return 'Accumulated_Deficit'
+            if name in ['Accumulated Deficit', 'Accumulated_Deficit', 'Retained Earnings']:
+                return 'Accumulated Deficit' 
             if name in ['Current Ratio', 'Current_Ratio']:
-                return 'Current_Ratio'
+                return 'Current Ratio'
             if name in ['Total Equity', 'Stockholders Equity', 'Total Stockholders Equity']:
-                return 'Total_Equity'
+                return 'Stockholders Equity'
+            if name in ['Current Assets']: return 'Current Assets'
+            if name in ['Current Liabilities']: return 'Current Liabilities'
+            if name in ['Total Assets']: return 'Total Assets'
+            if name in ['Inventory']: return 'Inventory'
+            if name in ['Total Liabilities', 'Total Liab', 'Total Liabilities Net Minority Interest']:
+                return 'Total Liabilities'
+            if name in ['EBIT', 'Operating Income']:
+                return 'EBIT'
+            if name in ['Total Revenue', 'Sales', 'Revenues']:
+                return 'Total Revenue'
+            if name in ['Net Income', 'Net Income Common Stockholders']:
+                return 'Net Income'
+            if name in ['Operating Cash Flow', 'Total Cash Flow From Operating Activities']:
+                return 'Operating Cash Flow'
+            if name in ['Interest Expense']: return 'Interest Expense'
+            if name in ['Accounts Receivable']: return 'Accounts Receivable'
+            if name in ['Accounts Payable']: return 'Accounts Payable'
+            if name in ['Cost Of Revenue', 'Cost Of Goods Sold']:
+                return 'Cost Of Revenue'
             return name
         
         df_financials_long['metric_name'] = df_financials_long['metric_name'].apply(normalize_metric_name)
         
-        # ลบข้อมูลซ้ำซ้อน หาก 1 ticker มีหลายชื่อสำหรับเมตริกเดียวกันในวันเดียวกัน
-        df_financials_long = df_financials_long.drop_duplicates(subset=['ticker', 'report_date', 'metric_name'], keep='first')
-        # --- [END FIX] ---
-
-        # Pivot financial data to wide format
+        df_financials_long = df_financials_long.sort_values(by='report_date', ascending=True)
+        df_financials_long = df_financials_long.drop_duplicates(subset=['ticker', 'report_date', 'metric_name'], keep='last')
+        
         df_financials_wide = df_financials_long.pivot_table(
             index=['ticker', 'report_date'], 
             columns='metric_name', 
@@ -665,62 +685,42 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
         
         df_financials_wide.columns.name = None
         
-        # ตรวจสอบว่าคอลัมน์ที่จำเป็นจริงๆ (ที่ Normalize แล้ว) อยู่ใน DataFrame หลัง Pivot หรือไม่
-        required_pivoted_cols = ['Accumulated_Deficit', 'Current_Ratio', 'Total_Equity']
-        missing_cols = [col for col in required_pivoted_cols if col not in df_financials_wide.columns]
+        # --- [FIX 1 (NEW): แก้ Warning 'Current Ratio' missing] ---
+        # คำนวณ 'Current Ratio' ที่นี่เลย ถ้ามันยังไม่มี
+        if 'Current Ratio' not in df_financials_wide.columns:
+            if 'Current Assets' in df_financials_wide.columns and 'Current Liabilities' in df_financials_wide.columns:
+                logging.info("Manually calculating 'Current Ratio' in data_handler...")
+                # ป้องกันการหารด้วยศูนย์
+                denom = df_financials_wide['Current Liabilities'].replace(0, np.nan)
+                df_financials_wide['Current Ratio'] = df_financials_wide['Current Assets'] / denom
+            else:
+                logging.warning("Cannot calculate 'Current Ratio': Missing 'Current Assets' or 'Current Liabilities'. Filling with NaN.")
+                df_financials_wide['Current Ratio'] = np.nan
+        # --- [END FIX 1] ---
         
-        if missing_cols:
-            logging.warning(f"After querying and pivoting, the following essential metrics are still missing: {missing_cols}. Filling with NaN.")
-            # เติมคอลัมน์ที่ขาดหายไปด้วย NaN เพื่อให้ Merge ทำงานต่อได้
-            for col in missing_cols:
-                df_financials_wide[col] = np.nan
-        
-        # (ส่วนนี้ไม่จำเป็นแล้ว เพราะเรา Normalize ชื่อก่อน Pivot)
-        # df_financials_wide.rename(columns={...}, inplace=True)
-        
-        # 2. Fetch Credit Rating (DimCompany - Latest Rating)
-        rating_query = db.session.query(
-            DimCompany.ticker,
-            DimCompany.credit_rating
-        )
+        # 2. Fetch Credit Rating
+        rating_query = db.session.query(DimCompany.ticker, DimCompany.credit_rating)
         if tickers:
             rating_query = rating_query.filter(DimCompany.ticker.in_(tickers))
-        
         df_rating = pd.read_sql(rating_query.statement, db.engine)
-        
-        # Merge rating (Broadcasts latest rating to all report_dates)
-        df_merged = pd.merge(
-            df_financials_wide, 
-            df_rating, 
-            on='ticker', 
-            how='left'
-        )
+        df_merged = pd.merge(df_financials_wide, df_rating, on='ticker', how='left')
 
-       # 3. Fetch all Market Data (Daily Prices)
-        # ... (ส่วนที่เหลือของฟังก์ชันเหมือนเดิม) ...
-        # ใช้ start_date เดียวกันในการกรอง
+        # 3. Fetch Market Data (Prices)
         price_query = db.session.query(
             FactDailyPrices.ticker,
             FactDailyPrices.date.label('price_date'), 
             FactDailyPrices.close.label('closing_price')
-        ).filter(
-            FactDailyPrices.date >= start_date # <--- ใช้ Filter จาก start_date
-        )
+        ).filter(FactDailyPrices.date >= start_date)
         if tickers:
             price_query = price_query.filter(FactDailyPrices.ticker.in_(tickers))
-
         df_prices = pd.read_sql(price_query.statement, db.engine)
         
-        # 4. Fetch Market Cap & Shares Outstanding Proxy (Latest from FactCompanySummary)
+        # 4. Fetch Market Cap
         summary_subquery = db.session.query(
-            FactCompanySummary.ticker, 
-            func.max(FactCompanySummary.date_updated).label('max_date')
+            FactCompanySummary.ticker, func.max(FactCompanySummary.date_updated).label('max_date')
         ).group_by(FactCompanySummary.ticker).subquery()
-
         summary_query = db.session.query(
-            FactCompanySummary.ticker,
-            FactCompanySummary.price, 
-            FactCompanySummary.market_cap 
+            FactCompanySummary.ticker, FactCompanySummary.price, FactCompanySummary.market_cap 
         ).join(
             summary_subquery,
             (FactCompanySummary.ticker == summary_subquery.c.ticker) & 
@@ -728,41 +728,59 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
         )
         if tickers:
             summary_query = summary_query.filter(FactCompanySummary.ticker.in_(tickers))
-        
         df_summary = pd.read_sql(summary_query.statement, db.engine)
         
-        # Calculate shares_outstanding
         df_summary['shares_outstanding'] = df_summary['market_cap'] / df_summary['price'].replace(0, np.nan)
         df_summary.drop(columns=['price'], inplace=True) 
+        df_merged = pd.merge(df_merged, df_summary[['ticker', 'market_cap', 'shares_outstanding']], on='ticker', how='left')
         
-        # Merge shares_outstanding and market_cap (Broadcasts latest to all report_dates)
-        df_merged = pd.merge(
-            df_merged,
-            df_summary[['ticker', 'market_cap', 'shares_outstanding']],
-            on='ticker',
-            how='left'
-        )
+        # --- Post-Processing in Pandas for Price Matching ---
         
-        # --- Post-Processing in Pandas for Price Matching (Time-Series Join) ---
-        # ต้องใช้ pd.merge_asof เพื่อหา closing_price ที่ใกล้เคียงที่สุด (และก่อนหน้า) วันที่รายงานผลประกอบการ
-        
-        # 1. เตรียมข้อมูล
         df_merged.rename(columns={'report_date': 'date'}, inplace=True)
-        df_merged.sort_values(['ticker', 'date'], inplace=True)
-        
         df_prices.rename(columns={'price_date': 'date'}, inplace=True)
-        df_prices.sort_values(['ticker', 'date'], inplace=True)
+
+        # แปลง date (ต้องทำก่อน dropna)
+        df_merged['date'] = pd.to_datetime(df_merged['date'], errors='coerce')
+        df_prices['date'] = pd.to_datetime(df_prices['date'], errors='coerce')
+
+        # --- [FINAL-FIX-V2: แก้ Error 'left keys must be sorted'] ---
         
+        # 1. ลบแถวที่ 'date' หรือ 'ticker' เป็นค่าว่าง (NaT/NaN) *ก่อน*
+        df_merged = df_merged.dropna(subset=['date', 'ticker'])
+        df_prices = df_prices.dropna(subset=['date', 'ticker'])
+
+        # 2. บังคับ 'ticker' ให้เป็น string *หลัง* จากลบ NaN แล้ว
+        df_merged['ticker'] = df_merged['ticker'].astype(str)
+        df_prices['ticker'] = df_prices['ticker'].astype(str)
+
+        # 3. บังคับ Sort ทั้งสองตาราง (ตอนนี้ข้อมูลสะอาด 100%)
+        df_merged = df_merged.sort_values(by=['ticker', 'date'])
+        df_prices = df_prices.sort_values(by=['ticker', 'date'])
+
+        # 4. [!!!! THE REAL FIX !!!!] 
+        # ลบ Index เก่าที่ยุ่งเหยิงทิ้ง และสร้าง Index ใหม่ที่เรียงลำดับ
+        df_merged = df_merged.reset_index(drop=True)
+        df_prices = df_prices.reset_index(drop=True)
+        # --- [END FINAL-FIX-V2] ---
+        
+        if df_merged.empty or df_prices.empty:
+            logging.warning("No data left in financials or prices after date conversion/cleaning. Cannot merge.")
+            return pd.DataFrame()
+
         # 2. Join ด้วย merge_asof
         df_final = pd.merge_asof(
             df_merged,
             df_prices[['ticker', 'date', 'closing_price']],
             on='date',
             by='ticker',
-            direction='backward' # หาข้อมูลราคาที่เกิดขึ้นก่อนหรือในวันที่ report_date
+            direction='backward' 
         )
 
         # Final Cleaning
+        if df_final.empty:
+            logging.warning("merge_asof resulted in an empty DataFrame.")
+            return pd.DataFrame()
+            
         df_final.rename(columns={'date': 'report_date'}, inplace=True)
         df_final.set_index(['ticker', 'report_date'], inplace=True)
         df_final.sort_index(inplace=True)

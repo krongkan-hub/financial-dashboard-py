@@ -16,7 +16,7 @@ if __name__ == "__main__":
     start_time_total = time.time()
 
     # --- [NEW] Define Top 500 Tickers (including Index Tickers) ---
-    TOP_1500_BASE = ALL_TICKERS_SORTED_BY_MC[:1500]
+    TOP_1500_BASE = ALL_TICKERS_SORTED_BY_MC[:500]
     INDEX_TICKERS = list(INDEX_TICKER_TO_NAME.keys())
     # Use set to ensure uniqueness when combining
     TICKERS_FOR_JOB_2_3 = list(set(TOP_1500_BASE + INDEX_TICKERS))

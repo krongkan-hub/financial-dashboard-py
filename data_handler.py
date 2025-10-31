@@ -1,4 +1,4 @@
-# data_handler.py (FINAL - DCF uses DB, TTM Tax Rate, Dynamic WACC Calculation + Fallback Functions)
+# data_handler.py (V-FINAL: ใช้วิธี Groupby-Apply (V8) เพื่อแก้ Bug merge_asof)
 
 import os
 import requests
@@ -588,21 +588,24 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         return dcf_base
 # --- [END NEW HELPER FUNCTION] ---
 
+
 # ==============================================================================
-# --- [NEW] SECTION: ML Risk Model V2.0 Data Fetching ---
+# --- [NEW V-FINAL] SECTION: ML Risk Model V2.0 Data Fetching ---
 # ==============================================================================
 
-def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 2010) -> pd.DataFrame:
+def _get_ml_risk_raw_data_base(tickers: Optional[List[str]] = None, start_year: int = 2010) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Fetches the raw, combined data required for the ML-Based Credit Risk Model (V2.0).
-    (FIXED: Calculates missing 'Current Ratio' and robustly sorts keys for merge_asof)
+    (V-FINAL)
+    ดึงข้อมูลดิบ แต่ *ไม่* ทำการ merge_asof
+    จะ return (df_merged_final, df_prices_final) ออกมาแทน
     """
-    logging.info("Starting to fetch raw data for ML Risk Model V2.0...")
+    logging.info("Starting to fetch raw data (base) for ML Risk Model V2.0...")
     
     start_date = datetime(start_year, 1, 1).date() 
     
     with server.app_context():
         
+        # ( ... โค้ดส่วนดึงข้อมูลจาก DB ทั้งหมดเหมือนเดิม ... )
         # --- [FIX 1: เพิ่ม Metrics ทั้งหมดที่ X และ Y ต้องการ] ---
         required_fin_metrics_alternatives = [
             'Accumulated Deficit', 'Accumulated_Deficit', 'Retained Earnings',
@@ -641,7 +644,7 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
         
         if df_financials_long.empty:
             logging.warning("No financial statement data found for required metrics.")
-            return pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame()
 
         # --- [FIX 2: สร้าง Normalize Function ที่สมบูรณ์] ---
         def normalize_metric_name(name):
@@ -686,17 +689,14 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
         df_financials_wide.columns.name = None
         
         # --- [FIX 1 (NEW): แก้ Warning 'Current Ratio' missing] ---
-        # คำนวณ 'Current Ratio' ที่นี่เลย ถ้ามันยังไม่มี
         if 'Current Ratio' not in df_financials_wide.columns:
             if 'Current Assets' in df_financials_wide.columns and 'Current Liabilities' in df_financials_wide.columns:
                 logging.info("Manually calculating 'Current Ratio' in data_handler...")
-                # ป้องกันการหารด้วยศูนย์
                 denom = df_financials_wide['Current Liabilities'].replace(0, np.nan)
                 df_financials_wide['Current Ratio'] = df_financials_wide['Current Assets'] / denom
             else:
                 logging.warning("Cannot calculate 'Current Ratio': Missing 'Current Assets' or 'Current Liabilities'. Filling with NaN.")
                 df_financials_wide['Current Ratio'] = np.nan
-        # --- [END FIX 1] ---
         
         # 2. Fetch Credit Rating
         rating_query = db.session.query(DimCompany.ticker, DimCompany.credit_rating)
@@ -739,71 +739,140 @@ def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 
         df_merged.rename(columns={'report_date': 'date'}, inplace=True)
         df_prices.rename(columns={'price_date': 'date'}, inplace=True)
 
-        # แปลง date (ต้องทำก่อน dropna)
         df_merged['date'] = pd.to_datetime(df_merged['date'], errors='coerce')
         df_prices['date'] = pd.to_datetime(df_prices['date'], errors='coerce')
 
-        # --- [FINAL-FIX-V2: แก้ Error 'left keys must be sorted'] ---
+        logging.info("Forcing 'ticker' columns to string type before processing.")
+        df_merged['ticker'] = df_merged['ticker'].astype(str)
+        df_prices['ticker'] = df_prices['ticker'].astype(str)
         
-        # [FIX V2.1] บังคับแปลง None (จาก DB NULL) ให้เป็น np.nan ก่อน
-        # เพื่อให้ .dropna() ทำงานกับ NULL จาก DB ได้ด้วย
-        df_merged['ticker'] = df_merged['ticker'].replace([None], np.nan)
-        df_prices['ticker'] = df_prices['ticker'].replace([None], np.nan)
-
-        # 1. ลบแถวที่ 'date' หรือ 'ticker' เป็นค่าว่าง (NaT/NaN) *ก่อน*
-        df_merged = df_merged.dropna(subset=['date', 'ticker']) # <--- (บรรทัด 754 เดิม)
+        df_merged = df_merged.dropna(subset=['date', 'ticker']) 
         df_prices = df_prices.dropna(subset=['date', 'ticker'])
 
-       # 3. บังคับ Sort ทั้งสองตาราง (วิธีที่ทนทานกว่า)
-        # 3a. ตั้ง Index ให้เป็นคีย์ที่จะ Sort
-        # (ขั้นตอนนี้จะล้มเหลวทันทีถ้ามี Ticker/Date ที่ซ้ำกัน ซึ่งไม่ควรเกิด)
-        try:
-            df_merged = df_merged.set_index(['ticker', 'date'])
-            df_prices = df_prices.set_index(['ticker', 'date'])
-        except Exception as set_idx_e:
-            logging.error(f"Failed to set_index before sort. Duplicates? {set_idx_e}")
-            # ถ้า set_index ล้มเหลว (เพราะมี duplicate keys) ให้กลับไปใช้ sort_values
-            # แต่เพิ่ม .copy() เพื่อบังคับให้สร้าง DF ใหม่
-            logging.warning("Falling back to sort_values() with .copy()")
-            df_merged = df_merged.sort_values(by=['ticker', 'date']).copy()
-            df_prices = df_prices.sort_values(by=['ticker', 'date']).copy()
-        else:
-            # 3b. Sort ที่ตัว Index (ถ้า set_index สำเร็จ)
-            df_merged = df_merged.sort_index()
-            df_prices = df_prices.sort_index()
-
-        # 3c. ดึง Index กลับมาเป็นคอลัมน์ (เพื่อให้ merge_asof ใช้ได้)
-        # ไม่ว่าข้างบนจะใช้ .set_index หรือ .sort_values, เราต้อง reset index อยู่ดี
-        df_merged = df_merged.reset_index()
-        df_prices = df_prices.reset_index()
-
-        # 4. (ไม่จำเป็นต้องมีแล้ว เพราะ reset_index() ได้สร้าง Index ที่เรียงลำดับให้ใหม่แล้ว)
-        # --- [END FINAL-FIX-V3] ---
-        
         if df_merged.empty or df_prices.empty:
             logging.warning("No data left in financials or prices after date conversion/cleaning. Cannot merge.")
-            return pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame()
 
-        # 2. Join ด้วย merge_asof (โค้ดเดิม)
-        df_final = pd.merge_asof(
-            df_merged,
-            df_prices[['ticker', 'date', 'closing_price']],
-            on='date',
-            by='ticker',
-            direction='backward' 
-        )
+        # --- [START HOTFIX (V-FINAL Base): Simplified Sorting] ---
+        
+        logging.info("Dropping duplicates and forcing sort (V-FINAL) on left DataFrame (df_merged)...")
+        df_merged = df_merged.drop_duplicates(subset=['ticker', 'date'], keep='last')
+        df_merged = df_merged.sort_values(by=['ticker', 'date']).reset_index(drop=True)
+        
+        logging.info("Dropping duplicates and forcing sort (V-FINAL) on right DataFrame (df_prices)...")
+        df_prices = df_prices.drop_duplicates(subset=['ticker', 'date'], keep='last')
+        df_prices = df_prices.sort_values(by=['ticker', 'date']).reset_index(drop=True)
 
-        # Final Cleaning
-        if df_final.empty:
-            logging.warning("merge_asof resulted in an empty DataFrame.")
-            return pd.DataFrame()
+        logging.info("Creating final (left) df_merged_final copy...")
+        df_merged_final = df_merged.copy() 
+
+        logging.info("Creating final (right) df_prices_final subset and copy...")
+        df_prices_final = df_prices[['ticker', 'date', 'closing_price']].copy()
+        # --- [END HOTFIX] ---
+        
+        logging.info("Base data fetch complete. Returning DFs for manual merge...")
+        return df_merged_final, df_prices_final
+
+
+def _merge_asof_by_group(df_merged: pd.DataFrame, df_prices: pd.DataFrame) -> pd.DataFrame:
+    """
+    (V-FINAL) Performs pd.merge_asof by iterating through each 'ticker' group.
+    This version keeps 'ticker' as a column throughout and is proven to work (V8).
+    """
+    logging.info("--- STARTING MERGE (V-FINAL - Groupby-Apply, Column-based) ---")
+    
+    if df_merged.empty or df_prices.empty:
+        logging.warning("Empty input DFs, cannot merge.")
+        return pd.DataFrame()
+
+    # สร้าง GroupBy objects
+    # (เรามั่นใจว่ามัน Sort มาแล้วจาก _get_ml_risk_raw_data_base)
+    left_groups = df_merged.groupby('ticker')
+    right_groups = df_prices.groupby('ticker')
+    
+    all_merged_groups = []
+    
+    logging.info(f"Found {len(left_groups)} unique tickers in LEFT frame to process...")
+    processed_count = 0
+    
+    # วนลูปผ่านกลุ่ม Ticker ฝั่งซ้าย
+    for ticker, left_group in left_groups:
+        try:
+            # พยายามดึงกลุ่ม Ticker ฝั่งขวา
+            right_group = right_groups.get_group(ticker)
             
+            # ทำ merge_asof *เฉพาะกลุ่มนี้*
+            merged_group = pd.merge_asof(
+                left_group,
+                right_group,
+                on='date',
+                by='ticker',   # <-- **[V8 FIX]** เพิ่ม by='ticker' เข้าไปใน merge_asof
+                direction='backward'
+            )
+            all_merged_groups.append(merged_group)
+            
+        except KeyError:
+            # Ticker นี้ไม่มีข้อมูลราคา (ฝั่งขวา)
+            left_group_with_nan = left_group.copy()
+            left_group_with_nan['closing_price'] = np.nan
+            all_merged_groups.append(left_group_with_nan)
+            
+        except Exception as e:
+            logging.error(f"  ❌ FAILED to merge group for ticker: {ticker}. Error: {e}")
+            continue
+            
+        processed_count += 1
+        if processed_count % 500 == 0:
+            logging.info(f"  Processed {processed_count}/{len(left_groups)} tickers...")
+
+    logging.info(f"Finished processing all {len(left_groups)} tickers.")
+    
+    if not all_merged_groups:
+        logging.warning("No groups were successfully merged.")
+        return pd.DataFrame()
+        
+    # รวมทุกกลุ่มที่ merge เสร็จแล้วกลับเป็น DataFrame เดียว
+    logging.info("Concatenating all merged groups...")
+    df_final = pd.concat(all_merged_groups, ignore_index=True) 
+    
+    logging.info("--- MERGE (V-FINAL - Groupby-Apply) COMPLETE ---")
+    return df_final
+
+
+def get_ml_risk_raw_data(tickers: Optional[List[str]] = None, start_year: int = 2010) -> pd.DataFrame:
+    """
+    (V-FINAL) Fetches and processes the raw data for the ML Risk Model.
+    This function now uses a robust Groupby-Apply merge method (from V8) 
+    to bypass the pandas merge_asof sorting bug.
+    """
+    try:
+        # 1. ดึงข้อมูลดิบ (ยังไม่ Merge)
+        df_merged_final, df_prices_final = _get_ml_risk_raw_data_base(start_year=start_year)
+        
+        # 2. รันฟังก์ชัน Merge (V-FINAL/V8) ที่แยกออกมา
+        df_final = _merge_asof_by_group(df_merged_final, df_prices_final)
+        
+        if df_final.empty:
+            logging.warning("merge_asof (by group) resulted in an empty DataFrame.")
+            return pd.DataFrame()
+
+        # 3. ทำ Post-processing ที่เหลือ (ที่เคยอยู่ในฟังก์ชันเดิม)
         df_final.rename(columns={'date': 'report_date'}, inplace=True)
+        
+        if 'ticker' not in df_final.columns:
+             logging.error("--- 💔 CRITICAL ERROR (V-FINAL) ---")
+             logging.error("'ticker' column was lost during groupby-merge!")
+             return pd.DataFrame()
+        
         df_final.set_index(['ticker', 'report_date'], inplace=True)
         df_final.sort_index(inplace=True)
         
-        logging.info(f"Finished fetching raw data. Shape: {df_final.shape}")
+        logging.info(f"Finished fetching raw data (V-FINAL). Final Shape: {df_final.shape}")
         return df_final
+        
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during get_ml_risk_raw_data (V-FINAL): {e}", exc_info=True)
+        return pd.DataFrame()
 
 # --- [MODIFIED] calculate_monte_carlo_dcf ---
 @lru_cache(maxsize=32)
@@ -1194,7 +1263,7 @@ def get_quarterly_financials(ticker: str, statement_type: str) -> Tuple[pd.DataF
             return df_live, source
 
         except Exception as e:
-            logging.error(f"[Fallback] Live financial statement fetch failed for {ticker} '{statement_type}': {e}", exc_info=True)
+            logging.error(f"Live financial statement fetch failed for {ticker} '{statement_type}': {e}", exc_info=True)
             return pd.DataFrame({"error": f"Live yfinance fetch failed: {e}"}), source
 
     except Exception as db_e:

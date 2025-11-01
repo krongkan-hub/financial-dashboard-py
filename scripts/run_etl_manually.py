@@ -1,8 +1,15 @@
 # run_etl_manually.py (Modified to limit Job 2 & 3 to Top 500)
+import sys
+import os
 import time
 import logging
-
-from app import server
+# หาที่อยู่ของโฟลเดอร์ปัจจุบัน (scripts/)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# หาที่อยู่ของโฟลเดอร์แม่ (project_dash/)
+project_root = os.path.dirname(script_dir)
+# เพิ่มโฟลเดอร์แม่เข้าไปใน sys.path
+sys.path.append(project_root)
+from index import server
 from app.etl import update_company_summaries, update_daily_prices, update_financial_statements, update_news_sentiment
 from app.constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
 # --- [END NEW IMPORT] ---

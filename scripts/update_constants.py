@@ -1,4 +1,7 @@
 # update_constants.py
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # <-- (A) เพิ่มส่วนนี้
 import logging
 import pandas as pd
 import yfinance as yf
@@ -98,7 +101,8 @@ def sort_tickers_by_market_cap():
     
     # 7. เขียนไฟล์ constants.py ใหม่ทั้งหมด
     try:
-        with open('constants.py', 'w', encoding='utf-8') as f:
+        output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'app', 'constants.py'))
+        with open(output_path, 'w', encoding='utf-8') as f: # <-- ใช้ output_path
             f.write("# constants.py (UPDATED BY SCRIPT)\n")
             f.write("# This file centralizes all static configuration data for the application.\n\n")
             f.write("import plotly.express as px\n\n")
@@ -133,10 +137,10 @@ def sort_tickers_by_market_cap():
             f.write("    )\n")
             f.write("}\n")
 
-        logging.info("Successfully updated and saved constants.py!")
+        logging.info(f"Successfully updated and saved {output_path}!") # <-- อัปเดต Log
 
     except Exception as e:
-        logging.error(f"Failed to write new constants.py file: {e}")
+        logging.error(f"Failed to write new constants.py file at {output_path}: {e}")
 
 if __name__ == "__main__":
     sort_tickers_by_market_cap()

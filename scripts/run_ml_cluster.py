@@ -1,5 +1,13 @@
 # run_ml_cluster.py (เวอร์ชันปรับปรุง Logic การหา k)
 
+import sys
+import os
+# หาที่อยู่ของโฟลเดอร์ปัจจุบัน (scripts/)
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# หาที่อยู่ของโฟลเดอร์แม่ (project_dash/)
+project_root = os.path.dirname(script_dir)
+# เพิ่มโฟลเดอร์แม่เข้าไปใน sys.path
+sys.path.append(project_root)
 import logging
 import pandas as pd
 import numpy as np

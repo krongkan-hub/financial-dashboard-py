@@ -3,7 +3,7 @@ name: Daily ETL Job Runner
 on:
   # ตั้งเวลาให้รัน (Cron)
   schedule:
-    - cron: '0 23 * * *'  # 23:00 น. UTC = 06:00 น. เวลาไทย (UTC+7)
+    - cron: '0 1 * * *'  # 1:00 น. UTC = 08:00 น. เวลาไทย (UTC+7)
   
   # เพิ่ม "workflow_dispatch" เพื่อให้คุณสามารถกดรัน Manual เองได้จากหน้า GitHub
   workflow_dispatch:
@@ -48,11 +48,11 @@ jobs:
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: |
-          python run_etl_manually.py
+          python scripts/run_etl_manually.py
 
       - name: 6. Run the ML Clustering script # <<< เพิ่ม Step นี้เข้าไป
         env:
           # สคริปต์ ML ต้องการเชื่อมต่อ DB เหมือนกัน
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
         # สั่งรันสคริปต์ ML ที่เราสร้าง (ใช้ชื่อไฟล์ใหม่ที่คุณตั้ง)
-        run: python run_ml_cluster.py
+        run: python scripts/run_ml_cluster.py

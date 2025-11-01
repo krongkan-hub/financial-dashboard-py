@@ -20,3 +20,4 @@ sqlalchemy
 matplotlib
 imbalanced-learn
 xgboost
+shap

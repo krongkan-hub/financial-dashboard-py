@@ -84,6 +84,7 @@ class FactCompanySummary(db.Model):
     long_business_summary = db.Column(db.Text, nullable=True)
     credit_rating = db.Column(db.String(20), nullable=True)
     peer_cluster_id = db.Column(db.Integer, nullable=True, index=True)
+    predicted_default_prob = db.Column(db.Float, nullable=True)
     __table_args__ = (db.UniqueConstraint('ticker', 'date_updated', name='_ticker_date_uc'),)
 
 class FactDailyPrices(db.Model):

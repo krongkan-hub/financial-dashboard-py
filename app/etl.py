@@ -324,10 +324,10 @@ def process_single_ticker_prices(data_tuple):
         raise e
 # --- [END NEW HELPER FUNCTION FOR OOM FIX] ---
 
-# --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 500 LIMIT) ---
+# --- Job 2: Update Daily Prices (MODIFIED FOR OOM FIX, SMART WEEKEND BUFFER, AND TOP 1000 LIMIT) ---
 def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
     days_back = 5475
-    job_name = "Job 2: Update Daily Prices (Top 500)" # <<< แก้ไข Log Name
+    job_name = "Job 2: Update Daily Prices (Top 1000)" # <<< แก้ไข Log Name
     if sql_insert is None:
         logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
         return
@@ -340,14 +340,10 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             tickers_list = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_list)} tickers.")
         else:
-            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:500] # <<< แก้ไขตัวแปรและตั้งค่าเป็น 500
+            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< แก้ไขตัวแปรและตั้งค่าเป็น 1000
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
             tickers_list = list(set(tickers_for_price_update + index_tickers))
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 500 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< แก้ไข Log
-        
-        # ถ้ายืนยันว่า ALL_TICKERS_SORTED_BY_MC[:500] คือสิ่งที่ถูกรันจริง ๆ, 
-        # การแก้ไข 500 นี้จะทำให้อัปเดตเป็น 500 (+16 index tickers) ซึ่งจะมีจำนวนประมาณ 1516 ตัว
-        # ดังนั้น log ที่ขึ้นต้นว่า 1/509 จะเปลี่ยนเป็น 1/1516 โดยประมาณ
+            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< แก้ไข Log
 
         if not tickers_list:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping price update.")
@@ -393,7 +389,7 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
         logging.error("ETL Job: [update_financial_statements] cannot run because insert statement is not available.")
         return
 
-    job_name = "Job 3: Update Financials (Top 500)"
+    job_name = "Job 3: Update Financials (Top 1000)"
     today = datetime.utcnow().date()
 
     with server.app_context():
@@ -401,8 +397,8 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
             tickers_to_process = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
         else:
-            tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:500]
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 500 Market Cap tickers ({len(tickers_to_process)} total).")
+            tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000]
+            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap tickers ({len(tickers_to_process)} total).")
 
         if not tickers_to_process:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping job.")
@@ -460,7 +456,7 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
 
 # --- [MODIFIED: Function signature accepts the tuple] ---
 def process_single_ticker_financials(ticker_data_tuple):
-    job_name = "Job 3: Update Financials (Top 500)"
+    job_name = "Job 3: Update Financials (Top 1000)"
     
     ticker, latest_date_in_db = ticker_data_tuple # Unpack the tuple
     

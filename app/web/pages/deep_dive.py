@@ -195,6 +195,70 @@ def create_metric_card(title, value, className=""):
     else: value_str = str(value)
     return dbc.Card(dbc.CardBody([ html.H6(title, className="metric-card-title"), html.P(value_str, className="metric-card-value"), ]), className=f"metric-card h-100 {className}")
 
+def create_risk_gauge(predicted_prob):
+    """สร้างการ์ดเกจวัดความเสี่ยงเครดิต (Credit Risk Gauge)"""
+    
+    # ถ้าไม่มีข้อมูล (เช่น หุ้นนอก coverage ของ ML หรือ live fetch)
+    if predicted_prob is None or pd.isna(predicted_prob):
+        return None
+
+    prob_pct = predicted_prob * 100
+
+    # กำหนดสีและข้อความตามระดับความเสี่ยง
+    if prob_pct <= 10:
+        bar_color = "#28a745" # สีเขียว (Low)
+        level_text = "Low Risk"
+    elif prob_pct <= 40:
+        bar_color = "#ffc107" # สีเหลือง (Medium)
+        level_text = "Medium Risk"
+    else:
+        bar_color = "#dc3545" # สีแดง (High)
+        level_text = "High Risk"
+
+    # สร้าง Gauge Figure ของ Plotly
+    gauge_fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = prob_pct,
+        number = {'suffix': '%', 'font': {'size': 28}},
+        title = {'text': f"<b>{level_text}</b>", 'font': {'size': 18}},
+        gauge = {
+            'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkgray"},
+            'bar': {'color': bar_color, 'thickness': 0.8},
+            'bgcolor': "white",
+            'borderwidth': 2,
+            'bordercolor': "#e9ecef",
+            'steps': [
+                {'range': [0, 10], 'color': 'rgba(40, 167, 69, 0.2)'},
+                {'range': [10, 40], 'color': 'rgba(255, 193, 7, 0.2)'},
+                {'range': [40, 100], 'color': 'rgba(220, 53, 69, 0.2)'}
+            ],
+            'threshold': { # เส้นแบ่ง Medium/High
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': 40 # ค่าที่เส้น Threshold จะแสดง (เช่น 40%)
+            }
+        }
+    ))
+
+    gauge_fig.update_layout(
+        height=200, # ปรับความสูง
+        margin=dict(l=20, r=20, t=40, b=20), # ปรับขอบ
+        font={'color': "#212529"}
+    )
+
+    # คืนค่าเป็น Card ที่มี Gauge อยู่ข้างใน
+    return dbc.Card(
+        dbc.CardBody([
+            html.H6("ML Credit Risk", className="metric-card-title text-center"),
+            dcc.Graph(
+                figure=gauge_fig,
+                config={'displayModeBar': False},
+                style={'height': '150px', 'marginTop': '-10px'}
+            )
+        ]),
+        className="metric-card h-100"
+    )
+
 # --- create_deep_dive_layout (MODIFIED: ใช้ get_deep_dive_header_data) ---
 def create_deep_dive_layout(ticker=None):
     if not ticker: return dbc.Container([html.P("Please provide a ticker.")], className="p-5 text-center")
@@ -259,6 +323,8 @@ def create_deep_dive_layout(ticker=None):
         ], className="text-end"), width="auto", align="center")
     ], align="center", className="marquee-header g-3")
 
+    risk_gauge_card = create_risk_gauge(header_data.get('predicted_default_prob'))
+
     # Key Stat Cards (using data from header_data dict)
     cards_to_show = [
         create_metric_card("Market Cap", header_data.get('market_cap')),
@@ -270,7 +336,13 @@ def create_deep_dive_layout(ticker=None):
     ]
 
     at_a_glance = html.Div([
-        dbc.Row([dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show if card is not None], className="g-3"),
+        dbc.Row(
+            # กรอง Card ที่เป็น None ออก (รวมถึง risk_gauge_card ถ้ามันเป็น None)
+            [dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show if card is not None] +
+            # เพิ่ม risk_gauge_card ที่นี่ (ถ้ามันไม่เป็น None)
+            ([dbc.Col(risk_gauge_card, width=6, lg=2, className="mb-3")] if risk_gauge_card else []),
+            className="g-3"
+        ),
         dbc.Card(dbc.CardBody([html.H5("Business Summary", className="card-title"), html.P(business_summary or 'Not available.', className="small")])) if business_summary else ""
     ])
 

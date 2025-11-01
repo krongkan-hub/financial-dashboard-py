@@ -1,65 +1,90 @@
 name: Daily ETL Job Runner
 
 on:
-  # ตั้งเวลาให้รัน (Cron)
   schedule:
-    - cron: '0 1 * * *'  # 1:00 น. UTC = 08:00 น. เวลาไทย (UTC+7)
-  
-  # เพิ่ม "workflow_dispatch" เพื่อให้คุณสามารถกดรัน Manual เองได้จากหน้า GitHub
+    - cron: '0 1 * * *'  
   workflow_dispatch:
 
 jobs:
-  run-etl:
+  # --- JOB 1: (The Beast) Summaries (3000+ tickers) ---
+  run-job-1-summaries:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: 1. Check out the repository
+      - name: 1. Check out code
         uses: actions/checkout@v4
-
       - name: 2. Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # (หรือเวอร์ชัน Python ที่คุณใช้)
-
+          python-version: '3.11'
       - name: 3. Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # --- [NEW STEP: 4. Run Database Migration] ---
-      # ขั้นตอนนี้จะรัน 'flask db upgrade' เพื่ออัปเดตโครงสร้าง DB 
-      # ให้รองรับคอลัมน์ใหม่ทั้งหมดก่อนรัน ETL
       - name: 4. Run Database Migration
         env:
-          # ต้องกำหนด FLASK_APP และ URI ฐานข้อมูล
-          FLASK_APP: index.py # <--- สมมติว่าไฟล์ index.py คือจุดเริ่มต้น Flask
+          FLASK_APP: index.py 
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }} 
-        run: |
-          # ตรวจสอบให้แน่ใจว่า Flask-Migrate และ SQLAlchemy ถูกติดตั้งแล้ว (จาก requirements.txt)
-          # และรันคำสั่งอัปเกรดฐานข้อมูลไปยังเวอร์ชันล่าสุด
-          flask db upgrade
-      # ----------------------------------------------
-
-      - name: 5. Run the ETL script
+        run: flask db upgrade
+      - name: 5. Run ETL Job 1 (Summaries)
         env:
-          # สั่งให้ Action ดึงค่า Secret ที่คุณตั้งไว้ใน GitHub มาใช้งาน
+          # (ใส่ Env Vars ทั้งหมดที่ Job 1 ต้องการ)
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }} 
+        run: |
+          python scripts/run_etl_manually.py --jobs 1
+
+  # --- JOB 2: (The Slow Ones) Prices & Financials (Top 1000) ---
+  run-jobs-2-3-core-data:
+    runs-on: ubuntu-latest
+    needs: run-job-1-summaries # <--- รอ Job 1 เสร็จก่อน
+    steps:
+      - name: 1. Check out code
+        uses: actions/checkout@v4
+      - name: 2. Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 3. Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # ไม่ต้อง Migrate ซ้ำ
+      - name: 4. Run ETL Jobs 2 (Prices) & 3 (Financials)
+        env:
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+        run: |
+          python scripts/run_etl_manually.py --jobs 2 3
+
+  # --- JOB 3: (The Fast Ones) News & ML Models ---
+  run-job-4-and-models:
+    runs-on: ubuntu-latest
+    needs: run-jobs-2-3-core-data # <--- รอ Job 2&3 เสร็จก่อน
+    steps:
+      - name: 1. Check out code
+        uses: actions/checkout@v4
+      - name: 2. Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 3. Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # ไม่ต้อง Migrate ซ้ำ
+      - name: 4. Run ETL Job 4 (News)
+        env:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
           NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
-          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: |
-          python scripts/run_etl_manually.py
-
-      - name: 6. Run the ML Clustering script # <<< เพิ่ม Step นี้เข้าไป
+          python scripts/run_etl_manually.py --jobs 4
+      
+      - name: 5. Run the ML Clustering script
         env:
-          # สคริปต์ ML ต้องการเชื่อมต่อ DB เหมือนกัน
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
-        # สั่งรันสคริปต์ ML ที่เราสร้าง (ใช้ชื่อไฟล์ใหม่ที่คุณตั้ง)
         run: python scripts/run_ml_cluster.py
 
-      - name: 7. Run the ML Risk Prediction script
+      - name: 6. Run the ML Risk Prediction script
         env:
-          # สคริปต์นี้ต้องการเชื่อมต่อ DB เช่นกัน
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
-        # รันสคริปต์สำหรับทำนายความเสี่ยง (Inference)
         run: python scripts/run_batch_prediction.py

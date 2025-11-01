@@ -1024,7 +1024,8 @@ def get_deep_dive_header_data(ticker: str) -> dict:
                 FactCompanySummary.analyst_target_price, FactCompanySummary.pe_ratio,
                 FactCompanySummary.forward_pe, FactCompanySummary.long_business_summary,
                 FactCompanySummary.beta,
-                FactCompanySummary.peer_cluster_id
+                FactCompanySummary.peer_cluster_id,
+                FactCompanySummary.predicted_default_prob
             ).outerjoin( # Use outerjoin in case DimCompany exists but summary doesn't yet
                 FactCompanySummary,
                 (DimCompany.ticker == FactCompanySummary.ticker) &
@@ -1067,6 +1068,7 @@ def get_deep_dive_header_data(ticker: str) -> dict:
                 'long_business_summary': db_result.long_business_summary,
                 'beta': db_result.beta,
                 'peer_cluster_id': db_result.peer_cluster_id,
+                'predicted_default_prob': db_result.predicted_default_prob,
                 # Add other necessary fields if needed
             })
             # Check if essential data like price is present
@@ -1115,6 +1117,7 @@ def get_deep_dive_header_data(ticker: str) -> dict:
                 'forward_pe': info.get('forwardPE'),
                 'long_business_summary': info.get('longBusinessSummary'),
                 'beta': info.get('beta'),
+                'predicted_default_prob': None,
                 # Map other yfinance info keys as needed
             })
             logging.info(f"[Fallback] Successfully fetched live header data for {ticker}.")
@@ -1203,6 +1206,13 @@ def get_historical_prices(ticker: str, period: str = "5y") -> Tuple[pd.DataFrame
                 logging.warning(f"[Fallback] Live fetch (yf.download) returned empty for {ticker} and period '{period}'.")
                 return pd.DataFrame(), source # Return empty DataFrame
 
+            # --- [START FIX] Handle potential MultiIndex for single ticker ---
+            if isinstance(df_prices.columns, pd.MultiIndex):
+                logging.info(f"[Fallback] Flattening MultiIndex columns for {ticker}.")
+                # Flatten MultiIndex (e.g., ('Close', '')) -> 'Close'
+                df_prices.columns = df_prices.columns.get_level_values(0)
+            # --- [END FIX] ---
+
             # Rename columns if needed (yf.download might return slightly different names)
             df_prices.rename(columns={'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume'}, inplace=True, errors='ignore')
 
@@ -1231,6 +1241,11 @@ def get_historical_prices(ticker: str, period: str = "5y") -> Tuple[pd.DataFrame
             if df_prices.empty:
                 logging.warning(f"[Fallback] Live fetch (after DB error) returned empty for {ticker}.")
                 return pd.DataFrame({"error": "DB query failed and live fetch returned no data."}), source
+            # --- [START FIX] Handle potential MultiIndex for single ticker ---
+            if isinstance(df_prices.columns, pd.MultiIndex):
+                logging.info(f"[Fallback] Flattening MultiIndex columns for {ticker} (after DB error).")
+                df_prices.columns = df_prices.columns.get_level_values(0)
+            # --- [END FIX] ---
             df_prices.rename(columns={'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume'}, inplace=True, errors='ignore')
             required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
             if not all(col in df_prices.columns for col in required_cols):

@@ -1,4 +1,5 @@
 # data_handler.py (V-FINAL: ใช้วิธี Groupby-Apply (V8) เพื่อแก้ Bug merge_asof)
+# (MODIFIED: 2025-11-01 - แก้ไข _get_dcf_base_data_from_db ให้รองรับ Metric ทางเลือก)
 
 import os
 import requests
@@ -496,6 +497,7 @@ def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_grow
 
 
 # --- [NEW HELPER FUNCTION FOR DCF BASE DATA FROM DB] ---
+# --- [MODIFIED: 2025-11-01 - Added alternative metric names] ---
 def _get_dcf_base_data_from_db(ticker: str) -> dict:
     """
     Queries the database (FactFinancialStatements & FactCompanySummary)
@@ -505,24 +507,33 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
     """
     with server.app_context():
         # 1. Find 4 latest unique report dates for the ticker
+        # --- [START FIX 2] ---
+        # Query TTM metrics (SUM over 4 quarters)
+        # We need to look in *only* quarterly statements for TTM
+        statement_types_income_cashflow = ['income_q', 'cashflow_q']
+        statement_types_balance = ['balance_q'] # Prefer quarterly, but will check annual if needed
+        
         latest_reports_query = db.session.query(
             distinct(FactFinancialStatements.report_date).label('report_date')
         ).filter(
             FactFinancialStatements.ticker == ticker,
-            FactFinancialStatements.statement_type.in_(['income', 'cashflow'])
+            FactFinancialStatements.statement_type.in_(statement_types_income_cashflow) # <-- FIXED: Only _q
         ).order_by(
             FactFinancialStatements.report_date.desc()
         ).limit(4).subquery()
+        # --- [END FIX 2] ---
 
         # 2. Query TTM metrics (SUM over 4 quarters)
+        # --- [START FIX 1] ---
         required_ttm_metrics = [
-            'EBIT',
-            'Depreciation And Amortization',
-            'Capital Expenditure',
+            'EBIT', 'Operating Income', # <--- Added alternative
+            'Depreciation And Amortization', 'Depreciation & Amortization', 'Depreciation', # <--- Added alternatives
+            'Capital Expenditure', 'CapEx', # <--- Added alternative
             'Income Tax Expense',
             'Income Before Tax',
-            'Interest Expense'           # <<< ADDED
+            'Interest Expense'
         ]
+        # --- [END FIX 1] ---
 
         ttm_data = db.session.query(
             FactFinancialStatements.metric_name,
@@ -533,11 +544,33 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
             FactFinancialStatements.metric_name.in_(required_ttm_metrics)
         ).group_by(FactFinancialStatements.metric_name).all()
 
-        ttm_dict = {name: (value if value is not None else 0.0) for name, value in ttm_data}
+        # --- [START FIX 1 (Normalization)] ---
+        # Create a raw dictionary *without* default values first to check for presence
+        ttm_dict_raw = {name: value for name, value in ttm_data}
 
-        # Check for required TTM metrics (FCFF components)
-        if not all(m in ttm_dict for m in ['EBIT', 'Depreciation And Amortization', 'Capital Expenditure']):
-             return {'error': 'Missing essential TTM financial data (EBIT, D&A, CapEx).', 'success': False}
+        # Normalize TTM metrics from alternatives
+        ebit_ttm_raw = ttm_dict_raw.get('EBIT', ttm_dict_raw.get('Operating Income'))
+        da_ttm_raw = ttm_dict_raw.get('Depreciation And Amortization', ttm_dict_raw.get('Depreciation & Amortization', ttm_dict_raw.get('Depreciation')))
+        capex_ttm_raw = ttm_dict_raw.get('Capital Expenditure', ttm_dict_raw.get('CapEx'))
+
+        # Check if any of the *normalized* values are None (meaning *none* of their alternatives were found)
+        if not all(v is not None for v in [ebit_ttm_raw, da_ttm_raw, capex_ttm_raw]):
+            missing = []
+            if ebit_ttm_raw is None: missing.append("EBIT/Operating Income")
+            if da_ttm_raw is None: missing.append("D&A")
+            if capex_ttm_raw is None: missing.append("CapEx")
+            return {'error': f'Missing essential TTM financial data: {", ".join(missing)}. (Querying only _q statements)', 'success': False}
+        
+        # Now, create the final ttm_dict with defaults for calculation
+        ttm_dict = {
+            'EBIT': ebit_ttm_raw,
+            'Depreciation And Amortization': da_ttm_raw,
+            'Capital Expenditure': capex_ttm_raw,
+            'Income Tax Expense': ttm_dict_raw.get('Income Tax Expense', 0.0),
+            'Income Before Tax': ttm_dict_raw.get('Income Before Tax', 0.0),
+            'Interest Expense': ttm_dict_raw.get('Interest Expense', 0.0)
+        }
+        # --- [END FIX 1 (Normalization)] ---
 
         # 3. Calculate TTM Tax Rate (Dynamic)
         ttm_tax = ttm_dict.get('Income Tax Expense', 0.0)
@@ -549,19 +582,24 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         tax_rate = max(0.0, min(0.5, tax_rate))
 
         # 4. Query latest Balance Sheet items (Cash, Debt)
+        # --- [START FIX 2] ---
+        # Find the latest date from *any* balance sheet (quarterly preferred, annual fallback)
         latest_bs_date = db.session.query(
             func.max(FactFinancialStatements.report_date)
         ).filter(
             FactFinancialStatements.ticker == ticker,
-            FactFinancialStatements.statement_type == 'balance'
+            FactFinancialStatements.statement_type.in_(['balance_q', 'balance_a']) # <-- FIXED
         ).scalar()
+        # --- [END FIX 2] ---
 
         bs_data = db.session.query(
             FactFinancialStatements.metric_name,
             FactFinancialStatements.metric_value
         ).filter(
             FactFinancialStatements.ticker == ticker,
-            FactFinancialStatements.statement_type == 'balance',
+            # --- [START FIX 2] ---
+            FactFinancialStatements.statement_type.in_(['balance_q', 'balance_a']), # <-- FIXED
+            # --- [END FIX 2] ---
             FactFinancialStatements.report_date == latest_bs_date,
             FactFinancialStatements.metric_name.in_(['Cash And Cash Equivalents', 'Total Debt'])
         ).all()
@@ -572,7 +610,7 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
         latest_summary = db.session.query(
             FactCompanySummary.price,
             FactCompanySummary.market_cap,
-            FactCompanySummary.beta                     # <<< ADDED
+            FactCompanySummary.beta
         ).filter(
             FactCompanySummary.ticker == ticker
         ).order_by(FactCompanySummary.date_updated.desc()).first()
@@ -615,10 +653,12 @@ def _get_dcf_base_data_from_db(ticker: str) -> dict:
             'success': True,
             'current_price': price,
             'shares_outstanding': shares_outstanding,
-            'ebit_ttm': ttm_dict['EBIT'],
+            # --- [START FIX 1 (Usage)] ---
+            'ebit_ttm': ttm_dict['EBIT'], # This now holds the normalized value
             'tax_rate': tax_rate, # <<< Dynamic TTM Rate
-            'd_and_a_ttm': ttm_dict['Depreciation And Amortization'],
-            'capex_ttm': ttm_dict['Capital Expenditure'],
+            'd_and_a_ttm': ttm_dict['Depreciation And Amortization'], # This now holds the normalized value
+            'capex_ttm': ttm_dict['Capital Expenditure'], # This now holds the normalized value
+            # --- [END FIX 1 (Usage)] ---
             'cash': bs_dict.get('Cash And Cash Equivalents', 0.0),
             'total_debt': total_debt,
             'wacc_calculated': wacc_calc # <<< ADDED (for optional display/info)

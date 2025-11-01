@@ -1,8 +1,14 @@
 import os
 from dotenv import load_dotenv
 
-basedir = os.path.abspath(os.path.dirname(__file__))
-load_dotenv(os.path.join(basedir, '.env')) 
+# --- [FIXED] ---
+# 1. หาตำแหน่งของ Root Directory (หนึ่งระดับบนจากไฟล์ config.py นี้)
+basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) 
+# 2. สร้าง Path ไปยังไฟล์ .env ที่อยู่ใน Root
+dotenv_path = os.path.join(basedir, '.env')
+# 3. สั่งโหลดไฟล์ .env จาก Path นั้น
+load_dotenv(dotenv_path) 
+# --- [END FIXED] ---
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'a-fallback-secret-key-for-development'

@@ -6,11 +6,12 @@ import datetime
 import os
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # <-- (A) เพิ่มส่วนนี้
 
 # --- (USER REQUEST 2) Import Feature Logic ---
 # Import ลอจิกการสร้าง Feature และ "สัญญา" 22 features จากไฟล์ใหม่
 try:
-    from ml_risk_features import engineer_features_for_prediction, ML_RISK_BASE_FEATURES
+    from app.ml.ml_risk_features import engineer_features_for_prediction, ML_RISK_BASE_FEATURES
 except ImportError:
     print("FATAL: ไม่พบไฟล์ ml_risk_features.py กรุณาสร้างไฟล์ตามคำแนะนำ")
     sys.exit(1)

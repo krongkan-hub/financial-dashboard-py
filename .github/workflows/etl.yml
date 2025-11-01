@@ -56,3 +56,10 @@ jobs:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
         # สั่งรันสคริปต์ ML ที่เราสร้าง (ใช้ชื่อไฟล์ใหม่ที่คุณตั้ง)
         run: python scripts/run_ml_cluster.py
+
+      - name: 7. Run the ML Risk Prediction script
+        env:
+          # สคริปต์นี้ต้องการเชื่อมต่อ DB เช่นกัน
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+        # รันสคริปต์สำหรับทำนายความเสี่ยง (Inference)
+        run: python scripts/run_batch_prediction.py

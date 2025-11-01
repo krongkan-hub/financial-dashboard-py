@@ -1,4 +1,5 @@
-# etl.py (FINAL VERSION - Fixed UnboundLocalError, implemented Smart Weekend Buffer, Limited Job 2 to Top 500, Job 3 to Top 500, Skip Logo Update)
+# app/etl.py (MODIFIED JOB 3 for Gap-Filling Logic)
+
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
@@ -46,7 +47,7 @@ def _clean_numpy_types(data_dict: Dict) -> Dict:
     for key, value in data_dict.items():
         if pd.isna(value) or value is None:
             cleaned_item[key] = None
-        # Check for any NumPy number type (np.int64, np.float64, np.int32, etc.)
+        # Check for any NumPy number type (np.int64, np.float64, np.number)
         elif isinstance(value, (np.int64, np.float64, np.number)):
             # Convert to standard Python float for consistency with DB schema (FactCompanySummary mostly uses Float)
             cleaned_item[key] = float(value)
@@ -386,7 +387,7 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
 # --- [END MODIFIED] ---
 
 
-# --- Job 3: update_financial_statements (เหมือนเดิม) ---
+# --- Job 3: update_financial_statements (MODIFIED to implement Gap-Filling Logic) ---
 def update_financial_statements(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_financial_statements] cannot run because insert statement is not available.")
@@ -407,98 +408,172 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping job.")
             return
 
-        max_date_results = db.session.query(FactCompanySummary.ticker, func.max(FactCompanySummary.date_updated)).filter(FactCompanySummary.ticker.in_(tickers_to_process)).group_by(FactCompanySummary.ticker).all()
-        max_dates = {ticker: max_date for ticker, max_date in max_date_results}
+        # --- [MODIFIED: Query latest financial report date, NOT summary date] ---
+        logging.info(f"ETL Job: [{job_name}] Querying DB for latest financial report dates (gap-fill check)...")
+        max_date_results = db.session.query(
+            FactFinancialStatements.ticker,
+            func.max(FactFinancialStatements.report_date) # <-- Check the correct table
+        ).filter(
+            FactFinancialStatements.ticker.in_(tickers_to_process)
+        ).group_by(FactFinancialStatements.ticker).all()
+        
+        max_dates_map = {ticker: max_date for ticker, max_date in max_date_results}
+        # --- [END MODIFIED] ---
 
     tickers_to_fetch = []
+    # --- [NEW: Logic to decide which tickers to fetch based on gap-fill] ---
+    # Financials are quarterly. If the last report is within ~60 days, it's very unlikely a new one is out.
+    QUARTERLY_BUFFER_DAYS = 60 
+    
     for ticker in tickers_to_process:
-        latest_summary_date = max_dates.get(ticker)
+        latest_report_date = max_dates_map.get(ticker)
+        
+        if latest_report_date:
+            days_diff = (today - latest_report_date).days
+            if days_diff <= QUARTERLY_BUFFER_DAYS:
+                logging.info(f"[{job_name}] Skipping {ticker}: Latest financial report in DB is recent (Date: {latest_report_date}, {days_diff} days ago).")
+                continue
+        
+        # Add to fetch list if no data OR if data is older than the buffer
         tickers_to_fetch.append(ticker)
+    # --- [END NEW] ---
 
     if not tickers_to_fetch:
-         logging.info(f"ETL Job: [{job_name}] All {len(tickers_to_process)} tickers are already up-to-date for today. Nothing to fetch.")
+         logging.info(f"ETL Job: [{job_name}] All {len(tickers_to_process)} tickers are already up-to-date (within {QUARTERLY_BUFFER_DAYS}-day buffer). Nothing to fetch.")
          return
 
-    logging.info(f"ETL Job: [{job_name}] Fetching financial statements for {len(tickers_to_fetch)}/{len(tickers_to_process)} tickers.")
+    logging.info(f"ETL Job: [{job_name}] Fetching financial statements for {len(tickers_to_fetch)}/{len(tickers_to_process)} tickers (gap-fill applied).")
+    
+    # --- [MODIFIED: Pass the max_dates_map to the retry helper] ---
+    # We must create tuples of (ticker, max_date)
+    ticker_data_tuples = []
+    for ticker in tickers_to_fetch:
+        ticker_data_tuples.append(
+            (ticker, max_dates_map.get(ticker)) # Pass ticker and its latest date (or None)
+        )
+    
+    process_tickers_with_retry(job_name, ticker_data_tuples, process_single_ticker_financials, initial_delay=0.8, max_retries=2)
+    # --- [END MODIFIED] ---
+    
+    logging.info(f"ETL Job: [{job_name}]... COMPLETED with skip logic.")
 
-    def process_single_ticker_financials(ticker):
-        job_name = "Job 3: Update Financials (Top 500)"
-        if sql_insert is None:
-            logging.error(f"[{job_name}] cannot run because insert statement is not available.")
+
+# --- [MODIFIED: Function signature accepts the tuple] ---
+def process_single_ticker_financials(ticker_data_tuple):
+    job_name = "Job 3: Update Financials (Top 500)"
+    
+    ticker, latest_date_in_db = ticker_data_tuple # Unpack the tuple
+    
+    if sql_insert is None:
+        logging.error(f"[{job_name}] cannot run because insert statement is not available.")
+        return
+
+    try:
+        # --- [MODIFIED: Use passed-in latest_date_in_db] ---
+        if latest_date_in_db:
+            logging.info(f"[{job_name}] Gap Filling: Latest financial report date in DB for {ticker} is {latest_date_in_db}. Will filter API data.")
+        else:
+            logging.info(f"[{job_name}] Gap Filling: No financial data in DB for {ticker}. Will fetch all available data.")
+        # --- [END MODIFIED] ---
+
+        logging.info(f"[{job_name}] Fetching all available financial statements for {ticker} using yfinance...")
+        tkr = yf.Ticker(ticker)
+        statements_data = {
+            'income_q': tkr.quarterly_financials, 
+            'balance_q': tkr.quarterly_balance_sheet, 
+            'cashflow_q': tkr.quarterly_cashflow,
+            'income_a': tkr.financials,            # Annual Income Statement
+            'balance_a': tkr.balance_sheet,        # Annual Balance Sheet
+            'cashflow_a': tkr.cashflow             # Annual Cash Flow
+        }
+        if not any(df is not None and not df.empty for df in statements_data.values()): # <-- FIX: ใช้ statements_data
+            logging.warning(f"[{job_name}] No financial statement data found via yfinance for {ticker}.")
+            time.sleep(0.8)
             return
 
-        try:
-            logging.info(f"[{job_name}] Fetching financial statements directly for {ticker} using yfinance...")
-            tkr = yf.Ticker(ticker)
-            statements_data = {
-                'income_q': tkr.quarterly_financials, 
-                'balance_q': tkr.quarterly_balance_sheet, 
-                'cashflow_q': tkr.quarterly_cashflow,
-                'income_a': tkr.financials,            # Annual Income Statement
-                'balance_a': tkr.balance_sheet,        # Annual Balance Sheet
-                'cashflow_a': tkr.cashflow             # Annual Cash Flow
-            }
-            if not any(df is not None and not df.empty for df in statements_data.values()): # <-- FIX: ใช้ statements_data
-                logging.warning(f"[{job_name}] No financial statement data found via yfinance for {ticker}.")
-                time.sleep(0.8)
-                return
+        all_statements_data = [] 
+        for statement_key, df in statements_data.items(): 
+            if df is None or df.empty: continue
+            if df.index.name is None: df.index.name = 'metric_name'
+            
+            df_to_process = df.copy() # Start with the full df
 
-            all_statements_data = [] 
-            # --- START MODIFICATION: Loop over the new dictionary keys (statement_key = 'income_q', 'balance_a', etc.) ---
-            for statement_key, df in statements_data.items(): 
-                if df is None or df.empty: continue
-                if df.index.name is None: df.index.name = 'metric_name'
-                try:
-                    date_columns = pd.to_datetime(df.columns, errors='coerce').dropna()
-                    non_date_column_names = [col for col in df.columns if col not in date_columns]
-                    df.columns = non_date_column_names + date_columns.tolist()
-                except Exception as date_err:
-                    # ใช้ statement_key ใน Log แทน statement_type เดิม
-                    logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_key}: {date_err}. Skipping this statement.")
-                    continue
-
-                df_to_melt = df.reset_index()
-                df_long = df_to_melt.melt(id_vars='metric_name', var_name='report_date', value_name='metric_value')
-                df_long['ticker'] = ticker
-                # ใช้ statement_key เป็น statement_type เพื่อแยก Annual ('_a') และ Quarterly ('_q') ใน DB
-                df_long['statement_type'] = statement_key 
-                df_long['report_date'] = pd.to_datetime(df_long['report_date']).dt.date
-                df_long.dropna(subset=['metric_value'], inplace=True)
-                df_long['metric_value'] = pd.to_numeric(df_long['metric_value'], errors='coerce').astype(float)
-                df_long.dropna(subset=['metric_value'], inplace=True)
-                df_long['metric_name'] = df_long['metric_name'].astype(str).str.strip()
-                all_statements_data.extend(df_long.to_dict('records'))
-            # --- END MODIFICATION ---
-
-            if all_statements_data:
-                with server.app_context():
-                    chunk_size = 1000
-                    constraint_name = '_ticker_date_statement_metric_uc'
-                    for i in range(0, len(all_statements_data), chunk_size):
-                        chunk = all_statements_data[i:i + chunk_size]
-                        stmt = sql_insert(FactFinancialStatements).values(chunk)
-                        set_ = {'metric_value': stmt.excluded.metric_value}
-                        try:
-                            if db_dialect == 'postgresql': on_conflict_stmt = stmt.on_conflict_do_update(constraint=constraint_name, set_=set_)
-                            elif db_dialect == 'sqlite': on_conflict_stmt = stmt.on_conflict_do_update(index_elements=['ticker', 'report_date', 'statement_type', 'metric_name'], set_=set_)
-                            else: raise Exception("Unsupported DB dialect for UPSERT.")
-                            db.session.execute(on_conflict_stmt)
-                            db.session.commit()
-                        except Exception as chunk_e:
-                            logging.error(f"[{job_name}] Error inserting financial chunk for {ticker}: {chunk_e}")
-                            db.session.rollback(); continue
-            time.sleep(0.8)
-            return True
-
-        except Exception as inner_e:
-            logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
+            # --- [NEW STEP 2: Filter columns based on date passed from tuple] ---
             try:
-                with server.app_context(): db.session.rollback()
-            except Exception as rb_err: logging.error(f"[{job_name}] Error during rollback for {ticker}: {rb_err}")
-            raise inner_e
+                # Identify all date-like columns
+                date_columns = pd.to_datetime(df_to_process.columns, errors='coerce').dropna()
+                non_date_column_names = [col for col in df_to_process.columns if col not in date_columns]
+                
+                columns_to_keep = non_date_column_names[:] # Start with non-date columns
 
-    process_tickers_with_retry(job_name, tickers_to_fetch, process_single_ticker_financials, initial_delay=0.8, max_retries=2)
-    logging.info(f"ETL Job: [{job_name}]... COMPLETED with skip logic.")
+                if latest_date_in_db:
+                    # Find only date columns *newer* than what we have
+                    new_date_columns = [col for col in date_columns if col.date() > latest_date_in_db]
+                    
+                    if not new_date_columns:
+                        logging.info(f"[{job_name}] Gap Filling: No new report dates found for {ticker} ({statement_key}). Skipping this statement.")
+                        continue
+                        
+                    logging.info(f"[{job_name}] Gap Filling: Found {len(new_date_columns)} new report(s) for {ticker} ({statement_key}). Processing them.")
+                    columns_to_keep.extend(new_date_columns)
+                else:
+                    # No latest date, so keep all date columns
+                    columns_to_keep.extend(date_columns)
+                
+                # Re-constitute the DataFrame with only metric names + new/all dates
+                df_to_process = df_to_process[columns_to_keep]
+
+            except Exception as date_err:
+                logging.warning(f"[{job_name}] Could not handle columns to datetime for {ticker}, {statement_key}: {date_err}. Skipping this statement.")
+                continue
+            # --- [END NEW STEP 2] ---
+            
+            df_to_melt = df_to_process.reset_index()
+            
+            # --- [MODIFIED STEP 3: Melt and re-parse dates] ---
+            # We melt, which turns the date columns (which are datetimes) into objects in the 'report_date' column
+            df_long = df_to_melt.melt(id_vars='metric_name', var_name='report_date', value_name='metric_value')
+            
+            # We must convert these objects back to dates
+            df_long['report_date'] = pd.to_datetime(df_long['report_date']).dt.date
+            # --- [END MODIFIED STEP 3] ---
+            
+            df_long['ticker'] = ticker
+            df_long['statement_type'] = statement_key 
+            
+            df_long.dropna(subset=['metric_value'], inplace=True)
+            df_long['metric_value'] = pd.to_numeric(df_long['metric_value'], errors='coerce').astype(float)
+            df_long.dropna(subset=['metric_value'], inplace=True)
+            df_long['metric_name'] = df_long['metric_name'].astype(str).str.strip()
+            all_statements_data.extend(df_long.to_dict('records'))
+
+        if all_statements_data:
+            with server.app_context():
+                chunk_size = 1000
+                constraint_name = '_ticker_date_statement_metric_uc'
+                for i in range(0, len(all_statements_data), chunk_size):
+                    chunk = all_statements_data[i:i + chunk_size]
+                    stmt = sql_insert(FactFinancialStatements).values(chunk)
+                    set_ = {'metric_value': stmt.excluded.metric_value}
+                    try:
+                        if db_dialect == 'postgresql': on_conflict_stmt = stmt.on_conflict_do_update(constraint=constraint_name, set_=set_)
+                        elif db_dialect == 'sqlite': on_conflict_stmt = stmt.on_conflict_do_update(index_elements=['ticker', 'report_date', 'statement_type', 'metric_name'], set_=set_)
+                        else: raise Exception("Unsupported DB dialect for UPSERT.")
+                        db.session.execute(on_conflict_stmt)
+                        db.session.commit()
+                    except Exception as chunk_e:
+                        logging.error(f"[{job_name}] Error inserting financial chunk for {ticker}: {chunk_e}")
+                        db.session.rollback(); continue
+        time.sleep(0.8)
+        return True
+
+    except Exception as inner_e:
+        logging.error(f"[{job_name}] Error during processing/DB UPSERT for {ticker}: {inner_e}", exc_info=True)
+        try:
+            with server.app_context(): db.session.rollback()
+        except Exception as rb_err: logging.error(f"[{job_name}] Error during rollback for {ticker}: {rb_err}")
+        raise inner_e
+# --- [END JOB 3 MODIFICATION] ---
 
 
 # --- Job 4: update_news_sentiment (เหมือนเดิม) ---

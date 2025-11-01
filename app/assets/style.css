@@ -109,3 +109,40 @@
     color: #0d6efd; /* Bootstrap primary link color */
     text-decoration: underline;
 }
+
+/* --- [FIX 3 - AGGRESSIVE] Dropdown Text Overflow --- */
+/* This targets the options *inside* the dropdown list */
+/* We use the .sidebar-fixed parent to make the CSS rule more specific */
+.sidebar-fixed #ticker-select-dropdown .Select-option,
+.sidebar-fixed #peer-reference-stock-dropdown .Select-option,
+.sidebar-fixed #peer-select-dropdown .Select-option {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* This targets the value shown in the box *after* selection (single value) */
+.sidebar-fixed #ticker-select-dropdown .Select-value-label,
+.sidebar-fixed #peer-reference-stock-dropdown .Select-value-label,
+.sidebar-fixed #peer-select-dropdown .Select-value-label {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important; /* Ensure it's a block to obey overflow */
+}
+
+/* This targets the placeholder text (e.g., "Select one or more...") */
+.sidebar-fixed #ticker-select-dropdown .Select-placeholder,
+.sidebar-fixed #peer-reference-stock-dropdown .Select-placeholder,
+.sidebar-fixed #peer-select-dropdown .Select-placeholder {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* This targets the multi-select "pills" */
+.sidebar-fixed #ticker-select-dropdown .Select-value,
+.sidebar-fixed #peer-reference-stock-dropdown .Select-value,
+.sidebar-fixed #peer-select-dropdown .Select-value {
+     max-width: 95%; /* Prevent pills from being too wide */
+}

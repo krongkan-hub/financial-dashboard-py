@@ -1,5 +1,6 @@
 # callbacks.py (Refactored - Step 4 - FIXED pd.read_sql TypeError + Added Smart Peer Finder)
 # (เวอร์ชันสมบูรณ์ - เปลี่ยนไปดึงข้อมูลจาก DB ทั้งหมด)
+# [อัปเดต] แก้ไข update_ticker_options ให้ค้นหาได้ทั้ง Ticker และ ชื่อบริษัท
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -272,12 +273,70 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             for t in indices
         ]
 
-    @app.callback(Output('ticker-select-dropdown', 'options'), [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')])
+    # ==================================================================
+    # --- [START] อัปเดตฟังก์ชัน Dropdown ของ Ticker ---
+    # ==================================================================
+    @app.callback(
+        Output('ticker-select-dropdown', 'options'),
+        [Input('sector-dropdown', 'value'), Input('user-selections-store', 'data')]
+    )
     def update_ticker_options(selected_sector, store_data):
-        if not selected_sector: return []
-        selected_tickers = store_data.get('tickers', []) if store_data else []
-        tickers_to_display = ALL_TICKERS_SORTED_BY_MC if selected_sector == 'All' else SECTORS.get(selected_sector, [])
-        return [{'label': t, 'value': t} for t in tickers_to_display if t not in selected_tickers]
+        """
+        [IMPROVED] Populates the ticker dropdown.
+        Now queries DimCompany to create labels with both Ticker and Company Name
+        (e.g., "AAPL | Apple Inc.") to allow searching by either.
+        """
+        if not selected_sector: 
+            return []
+        
+        # ใช้ set เพื่อการค้นหาที่เร็วขึ้น
+        selected_tickers = set(store_data.get('tickers', [])) if store_data else set()
+
+        # 1. Get the list of tickers for the selected sector
+        if selected_sector == 'All':
+            tickers_to_display_list = ALL_TICKERS_SORTED_BY_MC
+        else:
+            tickers_to_display_list = SECTORS.get(selected_sector, [])
+
+        # Filter out tickers that are already selected
+        tickers_to_query = [t for t in tickers_to_display_list if t not in selected_tickers]
+        
+        if not tickers_to_query:
+            return []
+
+        # 2. Query the database to get company names
+        with server.app_context():
+            try:
+                results = db.session.query(DimCompany.ticker, DimCompany.company_name) \
+                                    .filter(DimCompany.ticker.in_(tickers_to_query)) \
+                                    .all()
+                
+                # 3. Create a Ticker -> Company Name map
+                ticker_name_map = {ticker: name for ticker, name in results if name}
+                
+            except Exception as e:
+                logging.error(f"Error querying company names for dropdown: {e}")
+                # Fallback: If DB query fails, just return tickers as before
+                return [{'label': t, 'value': t} for t in tickers_to_query]
+
+        # 4. Build the enhanced options list
+        options = []
+        for ticker in tickers_to_query: # Iterate original list to maintain market cap sort order
+            company_name = ticker_name_map.get(ticker)
+            
+            if company_name:
+                # New, more searchable label
+                label = f"{ticker} | {company_name}"
+            else:
+                # Fallback for tickers missing from DimCompany name field
+                label = ticker
+                
+            options.append({'label': label, 'value': ticker})
+        
+        return options
+    # ==================================================================
+    # --- [END] อัปเดตฟังก์ชัน Dropdown ของ Ticker ---
+    # ==================================================================
 
     @app.callback(Output('index-select-dropdown', 'options'), Input('user-selections-store', 'data'))
     def update_index_options(store_data):

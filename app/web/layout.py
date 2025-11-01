@@ -316,7 +316,7 @@ def build_layout():
                         value='All',
                         clearable=False
                     ),
-                    dcc.Dropdown(id='ticker-select-dropdown', className="mt-2", placeholder="Select one or more tickers...", multi=True),
+                    dcc.Dropdown(id='ticker-select-dropdown', className="mt-2 sidebar-dropdown", placeholder="Select one or more tickers...", multi=True),
                     dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock(s)"], id="add-ticker-button", n_clicks=0, className="mt-2 w-100"),
                     html.Hr(),
                     html.Label("Add Benchmarks to Compare", className="fw-bold"),
@@ -330,13 +330,13 @@ def build_layout():
                         id='peer-reference-stock-dropdown',
                         placeholder="Select a reference stock...",
                         clearable=True, # Allow clearing the selection
-                        className="mt-1"
+                        className="mt-1 sidebar-dropdown"
                     ),
                     dcc.Dropdown(
                         id='peer-select-dropdown',
                         placeholder="Select peers to add...",
                         multi=True, # Allow selecting multiple peers
-                        className="mt-2"
+                        className="mt-2 sidebar-dropdown"
                     ),
                     html.Div(id='peer-finder-status', className="text-muted small mt-1 mb-2"), # Status message area
                     dbc.Button(

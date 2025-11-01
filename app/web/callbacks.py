@@ -319,19 +319,22 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 # Fallback: If DB query fails, just return tickers as before
                 return [{'label': t, 'value': t} for t in tickers_to_query]
 
-        # 4. Build the enhanced options list
+        # 4. Build the enhanced options list (Show ONLY Company Name)
         options = []
         for ticker in tickers_to_query: # Iterate original list to maintain market cap sort order
             company_name = ticker_name_map.get(ticker)
             
-            if company_name:
-                # New, more searchable label
-                label = f"{ticker} | {company_name}"
+            # --- START MODIFICATION ---
+            # Only add stocks that have a company name
+            if company_name: 
+                label = company_name  # <-- Use only the name for the label
+                options.append({'label': label, 'value': ticker})
             else:
-                # Fallback for tickers missing from DimCompany name field
-                label = ticker
-                
-            options.append({'label': label, 'value': ticker})
+                # Optional: If you still want to add tickers that are missing a name
+                # label = ticker
+                # options.append({'label': label, 'value': ticker})
+                pass # <-- This will skip any stock that doesn't have a name in the DB
+            # --- END MODIFICATION ---
         
         return options
     # ==================================================================

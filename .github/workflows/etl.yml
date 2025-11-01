@@ -79,12 +79,18 @@ jobs:
         run: |
           python scripts/run_etl_manually.py --jobs 4
       
-      - name: 5. Run the ML Clustering script
+      # [NEW STEP] 5. Run the ML Risk Model Training script (Creates artifacts)
+      - name: 5. Train the ML Risk Model
+        env:
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+        run: python scripts/run_ml_risk.py # <--- เพิ่มบรรทัดนี้
+
+      - name: 6. Run the ML Clustering script
         env:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
         run: python scripts/run_ml_cluster.py
 
-      - name: 6. Run the ML Risk Prediction script
+      - name: 7. Run the ML Risk Prediction script
         env:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
         run: python scripts/run_batch_prediction.py

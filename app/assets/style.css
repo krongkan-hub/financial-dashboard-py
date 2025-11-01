@@ -110,39 +110,41 @@
     text-decoration: underline;
 }
 
-/* --- [FIX 3 - AGGRESSIVE] Dropdown Text Overflow --- */
+/* --- [FIX 6 - FINAL - Dash 3.x Specific Selectors] --- */
+
 /* This targets the options *inside* the dropdown list */
-/* We use the .sidebar-fixed parent to make the CSS rule more specific */
-.sidebar-fixed #ticker-select-dropdown .Select-option,
-.sidebar-fixed #peer-reference-stock-dropdown .Select-option,
-.sidebar-fixed #peer-select-dropdown .Select-option {
+/* This rule must remain global */
+/* It targets the dynamic div that *contains* the text */
+div[id^="react-select-"][id$="-option-"] {
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
 }
 
-/* This targets the value shown in the box *after* selection (single value) */
-.sidebar-fixed #ticker-select-dropdown .Select-value-label,
-.sidebar-fixed #peer-reference-stock-dropdown .Select-value-label,
-.sidebar-fixed #peer-select-dropdown .Select-value-label {
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    display: block !important; /* Ensure it's a block to obey overflow */
-}
-
-/* This targets the placeholder text (e.g., "Select one or more...") */
-.sidebar-fixed #ticker-select-dropdown .Select-placeholder,
-.sidebar-fixed #peer-reference-stock-dropdown .Select-placeholder,
-.sidebar-fixed #peer-select-dropdown .Select-placeholder {
+/* This targets the placeholder text *inside the box* */
+/* We use our custom class + the specific internal class name */
+.sidebar-dropdown .dash-dropdown__placeholder {
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
 }
 
-/* This targets the multi-select "pills" */
-.sidebar-fixed #ticker-select-dropdown .Select-value,
-.sidebar-fixed #peer-reference-stock-dropdown .Select-value,
-.sidebar-fixed #peer-select-dropdown .Select-value {
-     max-width: 95%; /* Prevent pills from being too wide */
+/* This targets the selected value *inside the box* (for single-select) */
+.sidebar-dropdown .dash-dropdown__single-value {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* This targets the text *inside* the multi-select "pills" */
+.sidebar-dropdown .dash-dropdown__multi-value__label {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important; /* Force it to obey overflow */
+}
+
+/* This targets the "pill" itself to control its max width */
+.sidebar-dropdown .dash-dropdown__multi-value {
+     max-width: 95% !important; 
 }

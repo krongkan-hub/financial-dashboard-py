@@ -270,6 +270,47 @@ def _get_logo_url(ticker: str, info: Optional[dict] = None) -> Optional[str]:
 
 # --- [END Logo Helper] ---
 
+@lru_cache(maxsize=10) # ใช้ cache เหมือนฟังก์ชันอื่นๆ
+def get_market_cap_data(tickers: tuple) -> pd.DataFrame:
+    """
+    ฟังก์ชันน้ำหนักเบาที่ปรับให้เหมาะสมเพื่อดึง *เฉพาะ* Ticker และ Market Cap
+    สำหรับใช้ในการจัดเรียง (ถูกเรียกใช้โดย update_constants.py)
+    """
+    all_data = []
+    total = len(tickers)
+    logging.info(f"Starting lightweight market cap fetch for {total} tickers...")
+
+    for i, ticker in enumerate(tickers):
+        try:
+            tkr = yf.Ticker(ticker)
+            info = tkr.info
+            
+            # ตรวจสอบข้อมูลพื้นฐาน
+            if not info or info.get('quoteType') != 'EQUITY' or info.get('marketCap') is None:
+                logging.warning(f"({i+1}/{total}) Skipping {ticker}: Invalid ticker or no market cap.")
+                continue
+
+            data_dict = {
+                "Ticker": ticker,
+                "Market Cap": info.get("marketCap")
+            }
+            all_data.append(data_dict)
+
+            # หน่วงเวลาเล็กน้อยเพื่อไม่ให้ API ถูกใช้งานหนักเกินไป
+            time.sleep(0.2) 
+
+            if (i + 1) % 100 == 0: # Log ความคืบหน้าทุก 100 tickers
+                 logging.info(f"({i+1}/{total}) Fetched market caps...")
+
+        except Exception as e:
+            # หากเกิดข้อผิดพลาด ให้ข้ามไปทำ Ticker ถัดไป
+            logging.error(f"({i+1}/{total}) An error occurred processing market cap for {ticker}: {e}")
+            time.sleep(0.5) # หน่วงเวลาเล็กน้อยเมื่อเกิด error
+            continue
+    
+    logging.info(f"Finished lightweight fetch. Got data for {len(all_data)} out of {total} tickers.")
+    return pd.DataFrame(all_data)
+
 # --- [MODIFIED] get_competitor_data (เหมือนเดิม) ---
 @lru_cache(maxsize=10)
 def get_competitor_data(tickers: tuple) -> pd.DataFrame:

@@ -1,23 +1,26 @@
-# update_constants.py
+# scripts/update_constants.py
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # <-- (A) เพิ่มส่วนนี้
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import logging
 import pandas as pd
 import yfinance as yf
 import plotly.express as px
-from pprint import pformat # ใช้ pprint เพื่อจัด format dict ให้อ่านง่าย
+from pprint import pformat
 
 # --- Import from project files ---
-# ตรวจสอบให้แน่ใจว่า data_handler.py อยู่ใน path เดียวกัน
 try:
-    from app.data_handler import get_competitor_data
+    # --- [แก้ไข] ---
+    # เปลี่ยนจาก get_competitor_data เป็น get_market_cap_data
+    from app.data_handler import get_market_cap_data
+    # --- [สิ้นสุดการแก้ไข] ---
 except ImportError:
-    print("Error: Could not import get_competitor_data from data_handler.py")
+    # --- [แก้ไข] ---
+    print("Error: Could not import get_market_cap_data from data_handler.py")
+    # --- [สิ้นสุดการแก้ไข] ---
     print("Please run this script from the root directory of the project.")
     exit()
     
-# Import ข้อมูลเดิมจาก constants.py
 try:
     from app.constants import SECTORS, INDEX_TICKER_TO_NAME, SECTOR_TO_INDEX_MAPPING
 except ImportError:
@@ -30,13 +33,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def sort_tickers_by_market_cap():
     logging.info("Starting ticker sorting process...")
     
-    # 1. รวบรวม Tickers ทั้งหมด (ใช้ set เพื่อกำจัดตัวซ้ำตั้งแต่ต้น)
+    # 1. รวบรวม Tickers ทั้งหมด (เหมือนเดิม)
     all_tickers = list(set(t for tickers in SECTORS.values() for t in tickers))
     logging.info(f"Found {len(all_tickers)} unique tickers to fetch.")
 
     # 2. ดึงข้อมูล Market Cap
-    # นี่คือส่วนที่ช้าที่สุด (แต่ทำแค่ครั้งเดียว)
-    df = get_competitor_data(tuple(all_tickers))
+    # --- [แก้ไข] ---
+    # เรียกใช้ฟังก์ชันใหม่ที่เบากว่า
+    logging.info(f"Calling lightweight 'get_market_cap_data'...")
+    df = get_market_cap_data(tuple(all_tickers))
+    # --- [สิ้นสุดการแก้ไข] ---
     
     if df.empty or 'Market Cap' not in df.columns:
         logging.error("Could not fetch market cap data. Aborting update.")
@@ -44,38 +50,32 @@ def sort_tickers_by_market_cap():
 
     logging.info("Successfully fetched market cap data.")
     
-    # --- [NEW] สร้าง Set ของ Ticker ที่ดึงข้อมูลได้สำเร็จ (Valid Tickers) ---
+    # --- [NEW] สร้าง Set ของ Ticker ที่ดึงข้อมูลได้สำเร็จ (Valid Tickers) (เหมือนเดิม)
     valid_ticker_set = set(df['Ticker'])
     logging.info(f"Successfully fetched data for {len(valid_ticker_set)} valid tickers.")
     # --- [END NEW] ---
 
-    # 3. สร้าง map สำหรับการค้นหา Market Cap
+    # 3. สร้าง map สำหรับการค้นหา Market Cap (เหมือนเดิม)
     market_cap_map = df.set_index('Ticker')['Market Cap'].to_dict()
 
-    # 4. หา 5 อันดับแรก (Top 5 Default Tickers)
+    # 4. หา 5 อันดับแรก (Top 5 Default Tickers) (เหมือนเดิม)
     top_5_df = df.nlargest(5, 'Market Cap')
     top_5_tickers = top_5_df['Ticker'].tolist()
     logging.info(f"Top 5 Tickers: {top_5_tickers}")
 
-    # 4.5. สร้างลิสต์ Ticker "ทั้งหมด" ที่เรียงตาม Market Cap
+    # 4.5. สร้างลิสต์ Ticker "ทั้งหมด" ที่เรียงตาม Market Cap (เหมือนเดิม)
     all_tickers_df = df.nlargest(len(df), 'Market Cap')
     all_tickers_sorted = all_tickers_df['Ticker'].tolist()
     logging.info(f"Created a sorted list of all {len(all_tickers_sorted)} tickers.")
 
-    # 5. สร้าง SECTORS dictionary ใหม่ที่เรียงลำดับแล้ว
+    # 5. สร้าง SECTORS dictionary ใหม่ที่เรียงลำดับแล้ว (เหมือนเดิม)
     sorted_sectors = {}
     total_removed = 0
     for sector, tickers in SECTORS.items():
-        # --- [MODIFIED] ---
-        # 1. กำจัด Ticker ที่ซ้ำกันใน List เดิม (เช่น [A, A, B] -> [A, B])
+        # (ส่วนนี้เหมือนเดิม)
         unique_tickers = list(set(tickers))
-        
-        # 2. [NEW] กรอง Ticker ให้เหลือเฉพาะตัวที่ดึงข้อมูลได้ (Valid Tickers)
         valid_unique_tickers = [t for t in unique_tickers if t in valid_ticker_set]
-        
-        # 3. เรียง Ticker ตาม Market Cap (จากมากไปน้อย)
         sorted_list = sorted(valid_unique_tickers, key=lambda t: market_cap_map.get(t, 0), reverse=True)
-        # --- [END MODIFIED] ---
         
         removed_count = len(unique_tickers) - len(valid_unique_tickers)
         if removed_count > 0:
@@ -86,11 +86,11 @@ def sort_tickers_by_market_cap():
     
     logging.info(f"All sector lists have been de-duplicated, filtered (removed {total_removed} invalid tickers), and sorted by market cap.")
     
-    # 6. สร้าง constants ที่ต้องอ้างอิง SECTORS ใหม่
+    # 6. สร้าง constants ที่ต้องอ้างอิง SECTORS ใหม่ (เหมือนเดิม)
     all_possible_symbols = list(INDEX_TICKER_TO_NAME.keys())
     for sector_tickers in sorted_sectors.values():
         all_possible_symbols.extend(sector_tickers)
-    all_possible_symbols = sorted(list(set(all_possible_symbols))) # (กำจัดตัวซ้ำอีกครั้ง)
+    all_possible_symbols = sorted(list(set(all_possible_symbols)))
 
     color_discrete_map = {
         symbol: color for symbol, color in zip(
@@ -99,13 +99,17 @@ def sort_tickers_by_market_cap():
         )
     }
     
-    # 7. เขียนไฟล์ constants.py ใหม่ทั้งหมด
+    # 7. เขียนไฟล์ constants.py ใหม่ทั้งหมด (เหมือนเดิม)
     try:
         output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'app', 'constants.py'))
-        with open(output_path, 'w', encoding='utf-8') as f: # <-- ใช้ output_path
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write("# constants.py (UPDATED BY SCRIPT)\n")
             f.write("# This file centralizes all static configuration data for the application.\n\n")
-            f.write("import plotly.express as px\n\n")
+            f.write("import plotly.express as px\n")
+            # --- [เพิ่ม] Import datetime ---
+            f.write("from datetime import date, datetime\n\n") 
+            f.write("HISTORICAL_START_DATE = datetime(2010, 1, 1)\n\n")
+            # --- [สิ้นสุดการเพิ่ม] ---
             
             f.write("# --- [NEW] Top 5 Tickers for default view ---\n")
             f.write(f"TOP_5_DEFAULT_TICKERS = {pformat(top_5_tickers)}\n\n")
@@ -137,7 +141,7 @@ def sort_tickers_by_market_cap():
             f.write("    )\n")
             f.write("}\n")
 
-        logging.info(f"Successfully updated and saved {output_path}!") # <-- อัปเดต Log
+        logging.info(f"Successfully updated and saved {output_path}!")
 
     except Exception as e:
         logging.error(f"Failed to write new constants.py file at {output_path}: {e}")

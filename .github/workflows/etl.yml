@@ -93,4 +93,4 @@ jobs:
       - name: 7. Run the ML Risk Prediction script
         env:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
-        run: python scripts/run_batch_prediction.py
+        run: python scripts/run_batch_prediction_lstm.py

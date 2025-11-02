@@ -1,4 +1,5 @@
-# app/etl.py (MODIFIED JOB 3 for Gap-Filling Logic)
+# app/etl.py (MODIFIED JOB 1 to carry over last probability)
+# (MODIFIED JOB 3 for Gap-Filling Logic)
 
 import logging
 import pandas as pd
@@ -117,7 +118,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     return skipped_items
 
 
-# --- Job 1: Update Company Summaries (MODIFIED: Skip logo update logic) ---
+# --- Job 1: Update Company Summaries (MODIFIED: Skip logo update logic AND carry over probability) ---
 def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
@@ -169,6 +170,22 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
 
             row = df_single.iloc[0]
 
+            # --- [NEW STEP 1.5: Get the last known probability] ---
+            last_prob = None
+            try:
+                with server.app_context():
+                    # Find the most recent non-null probability for this ticker
+                    last_prob_result = db.session.query(FactCompanySummary.predicted_default_prob) \
+                        .filter(FactCompanySummary.ticker == ticker, 
+                                FactCompanySummary.predicted_default_prob.isnot(None)) \
+                        .order_by(FactCompanySummary.date_updated.desc()) \
+                        .first()
+                    if last_prob_result:
+                        last_prob = last_prob_result[0] # Get the value
+            except Exception as e:
+                logging.warning(f"[{job_name}] Could not query previous probability for {ticker}: {e}")
+            # --- [END NEW STEP 1.5] ---
+
             dim_data = {
                 'ticker': row['Ticker'],
                 'company_name': row.get('company_name'),
@@ -190,7 +207,8 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                 'analyst_target_price': row.get('Analyst Target Price'),
                 'long_business_summary': row.get('Long Business Summary'),
                 'fcf_ttm': row.get('freeCashflow'),
-                'revenue_ttm': row.get('totalRevenue')
+                'revenue_ttm': row.get('totalRevenue'),
+                'predicted_default_prob': last_prob # <<< MODIFICATION: Carry over the last known value
             }
 
             with server.app_context():
@@ -239,9 +257,16 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                         # Execute a plain INSERT or DO NOTHING, not DO UPDATE with empty set_
                         db.session.execute(on_conflict_dim_nothing)
 
-                # UPSERT FactCompanySummary (ส่วนนี้เหมือนเดิม)
+                # UPSERT FactCompanySummary
                 stmt_fact = sql_insert(FactCompanySummary).values(fact_data_clean)
-                all_cols = {c.name for c in FactCompanySummary.__table__.columns if c.name not in ['id', 'ticker', 'date_updated', 'peer_cluster_id']} # ไม่ update cluster id ที่นี่
+                
+                # --- [MODIFICATION 3: Exclude prob from ON CONFLICT UPDATE] ---
+                # This prevents this job (Job 1) from overwriting a newer probability 
+                # that Job 4 (ML) might have just written.
+                all_cols = {c.name for c in FactCompanySummary.__table__.columns 
+                            if c.name not in ['id', 'ticker', 'date_updated', 'peer_cluster_id', 'predicted_default_prob']}
+                # --- [END MODIFICATION 3] ---
+                
                 fact_set_ = {col: getattr(stmt_fact.excluded, col) for col in all_cols}
                 if db_dialect == 'postgresql':
                     on_conflict_fact = stmt_fact.on_conflict_do_update(constraint='_ticker_date_uc', set_=fact_set_)

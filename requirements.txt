@@ -19,5 +19,4 @@ numpy
 sqlalchemy
 matplotlib
 imbalanced-learn
-xgboost
-shap
+tensorflow

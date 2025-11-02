@@ -1,4 +1,5 @@
 # layout.py (Responsive Version with Monte Carlo DCF Modal & MathJax Fix & Smart Peer Finder UI)
+# [MODIFIED] Changed "Add Selected Peer(s)" button to match "Add Stock(s)" button style
 
 from dash import dcc, html
 import dash_bootstrap_components as dbc
@@ -198,13 +199,48 @@ METRIC_DEFINITIONS = {
 
 
 def create_navbar():
+    """
+    Creates the main navbar with:
+    1. Logo/Brand on the left.
+    2. Centered navigation icons (Stocks, Bonds, Derivatives) like Facebook.
+    3. Login/Logout button on the far right.
+    """
+    # 1. Setup Login/Logout Button
     if current_user.is_authenticated:
         login_button = dbc.Button("Logout", href="/logout", color="secondary", external_link=True)
     else:
         login_button = dbc.Button("Login", id="open-login-modal-button", color="primary")
+
+    # 2. [NEW] Create centered navigation icons (like Facebook)
+    nav_links = dbc.Nav(
+        [
+            # Stocks (Main Dashboard)
+            dbc.NavItem(
+                dbc.NavLink(html.I(className="bi bi-graph-up fs-4"), href="/", id="nav-stocks-link", active="exact")
+            ),
+            dbc.Tooltip("Stocks", target="nav-stocks-link", placement="bottom"),
+
+            # Bonds (New Page)
+            dbc.NavItem(
+                dbc.NavLink(html.I(className="bi bi-file-text fs-4"), href="/bonds", id="nav-bonds-link", active="exact")
+            ),
+            dbc.Tooltip("Bonds", target="nav-bonds-link", placement="bottom"),
+
+            # Derivatives (New Page)
+            dbc.NavItem(
+                dbc.NavLink(html.I(className="bi bi-layers fs-4"), href="/derivatives", id="nav-derivatives-link", active="exact")
+            ),
+            dbc.Tooltip("Derivatives", target="nav-derivatives-link", placement="bottom"),
+        ],
+        className="mx-auto", # "mx-auto" centers the Nav component in flexbox
+        navbar=True
+    )
+
+    # 3. Assemble the Navbar
     return dbc.Navbar(
         dbc.Container(
             [
+                # Left: Brand/Logo
                 html.A(
                     dbc.Row(
                         [
@@ -217,7 +253,12 @@ def create_navbar():
                     href="/",
                     style={"textDecoration": "none"},
                 ),
-                dbc.Stack(login_button, direction="horizontal", className="ms-auto")
+
+                # Center: New Nav Links
+                nav_links,
+
+                # Right: Login/Logout Button
+                dbc.Stack(login_button, direction="horizontal", className="ms-auto") # ms-auto pushes this to the right
             ],
             fluid=True
         ),
@@ -323,28 +364,60 @@ def build_layout():
                     dcc.Dropdown(id='index-select-dropdown', placeholder="Select one or more indices...", multi=True),
                     dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id="add-index-button", n_clicks=0, className="mt-2 w-100"),
 
-                    # --- [START] New Section for Smart Peer Finder ---
+                    # --- [START] New Section for Smart Peer Finder (MODIFIED) ---
                     html.Hr(),
-                    html.Label("Find Smart Peers", className="fw-bold"),
+                    # [MODIFIED] Use Stack to align Label and Icon
+                    dbc.Stack(
+                        [
+                            html.Label("Find Smart Peers", className="fw-bold mb-0"),
+                            html.I(
+                                className="bi bi-info-circle-fill ms-auto", # Icon
+                                id="smart-peer-info-icon", # Target ID for Popover
+                                style={'cursor': 'pointer', 'color': '#6c757d'} # Style
+                            )
+                        ],
+                        direction="horizontal",
+                        className="w-100"
+                    ),
+                    # [NEW] Popover component
+                    dbc.Popover(
+                        [
+                            dbc.PopoverHeader("What is Smart Peer Finder?"),
+                            dbc.PopoverBody(
+                                "This tool uses a K-Means Machine Learning model to find similar companies (peers) "
+                                "based on 20+ financial metrics. "
+                                "Benefit: Quickly discover comparable stocks that you might not have considered."
+                            ),
+                        ],
+                        id="smart-peer-popover",
+                        target="smart-peer-info-icon", # Triggers from the icon
+                        trigger="hover", # Show on hover
+                        placement="right",
+                    ),
+                    # [END MODIFICATION]
                     dcc.Dropdown(
                         id='peer-reference-stock-dropdown',
                         placeholder="Select a reference stock...",
-                        clearable=True, # Allow clearing the selection
-                        className="mt-1 sidebar-dropdown"
+                        clearable=True, 
+                        className="mt-2 sidebar-dropdown" # Added mt-2
                     ),
                     dcc.Dropdown(
                         id='peer-select-dropdown',
                         placeholder="Select peers to add...",
-                        multi=True, # Allow selecting multiple peers
+                        multi=True, 
                         className="mt-2 sidebar-dropdown"
                     ),
-                    html.Div(id='peer-finder-status', className="text-muted small mt-1 mb-2"), # Status message area
+                    html.Div(id='peer-finder-status', className="text-muted small mt-1 mb-2"), 
+                    
+                    # --- [START] BUTTON MODIFICATION ---
                     dbc.Button(
-                        [html.I(className="bi bi-robot me-2"), "Add Selected Peer(s)"],
-                        id="add-peer-button",
+                        [html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock(s)"], # <-- MODIFIED Icon and Text
+                        id="add-peer-button", # Keep the same ID
                         n_clicks=0,
-                        className="w-100",
+                        className="w-100", # Keep original class
                     ),
+                    # --- [END] BUTTON MODIFICATION ---
+                    
                     # --- [END] New Section for Smart Peer Finder ---
 
                     html.Hr(className="my-4"),

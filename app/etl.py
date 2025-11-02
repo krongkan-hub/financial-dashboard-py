@@ -1,4 +1,4 @@
-# app/etl.py (MODIFIED JOB 1 to carry over last probability)
+# app/etl.py (MODIFIED JOB 1 to carry over last probability AND cluster_id)
 # (MODIFIED JOB 3 for Gap-Filling Logic)
 
 import logging
@@ -118,7 +118,7 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     return skipped_items
 
 
-# --- Job 1: Update Company Summaries (MODIFIED: Skip logo update logic AND carry over probability) ---
+# --- Job 1: Update Company Summaries (MODIFIED: Skip logo update logic AND carry over probability/cluster) ---
 def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
@@ -170,20 +170,31 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
 
             row = df_single.iloc[0]
 
-            # --- [NEW STEP 1.5: Get the last known probability] ---
+            # --- [NEW STEP 1.5: Get last known prob AND cluster ID] ---
             last_prob = None
+            last_cluster_id = None # <-- (NEW) ADD THIS
             try:
                 with server.app_context():
-                    # Find the most recent non-null probability for this ticker
+                    # Find the most recent non-null probability
                     last_prob_result = db.session.query(FactCompanySummary.predicted_default_prob) \
                         .filter(FactCompanySummary.ticker == ticker, 
                                 FactCompanySummary.predicted_default_prob.isnot(None)) \
                         .order_by(FactCompanySummary.date_updated.desc()) \
                         .first()
                     if last_prob_result:
-                        last_prob = last_prob_result[0] # Get the value
+                        last_prob = last_prob_result[0]
+                    
+                    # (NEW) Find the most recent non-null cluster ID
+                    last_cluster_result = db.session.query(FactCompanySummary.peer_cluster_id) \
+                        .filter(FactCompanySummary.ticker == ticker, 
+                                FactCompanySummary.peer_cluster_id.isnot(None)) \
+                        .order_by(FactCompanySummary.date_updated.desc()) \
+                        .first()
+                    if last_cluster_result:
+                        last_cluster_id = last_cluster_result[0]
+                        
             except Exception as e:
-                logging.warning(f"[{job_name}] Could not query previous probability for {ticker}: {e}")
+                logging.warning(f"[{job_name}] Could not query previous prob/cluster for {ticker}: {e}")
             # --- [END NEW STEP 1.5] ---
 
             dim_data = {
@@ -208,7 +219,8 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                 'long_business_summary': row.get('Long Business Summary'),
                 'fcf_ttm': row.get('freeCashflow'),
                 'revenue_ttm': row.get('totalRevenue'),
-                'predicted_default_prob': last_prob # <<< MODIFICATION: Carry over the last known value
+                'predicted_default_prob': last_prob, # <<< MODIFICATION 1
+                'peer_cluster_id': last_cluster_id  # <<< (NEW) MODIFICATION 2
             }
 
             with server.app_context():
@@ -260,9 +272,8 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
                 # UPSERT FactCompanySummary
                 stmt_fact = sql_insert(FactCompanySummary).values(fact_data_clean)
                 
-                # --- [MODIFICATION 3: Exclude prob from ON CONFLICT UPDATE] ---
-                # This prevents this job (Job 1) from overwriting a newer probability 
-                # that Job 4 (ML) might have just written.
+                # --- [MODIFICATION 3: Exclude prob AND cluster_id from ON CONFLICT UPDATE] ---
+                # This prevents Job 1 from overwriting newer ML values from Job 4.
                 all_cols = {c.name for c in FactCompanySummary.__table__.columns 
                             if c.name not in ['id', 'ticker', 'date_updated', 'peer_cluster_id', 'predicted_default_prob']}
                 # --- [END MODIFICATION 3] ---

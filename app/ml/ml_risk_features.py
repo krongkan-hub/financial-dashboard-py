@@ -1,3 +1,6 @@
+# app/ml/ml_risk_features.py
+# (MODIFIED: 2025-11-02 - เพิ่ม 5 Features ใหม่ (QoQ, Quality Ratios) เพื่อปรับปรุง Precision)
+
 import pandas as pd
 import numpy as np
 import logging
@@ -22,9 +25,11 @@ def get_column(df, possible_names):
     log.debug(f"Could not find any of {possible_names} in DataFrame.")
     return None
 
-# --- Feature Contract (คัดลอกจาก run_ml_risk.py V5, line 343) ---
-# นี่คือ "สัญญา" 22 Base Features ที่โมเดลคาดหวัง (ก่อนการ Impute)
+# --- [START CHANGE 1] ---
+# --- Feature Contract (อัปเดตเป็น 27 Features) ---
+# นี่คือ "สัญญา" 27 Base Features ที่โมเดลคาดหวัง (ก่อนการ Impute)
 ML_RISK_BASE_FEATURES = [
+    # 22 Features เดิม
     'Current Ratio', 'Operating Margin', 'Total Assets (ln)', 
     'Total Revenue_YoY_Growth', 'Net Income_YoY_Growth', 'Operating Cash Flow_YoY_Growth', 
     'Change in Operating Margin', 'Change in Current Ratio', 
@@ -33,19 +38,27 @@ ML_RISK_BASE_FEATURES = [
     'CV_Operating_Margin', 'Count_Negative_Net_Income_12Q', 'Sales_Volatility',
     'RETA_Proxy', 'EBITTA_Proxy', 'SATA_Proxy',
     'WCT', 
-    'CCC' 
+    'CCC',
+    
+    # --- 5 Features ใหม่ (V2) ---
+    'Revenue_QoQ_Growth',
+    'AR_QoQ_Growth',
+    'Inventory_QoQ_Growth',
+    'CFO_to_Net_Income',
+    'Asset_Turnover_TTM'
 ]
+# --- [END CHANGE 1] ---
+
 
 def engineer_features_for_prediction(df_raw):
     """
-    สร้าง 22 Base Features ดิบ (Raw Features) จากข้อมูลล่าสุด
-    (ดัดแปลงจาก logic ใน engineer_features() ของ run_ml_risk.py)
+    สร้าง 27 Base Features ดิบ (Raw Features) จากข้อมูลล่าสุด
     
     คืนค่า:
-    - X_features (DataFrame ที่มี 22 คอลัมน์ ตรงตาม ML_RISK_BASE_FEATURES)
+    - X_features (DataFrame ที่มี 27 คอลัมน์ ตรงตาม ML_RISK_BASE_FEATURES)
     - tickers (List ของ Ticker ที่เรียงลำดับตรงกัน)
     """
-    log.info("Engineering 22 base features for prediction...")
+    log.info("Engineering 27 base features (V2) for prediction...")
     
     df_eng = df_raw.copy()
     df_eng = df_eng.sort_values(by=['ticker', 'report_date']).reset_index(drop=True)
@@ -141,8 +154,8 @@ def engineer_features_for_prediction(df_raw):
     
     # --- 7. Working Capital Turnover (WCT) ---
     if 'Net Working Capital' in df_eng.columns and rev_col:
-        df_eng['Total Revenue_TTM'] = df_eng.groupby('ticker')[rev_col].transform(calculate_ttm)
-        df_eng['WCT'] = df_eng['Total Revenue_TTM'] / (df_eng['Net Working Capital'].replace(0, np.nan) + 1e-6)
+        # (Total Revenue_TTM_SATA ถูกสร้างในส่วนที่ 6 แล้ว)
+        df_eng['WCT'] = df_eng['Total Revenue_TTM_SATA'] / (df_eng['Net Working Capital'].replace(0, np.nan) + 1e-6)
     else:
         df_eng['WCT'] = np.nan
 
@@ -165,13 +178,53 @@ def engineer_features_for_prediction(df_raw):
     
     df_eng['CCC'] = df_eng['DSO'] + df_eng['DIO'] - df_eng['DPO']
     
+    
+    # --- [START CHANGE 2] ---
+    # --- 9. New Features (V2) - Fast Signals & Quality Ratios ---
+    
+    # 9.1 Fast Signals (QoQ Growth, periods=1)
+    if rev_col:
+        df_eng['Revenue_QoQ_Growth'] = df_eng.groupby('ticker')[rev_col].pct_change(periods=1, fill_method=None)
+    else: df_eng['Revenue_QoQ_Growth'] = np.nan
+    
+    if ar_col:
+        df_eng['AR_QoQ_Growth'] = df_eng.groupby('ticker')[ar_col].pct_change(periods=1, fill_method=None)
+    else: df_eng['AR_QoQ_Growth'] = np.nan
+        
+    if inv_col:
+        df_eng['Inventory_QoQ_Growth'] = df_eng.groupby('ticker')[inv_col].pct_change(periods=1, fill_method=None)
+    else: df_eng['Inventory_QoQ_Growth'] = np.nan
+
+    # 9.2 Quality Ratio (CFO to Net Income)
+    if ocf_col and ni_col:
+        # ใช้ TTM เพื่อให้สัญญาณเสถียรขึ้น
+        if 'CFO_TTM' not in df_eng.columns: # (คำนวณในส่วนที่ 8 แล้ว)
+             df_eng['CFO_TTM'] = df_eng.groupby('ticker')[ocf_col].transform(calculate_ttm)
+        if 'Net_Income_TTM' not in df_eng.columns: # (คำนวณในส่วนที่ 1 แล้ว)
+             df_eng['Net_Income_TTM'] = df_eng.groupby('ticker')[ni_col].transform(calculate_ttm)
+        
+        df_eng['CFO_to_Net_Income'] = df_eng['CFO_TTM'] / df_eng['Net_Income_TTM'].replace(0, np.nan)
+    else:
+        df_eng['CFO_to_Net_Income'] = np.nan
+        
+    # 9.3 Efficiency Ratio (Asset Turnover TTM)
+    if 'Total Revenue_TTM_SATA' in df_eng.columns and ta_col:
+        # (Total Revenue_TTM_SATA ถูกสร้างในส่วนที่ 6 แล้ว)
+        df_eng['Avg_Total_Assets'] = df_eng.groupby('ticker')[ta_col].transform(lambda x: x.rolling(window=2, min_periods=1).mean())
+        df_eng['Asset_Turnover_TTM'] = df_eng['Total Revenue_TTM_SATA'] / df_eng['Avg_Total_Assets'].replace(0, np.nan)
+    else:
+        df_eng['Asset_Turnover_TTM'] = np.nan
+    
+    # --- [END CHANGE 2] ---
+
+    
     # --- Final Data Prep ---
     df_eng = df_eng.replace([np.inf, -np.inf], np.nan)
     
     # ดึง Tickers และ Tickers List ออกมาก่อน
     tickers = df_eng['ticker'].tolist()
     
-    # ตรวจสอบว่ามีคอลัมน์ทั้งหมด 22 features หรือไม่
+    # ตรวจสอบว่ามีคอลัมน์ทั้งหมด 27 features หรือไม่
     X_features = pd.DataFrame(index=df_eng.index)
     for col in ML_RISK_BASE_FEATURES:
         if col in df_eng.columns:
@@ -180,5 +233,5 @@ def engineer_features_for_prediction(df_raw):
             log.warning(f"Feature '{col}' not found during prediction engineering. Filling with NaN.")
             X_features[col] = np.nan # เติม NaN ถ้าไม่มี (Imputer จะจัดการต่อ)
 
-    # คืนค่าเฉพาะ 22 features ที่เรียงลำดับถูกต้อง และ list ของ tickers
+    # คืนค่าเฉพาะ 27 features ที่เรียงลำดับถูกต้อง และ list ของ tickers
     return X_features[ML_RISK_BASE_FEATURES], tickers

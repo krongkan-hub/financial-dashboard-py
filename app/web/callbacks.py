@@ -1,6 +1,7 @@
 # callbacks.py (Refactored - Step 4 - FIXED pd.read_sql TypeError + Added Smart Peer Finder)
 # (เวอร์ชันสมบูรณ์ - เปลี่ยนไปดึงข้อมูลจาก DB ทั้งหมด)
 # [อัปเดต] แก้ไข update_ticker_options ให้ค้นหาได้ทั้ง Ticker และ ชื่อบริษัท
+# [FIXED 2025-11-02] แก้ไข Bug กราฟไม่แสดงผล Benchmark (ลบ .rename() และเพิ่ม labels=... ใน px.line() 2 จุด)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -448,8 +449,14 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 if ytd_data.empty or len(ytd_data) < 2: raise ValueError("Not enough data after pivot.")
 
                 ytd_perf = (ytd_data / ytd_data.iloc[0]) - 1
-                ytd_perf = ytd_perf.rename(columns=INDEX_TICKER_TO_NAME)
-                fig = px.line(ytd_perf, title='YTD Performance Comparison', color_discrete_map=COLOR_DISCRETE_MAP)
+                
+                # --- [START BUG FIX 1] ---
+                # ytd_perf = ytd_perf.rename(columns=INDEX_TICKER_TO_NAME) # <--- [ลบ] บรรทัดนี้คือปัญหา
+                fig = px.line(ytd_perf, title='YTD Performance Comparison', 
+                              color_discrete_map=COLOR_DISCRETE_MAP, 
+                              labels=INDEX_TICKER_TO_NAME) # <--- [เพิ่ม] labels=...
+                # --- [END BUG FIX 1] ---
+                
                 fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 
@@ -469,9 +476,14 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
                 rolling_max = prices.cummax()
                 drawdown_data = (prices / rolling_max) - 1
-                drawdown_data = drawdown_data.rename(columns=INDEX_TICKER_TO_NAME)
-
-                fig = px.line(drawdown_data, title='1-Year Drawdown Comparison', color_discrete_map=COLOR_DISCRETE_MAP)
+                
+                # --- [START BUG FIX 2] ---
+                # drawdown_data = drawdown_data.rename(columns=INDEX_TICKER_TO_NAME) # <--- [ลบ] บรรทัดนี้คือปัญหา
+                fig = px.line(drawdown_data, title='1-Year Drawdown Comparison', 
+                              color_discrete_map=COLOR_DISCRETE_MAP, 
+                              labels=INDEX_TICKER_TO_NAME) # <--- [เพิ่ม] labels=...
+                # --- [END BUG FIX 2] ---
+                
                 fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 

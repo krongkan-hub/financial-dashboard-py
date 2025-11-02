@@ -33,5 +33,6 @@ IDE specific files
 .vscode/
 .idea/
 
-# Model artifacts (สำคัญมากสำหรับ Idea 17)
 models/*.joblib
+models/*.keras
+/scripts/models/

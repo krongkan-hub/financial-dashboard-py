@@ -1,6 +1,7 @@
 # scripts/run_ml_risk.py
 # (ดัดแปลงจาก run_ml_risk.py เพื่อใช้โมเดลอนุกรมเวลา LSTM/Keras)
 # (FIXED: 2025-11-02 - แก้ไข ValueError: Shape mismatch (42 vs 43))
+# (MODIFIED: 2025-11-03 - แก้ไข Segmentation Fault โดยเลื่อน pad_sequences ไปทำในภายหลัง)
 
 import sys
 import os
@@ -219,24 +220,24 @@ def engineer_features_and_sequences(df_with_y):
 
     if not X_list:
         logging.error("No sequences could be created.")
-        return np.array([]), np.array([]), pd.DataFrame(), []
+        return [], np.array([]), pd.DataFrame(), [] # <-- [BATCH FIX] คืนค่า List ว่าง
 
-    # --- [NEU] Padding ---
-    # `pad_sequences` จะเติม 0 (padding) ด้านหน้า (pre)
-    # ให้ทุก sequence มีความยาวเท่ากับ SEQUENCE_LENGTH
-    logging.info(f"Padding {len(X_list)} sequences...")
-    X_padded = pad_sequences(X_list, maxlen=SEQUENCE_LENGTH, dtype='float32', padding='pre', truncating='pre')
+    # --- [BATCH FIX] ---
+    # ลบการทำ pad_sequences ออกจากตรงนี้
+    # logging.info(f"Padding {len(X_list)} sequences...")
+    # X_padded = pad_sequences(X_list, maxlen=SEQUENCE_LENGTH, dtype='float32', padding='pre', truncating='pre')
     
     y_seq = np.array(y_list)
     ids_seq = pd.DataFrame(ids_list, columns=['ticker', 'report_date'])
     
-    logging.info(f"Sequence creation complete. X shape: {X_padded.shape}, y shape: {y_seq.shape}")
+    logging.info(f"Sequence creation complete. Returning {len(X_list)} raw sequences.")
     
-    return X_padded, y_seq, ids_seq, final_feature_names
+    # คืนค่า X_list (List ดิบ) แทน X_padded (Array)
+    return X_list, y_seq, ids_seq, final_feature_names
+    # --- [END BATCH FIX] ---
 
-# --- [UNCHANGED] ฟังก์ชันแบ่งข้อมูล ---
-# ฟังก์ชันนี้ใช้ได้เลย เพราะเราส่ง ids_seq ที่มี 'report_date' ไปให้
-def split_data(X_seq, y_seq, ids_seq, feature_names):
+# --- [MODIFIED] ฟังก์ชันแบ่งข้อมูล ---
+def split_data(X_list, y_seq, ids_seq, feature_names): # <-- [BATCH FIX] รับ X_list
     """Splits sequenced data into train, validation, and test sets based on time."""
     logging.info("4. Splitting sequenced data into Train, Validation, Test sets (Time-Based)...")
     
@@ -263,10 +264,18 @@ def split_data(X_seq, y_seq, ids_seq, feature_names):
     val_indices = ids_seq.iloc[train_end_index:val_end_index]['index'].values
     test_indices = ids_seq.iloc[val_end_index:]['index'].values
     
-    # ใช้ indices เพื่อแบ่ง X_seq และ y_seq
-    X_train, y_train = X_seq[train_indices], y_seq[train_indices]
-    X_val, y_val = X_seq[val_indices], y_seq[val_indices]
-    X_test, y_test = X_seq[test_indices], y_seq[test_indices]
+    # --- [BATCH FIX] ---
+    # ใช้ indices เพื่อแบ่ง X_list (ที่เป็น List) และ y_seq (ที่เป็น Array)
+    logging.info(f"Splicing {len(X_list)} raw sequences into splits...")
+    X_train = [X_list[i] for i in train_indices]
+    y_train = y_seq[train_indices]
+    
+    X_val = [X_list[i] for i in val_indices]
+    y_val = y_seq[val_indices]
+    
+    X_test = [X_list[i] for i in test_indices]
+    y_test = y_seq[test_indices]
+    # --- [END BATCH FIX] ---
     
     train_ids = ids_seq.iloc[:train_end_index]
     val_ids = ids_seq.iloc[train_end_index:val_end_index]
@@ -317,7 +326,7 @@ def build_model(input_shape):
     return model
 
 # --- [MODIFIED] ฟังก์ชันเทรนโมเดล ---
-def train_model(X_train, y_train, X_val, y_val, num_features):
+def train_model(X_train_list, y_train, X_val_list, y_val, num_features): # <-- [BATCH FIX] รับ List
     """เทรนโมเดล Keras (LSTM/GRU)"""
     logging.info("5. Training Deep Learning (LSTM/GRU) model...")
     
@@ -355,10 +364,19 @@ def train_model(X_train, y_train, X_val, y_val, num_features):
         verbose=1
     )
     
-    # 4. เทรนโมเดล
+    # --- [BATCH FIX] ---
+    # 4. Padding ข้อมูล Train และ Validation ที่นี่
+    logging.info(f"Padding {len(X_train_list)} training sequences (in batch)...")
+    X_train_padded = pad_sequences(X_train_list, maxlen=SEQUENCE_LENGTH, dtype='float32', padding='pre', truncating='pre')
+    
+    logging.info(f"Padding {len(X_val_list)} validation sequences (in batch)...")
+    X_val_padded = pad_sequences(X_val_list, maxlen=SEQUENCE_LENGTH, dtype='float32', padding='pre', truncating='pre')
+    # --- [END BATCH FIX] ---
+
+    # 5. เทรนโมเดล
     history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
+        X_train_padded, y_train,           # <-- [BATCH FIX] ใช้ตัวแปรที่ Pad แล้ว
+        validation_data=(X_val_padded, y_val), # <-- [BATCH FIX] ใช้ตัวแปรที่ Pad แล้ว
         epochs=100, # ตั้งไว้สูงๆ แล้วให้ EarlyStopping หยุด
         batch_size=64,
         class_weight=class_weights,
@@ -369,19 +387,23 @@ def train_model(X_train, y_train, X_val, y_val, num_features):
     logging.info("Model training complete.")
     return model
 
-# --- [UNCHANGED] ฟังก์ชันหา Threshold ---
-# ฟังก์ชันนี้ใช้ได้เลย เพราะรับ y_pred_proba
-def optimize_threshold(model, X_val, y_val, beta=2.0):
+# --- [MODIFIED] ฟังก์ชันหา Threshold ---
+def optimize_threshold(model, X_val_list, y_val, beta=2.0): # <-- [BATCH FIX] รับ List
     """
     (FIX 3) Calculates the optimal threshold from the Validation set by explicitly maximizing F-beta score (F2-Score)
     with a stricter MIN_PRECISION constraint.
     """
-    if X_val.shape[0] == 0 or y_val.shape[0] == 0:
+    if len(X_val_list) == 0 or y_val.shape[0] == 0: # <-- [BATCH FIX] เช็ค List
         logging.warning("Validation set is empty, skipping threshold optimization.")
         return 0.5, 0.0, 0.0 
 
     logging.info("Optimizing Classification Threshold using Validation Set...")
-    y_pred_proba = model.predict(X_val).ravel() # <-- .ravel()
+    
+    # --- [BATCH FIX] ---
+    logging.info(f"Padding {len(X_val_list)} validation sequences for optimization...")
+    X_val_padded = pad_sequences(X_val_list, maxlen=SEQUENCE_LENGTH, dtype='float32', padding='pre', truncating='pre')
+    y_pred_proba = model.predict(X_val_padded).ravel() # <-- ใช้ X_val_padded
+    # --- [END BATCH FIX] ---
     
     precision, recall, thresholds = precision_recall_curve(y_val, y_pred_proba)
     
@@ -412,11 +434,17 @@ def optimize_threshold(model, X_val, y_val, beta=2.0):
     
     return optimal_threshold, optimal_recall, optimal_precision
 
-# --- [UNCHANGED] ฟังก์ชันประเมินผล ---
-def evaluate_model(model, X_test, y_test, optimal_threshold=0.5):
+# --- [MODIFIED] ฟังก์ชันประเมินผล ---
+def evaluate_model(model, X_test_list, y_test, optimal_threshold=0.5): # <-- [BATCH FIX] รับ List
     """Evaluates the model on the test set and prints metrics."""
     logging.info(f"6. Evaluating model on Test Set (Threshold {optimal_threshold:.4f})...")
-    y_pred_proba = model.predict(X_test).ravel() # <-- .ravel()
+    
+    # --- [BATCH FIX] ---
+    logging.info(f"Padding {len(X_test_list)} test sequences for evaluation...")
+    X_test_padded = pad_sequences(X_test_list, maxlen=SEQUENCE_LENGTH, dtype='float32', padding='pre', truncating='pre')
+    y_pred_proba = model.predict(X_test_padded).ravel() # <-- ใช้ X_test_padded
+    # --- [END BATCH FIX] ---
+    
     y_pred = (y_pred_proba >= optimal_threshold).astype(int)
     
     accuracy = accuracy_score(y_test, y_pred) 
@@ -462,6 +490,7 @@ if __name__ == "__main__":
 
     # 1. Fetch Data (เหมือนเดิม)
     logging.info("1. Fetching comprehensive ML raw data from database starting from year 2010...")
+    # (เรายังคงดึงข้อมูลทั้งหมดตั้งแต่ 2010)
     df_raw_data = get_ml_risk_raw_data(start_year=2010) 
 
     if df_raw_data.empty:
@@ -472,27 +501,28 @@ if __name__ == "__main__":
         df_with_y = create_target_variable(df_financials_reset, pd.DataFrame()) 
 
         if not df_with_y.empty:
-            # 3. [NEU] Engineer Features and Create Sequences (With FIX)
-            X_seq, y_seq, ids_seq, feature_names_final = engineer_features_and_sequences(df_with_y)
+            # 3. [MODIFIED] Engineer Features and Create Sequences (คืนค่า List)
+            X_list, y_seq, ids_seq, feature_names_final = engineer_features_and_sequences(df_with_y)
             
-            if X_seq.shape[0] > 0:
-                num_features = X_seq.shape[2] # (Num Samples, 12, 41) -> 41
+            if len(X_list) > 0: # <-- [BATCH FIX] เช็ค List
+                # num_features ได้จาก feature_names_final
+                num_features = len(feature_names_final)
             else:
                 num_features = 0
 
             if num_features > 0:
-                # 4. Split Data (เหมือนเดิม, แต่ใช้ X_seq, y_seq)
+                # 4. Split Data (รับ List, คืน List)
                 try:
-                    X_train, y_train, X_val, y_val, X_test, y_test = split_data(X_seq, y_seq, ids_seq, feature_names_final)
+                    X_train, y_train, X_val, y_val, X_test, y_test = split_data(X_list, y_seq, ids_seq, feature_names_final)
 
-                    # 5. [NEU] Train Keras Model
+                    # 5. [MODIFIED] Train Keras Model (รับ List, ทำ Padding ภายใน)
                     trained_model = train_model(X_train, y_train, X_val, y_val, num_features)
 
                     if trained_model:
-                        # 6. Optimize Threshold (เหมือนเดิม)
+                        # 6. Optimize Threshold (รับ List, ทำ Padding ภายใน)
                         optimized_threshold, _, _ = optimize_threshold(trained_model, X_val, y_val, beta=2.0)
                         
-                        # 7. Evaluate Model (เหมือนเดิม)
+                        # 7. Evaluate Model (รับ List, ทำ Padding ภายใน)
                         evaluate_model(trained_model, X_test, y_test, optimized_threshold)
 
                         # 8. Save Model (เวอร์ชัน Keras)

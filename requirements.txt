@@ -19,4 +19,6 @@ numpy
 sqlalchemy
 matplotlib
 imbalanced-learn
-tensorflow
+xgboost
+shap
+tensorflow-cpu==2.16.2

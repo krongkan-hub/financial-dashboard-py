@@ -1,5 +1,6 @@
 # data_handler.py (V-FINAL: ใช้วิธี Groupby-Apply (V8) เพื่อแก้ Bug merge_asof)
 # (MODIFIED: 2025-11-01 - แก้ไข _get_dcf_base_data_from_db ให้รองรับ Metric ทางเลือก)
+# (MODIFIED: 2025-11-02 - แก้ไข Timeout โดยการดึงราคาแบบ Batch รายปี)
 
 import os
 import requests
@@ -791,14 +792,47 @@ def _get_ml_risk_raw_data_base(tickers: Optional[List[str]] = None, start_year: 
         df_merged = pd.merge(df_financials_wide, df_rating, on='ticker', how='left')
 
         # 3. Fetch Market Data (Prices)
-        price_query = db.session.query(
-            FactDailyPrices.ticker,
-            FactDailyPrices.date.label('price_date'), 
-            FactDailyPrices.close.label('closing_price')
-        ).filter(FactDailyPrices.date >= start_date)
-        if tickers:
-            price_query = price_query.filter(FactDailyPrices.ticker.in_(tickers))
-        df_prices = pd.read_sql(price_query.statement, db.engine)
+        # --- [START BATCH FIX - 2025-11-02] ---
+        logging.info("  Fetching prices data (in yearly batches to prevent timeout)...")
+        
+        current_year = datetime.now().year
+        all_price_dfs = [] # List สำหรับเก็บ DataFrame ของแต่ละปี
+        
+        # Loop from start_year (e.g., 2010) to the current year
+        for year in range(start_year, current_year + 1):
+            logging.info(f"    Fetching prices for year {year}...")
+            
+            year_start_date = datetime(year, 1, 1).date()
+            year_end_date = datetime(year, 12, 31).date()
+
+            price_query_year = db.session.query(
+                FactDailyPrices.ticker,
+                FactDailyPrices.date.label('price_date'), 
+                FactDailyPrices.close.label('closing_price')
+            ).filter(
+                FactDailyPrices.date >= year_start_date,
+                FactDailyPrices.date <= year_end_date  # <-- กรองทีละปี
+            )
+            
+            # (สำคัญ) เรายังคง filter 'tickers' ถ้ามีการระบุมา
+            if tickers:
+                price_query_year = price_query_year.filter(FactDailyPrices.ticker.in_(tickers))
+
+            # ดึงข้อมูลเฉพาะของปีนี้ (Query นี้จะเร็ว)
+            df_prices_year = pd.read_sql(price_query_year.statement, db.engine)
+            
+            if not df_prices_year.empty:
+                all_price_dfs.append(df_prices_year)
+        
+        # เมื่อ Loop ครบทุกปี, นำ DataFrame มารวมกัน
+        if not all_price_dfs:
+            logging.warning("  No price data found after batch fetching.")
+            df_prices = pd.DataFrame(columns=['ticker', 'price_date', 'closing_price'])
+        else:
+            df_prices = pd.concat(all_price_dfs, ignore_index=True)
+        
+        logging.info(f"  Fetched {len(df_prices)} total price records from {start_year} to {current_year}.")
+        # --- [END BATCH FIX - 2025-11-02] ---
         
         # 4. Fetch Market Cap
         summary_subquery = db.session.query(
@@ -973,7 +1007,7 @@ def calculate_monte_carlo_dcf(
     """
     try:
         # --- [MODIFICATION: Fetch base data from DB] ---
-        dcf_data = _get_dcf_base_data_from_db(ticker)
+        dcf_data = _get_dcf_base_data_from_db( ticker)
 
         if not dcf_data.get('success'):
             # Propagate detailed error message

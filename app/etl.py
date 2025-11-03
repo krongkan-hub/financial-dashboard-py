@@ -1,4 +1,4 @@
-# app/etl.py (MODIFIED: Implements 5-Year Rolling Window, Purge, and TOP 50 Limit)
+# app/etl.py (MODIFIED: Implements 5-Year Rolling Window, Purge, and TOP 1000 Limit)
 
 import logging
 import pandas as pd
@@ -115,21 +115,21 @@ def process_tickers_with_retry(job_name, items_list, process_func, initial_delay
     return skipped_items
 
 
-# --- Job 1: Update Company Summaries (MODIFIED for TOP 50 Limit & 5-Year Purge) ---
+# --- Job 1: Update Company Summaries (MODIFIED for TOP 1000 Limit & 5-Year Purge) ---
 def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_company_summaries] cannot run because insert statement is not available.")
         return
 
-    job_name = "Job 1: Update Summaries (Top 500, 5-Year Purge)" # <<< MODIFIED Job Name
+    job_name = "Job 1: Update Summaries (Top 1000, 5-Year Purge)" # <<< MODIFIED Job Name
     
-    # --- [MODIFIED: TOP 50 Limit] ---
+    # --- [MODIFIED: TOP 1000 Limit] ---
     if tickers_list_override is not None:
         tickers_to_process = tickers_list_override
         logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
     else:
-        tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:50] # <<< Changed to 50
-        logging.info(f"ETL Job: [{job_name}] Defaulting to Top 50 Market Cap tickers ({len(tickers_to_process)} total).")
+        tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Changed to 1000
+        logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap tickers ({len(tickers_to_process)} total).")
     # --- [END MODIFIED] ---
 
     today = datetime.utcnow().date()
@@ -308,7 +308,7 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     # --- [END PURGE] ---
 
 
-# --- Job 2: Update Daily Prices (MODIFIED for TOP 50 Limit & 5-Year Purge and Start Date) ---
+# --- Job 2: Update Daily Prices (MODIFIED for TOP 1000 Limit & 5-Year Purge and Start Date) ---
 # --- [NEW HELPER FUNCTION FOR OOM FIX - UNCHANGED] ---
 def process_single_ticker_prices(data_tuple):
     ticker, start_date, end_date = data_tuple
@@ -371,13 +371,13 @@ def process_single_ticker_prices(data_tuple):
 # --- [END NEW HELPER FUNCTION FOR OOM FIX - UNCHANGED] ---
 
 def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
-    # --- [MODIFIED: 5-Year Window & TOP 50] ---
+    # --- [MODIFIED: 5-Year Window & TOP 1000] ---
     days_back_5y = 5 * 365 
-    job_name = "Job 2: Update Daily Prices (Top 50, 5-Year Window)" # <<< MODIFIED Job Name
+    job_name = "Job 2: Update Daily Prices (Top 1000, 5-Year Window)" # <<< MODIFIED Job Name
     # --- [END MODIFIED] ---
     
     if sql_insert is None:
-        logging.error(f"ETL Job: [{job_name}] cannot run because insert statement is not available.")
+        logging.error(f"ETL Job: [update_daily_prices] cannot run because insert statement is not available.")
         return
 
     today = datetime.utcnow().date()
@@ -392,10 +392,10 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             tickers_list = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_list)} tickers.")
         else:
-            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:50]
+            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Changed from 50 to 1000
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
             tickers_list = list(set(tickers_for_price_update + index_tickers))
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 50 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< MODIFIED Log
+            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< MODIFIED Log
 
         if not tickers_list:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping price update.")
@@ -461,14 +461,14 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
     logging.info(f"ETL Job: [{job_name}]... COMPLETED.")
 
 
-# --- Job 3: update_financial_statements (MODIFIED for TOP 50 Limit & 5-Year Purge and Stability) ---
+# --- Job 3: update_financial_statements (MODIFIED for TOP 1000 Limit & 5-Year Purge and Stability) ---
 def update_financial_statements(tickers_list_override: Optional[List[str]] = None):
     if sql_insert is None:
         logging.error("ETL Job: [update_financial_statements] cannot run because insert statement is not available.")
         return
 
-    # --- [MODIFIED: 5-Year Window & TOP 50] ---
-    job_name = "Job 3: Update Financials (Top 50, 5-Year Window)" # <<< MODIFIED Job Name
+    # --- [MODIFIED: 5-Year Window & TOP 1000] ---
+    job_name = "Job 3: Update Financials (Top 1000, 5-Year Window)" # <<< MODIFIED Job Name
     today = datetime.utcnow().date()
     days_back_5y = 5 * 365
     cutoff_date_5y = today - timedelta(days=days_back_5y)
@@ -479,8 +479,8 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
             tickers_to_process = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
         else:
-            tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:50]
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 50 Market Cap tickers ({len(tickers_to_process)} total).") # <<< MODIFIED Log
+            tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Changed from 50 to 1000
+            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap tickers ({len(tickers_to_process)} total).") # <<< MODIFIED Log
 
         if not tickers_to_process:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping job.")
@@ -551,7 +551,7 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
 
 # --- [MODIFIED: Function signature accepts the tuple, and implements cleaning] ---
 def process_single_ticker_financials(ticker_data_tuple):
-    job_name = "Job 3: Update Financials (Top 50, 5-Year Window)" # <<< MODIFIED Job Name
+    job_name = "Job 3: Update Financials (Top 1000, 5-Year Window)" # <<< MODIFIED Job Name
     
     # --- [MODIFIED: Unpack 5Y Cutoff] ---
     ticker, latest_date_in_db, cutoff_date_5y = ticker_data_tuple # Unpack the tuple
@@ -618,7 +618,7 @@ def process_single_ticker_financials(ticker_data_tuple):
                 continue
             
             if df_to_process.empty or all(col in non_date_column_names for col in df_to_process.columns):
-                 logging.info(f"[{job_name}] No date columns left to process for {ticker} ({statement_key}) after filtering. Skipping.")
+                 logging.info(f"[{job_name}] No date columns left to process for {ticker} ({statement_type}) after filtering. Skipping.")
                  continue
 
             df_to_melt = df_to_process.reset_index()
@@ -675,20 +675,19 @@ def process_single_ticker_financials(ticker_data_tuple):
         raise inner_e
 
 
-# --- Job 4: update_news_sentiment (MODIFIED for 7-Day Purge) ---
+# --- Job 4: update_news_sentiment (MODIFIED for 30-Day Purge) ---
 def update_news_sentiment():
     if sql_insert is None:
         logging.error("ETL Job: [update_news_sentiment] cannot run because insert statement is not available.")
         return
 
-    job_name = "Job 4: Update News/Sentiment (Top 20, 7-Day Purge)"
-    tickers_for_etl = ALL_TICKERS_SORTED_BY_MC[:20] # <<< KEEP at 20 (small and efficient)
+    job_name = "Job 4: Update News/Sentiment (Top 20, 30-Day Purge)"
+    tickers_for_etl = ALL_TICKERS_SORTED_BY_MC[:20] 
     companies_list = []
     
     # --- [NEW: 30-Day Cutoff for News Purge] ---
     today = datetime.utcnow().date()
-    # ใช้ 30 วันตามที่เหมาะสมสำหรับการเก็บข่าวสาร
-    cutoff_date_news = datetime.utcnow() - timedelta(days=7) 
+    cutoff_date_news = datetime.utcnow() - timedelta(days=30) 
     # --- [END NEW] ---
 
     with server.app_context():
@@ -706,7 +705,6 @@ def update_news_sentiment():
             return True
 
         try:
-            # get_news_and_sentiment จะดึงข้อมูล 7 วันล่าสุดอยู่แล้ว (defined ใน data_handler.py)
             data = get_news_and_sentiment(company_name) 
             if 'error' in data or 'articles' not in data or not data['articles']:
                 logging.warning(f"[{job_name}] No news articles found or error fetching for {company_name} ({ticker}). Error: {data.get('error')}")
@@ -757,7 +755,7 @@ def update_news_sentiment():
 
     process_tickers_with_retry(job_name, companies_list, process_single_ticker_news, initial_delay=1.0, retry_delay=90, max_retries=2)
     
-    # --- [NEW] Purge data older than 7 days for news ---
+    # --- [NEW] Purge data older than 30 days for news ---
     logging.info(f"[{job_name}] Purging old news data (before {cutoff_date_news})...")
     try:
         with server.app_context():

@@ -32,8 +32,7 @@ if __name__ == "__main__":
 
     start_time_total = time.time()
 
-    # --- (3) แก้ไขเป็น Top 1000 (ตามไฟล์ที่คุณอัปโหลดมา) ---
-    TOP_1500_BASE = ALL_TICKERS_SORTED_BY_MC[:500] #
+    TOP_1500_BASE = ALL_TICKERS_SORTED_BY_MC[:50] #
     INDEX_TICKERS = list(INDEX_TICKER_TO_NAME.keys())
     # Use set to ensure uniqueness when combining
     TICKERS_FOR_JOB_2_3 = list(set(TOP_1500_BASE + INDEX_TICKERS))

@@ -1,4 +1,4 @@
-# app/etl.py (MODIFIED: Job 1/3 = Top 1000, Job 2 = Top 50, with 5-Year Purge)
+# app/etl.py (MODIFIED: Job 1/3 = Top 1000 / 5-Year Purge, Job 2 = Top 50 / 1-Year Purge)
 
 import logging
 import pandas as pd
@@ -308,7 +308,7 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     # --- [END PURGE] ---
 
 
-# --- Job 2: Update Daily Prices (MODIFIED for TOP 50 Limit & 5-Year Purge and Start Date) ---
+# --- Job 2: Update Daily Prices (MODIFIED for TOP 50 Limit & 1-Year Purge and Start Date) ---
 # --- [NEW HELPER FUNCTION FOR OOM FIX - UNCHANGED] ---
 def process_single_ticker_prices(data_tuple):
     ticker, start_date, end_date = data_tuple
@@ -371,9 +371,9 @@ def process_single_ticker_prices(data_tuple):
 # --- [END NEW HELPER FUNCTION FOR OOM FIX - UNCHANGED] ---
 
 def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
-    # --- [MODIFIED: 5-Year Window & TOP 50] ---
-    days_back_5y = 5 * 365 
-    job_name = "Job 2: Update Daily Prices (Top 50, 5-Year Window)" # <<< MODIFIED Job Name
+    # --- [MODIFIED: 1-Year Window & TOP 50] ---
+    days_back_1y = 1 * 365 # <<< Changed to 1 year
+    job_name = "Job 2: Update Daily Prices (Top 50, 1-Year Window)" # <<< MODIFIED Job Name
     # --- [END MODIFIED] ---
     
     if sql_insert is None:
@@ -381,12 +381,12 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
         return
 
     today = datetime.utcnow().date()
-    # --- [NEW: 5-Year Cutoff] ---
-    cutoff_date_5y = today - timedelta(days=days_back_5y)
+    # --- [NEW: 1-Year Cutoff] ---
+    cutoff_date_1y = today - timedelta(days=days_back_1y)
     # --- [END NEW] ---
 
     with server.app_context():
-        logging.info(f"Starting ETL Job: [{job_name}] for 5 years back (approx {days_back_5y} days), implementing GAP FILLING...")
+        logging.info(f"Starting ETL Job: [{job_name}] for 1 year back (approx {days_back_1y} days), implementing GAP FILLING...")
         
         if tickers_list_override is not None and len(tickers_list_override) > 0:
             tickers_list = tickers_list_override
@@ -409,8 +409,8 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
         required_days_back = 3 if is_monday else 1
         ticker_tuples_to_process = []
         
-        # --- [MODIFIED: 5-Year Window] ---
-        full_history_start_date_for_job = cutoff_date_5y 
+        # --- [MODIFIED: 1-Year Window] ---
+        full_history_start_date_for_job = cutoff_date_1y 
         # --- [END MODIFIED] ---
 
         for ticker in tickers_list:
@@ -421,14 +421,14 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
                      continue
                 new_start_date = latest_date_in_db + timedelta(days=1)
             else:
-                # --- [FIX] ใช้ 5-year cutoff สำหรับ Ticker ที่ไม่มีข้อมูลเลย ---
+                # --- [FIX] ใช้ 1-year cutoff สำหรับ Ticker ที่ไม่มีข้อมูลเลย ---
                 new_start_date = full_history_start_date_for_job
-                logging.info(f"[{job_name}] No data for {ticker}. Fetching from 5-year start date: {new_start_date}")
+                logging.info(f"[{job_name}] No data for {ticker}. Fetching from 1-year start date: {new_start_date}")
 
-            # --- [NEW] Ensure we don't fetch *before* the 5-year cutoff ---
-            if new_start_date < cutoff_date_5y:
-                logging.warning(f"[{job_name}] {ticker} has latest date {latest_date_in_db}, but start date {new_start_date} is before 5y cutoff. Forcing start date to {cutoff_date_5y}.")
-                new_start_date = cutoff_date_5y
+            # --- [NEW] Ensure we don't fetch *before* the 1-year cutoff ---
+            if new_start_date < cutoff_date_1y:
+                logging.warning(f"[{job_name}] {ticker} has latest date {latest_date_in_db}, but start date {new_start_date} is before 1y cutoff. Forcing start date to {cutoff_date_1y}.")
+                new_start_date = cutoff_date_1y
             # --- [END NEW] ---
 
             if new_start_date >= today: 
@@ -443,12 +443,12 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             logging.info(f"ETL Job: [{job_name}] Processing {len(ticker_tuples_to_process)}/{len(tickers_list)} tickers. Fetching missing data.")
             process_tickers_with_retry(job_name, ticker_tuples_to_process, process_single_ticker_prices, initial_delay=0.3, retry_delay=60, max_retries=3)
         
-    # --- [NEW] Purge data older than 5 years ---
-    logging.info(f"[{job_name}] Purging old price data (before {cutoff_date_5y})...")
+    # --- [NEW] Purge data older than 1 year (Must use cutoff_date_1y) ---
+    logging.info(f"[{job_name}] Purging old price data (before {cutoff_date_1y})...")
     try:
         with server.app_context():
             deleted_count = db.session.query(FactDailyPrices).filter(
-                FactDailyPrices.date < cutoff_date_5y
+                FactDailyPrices.date < cutoff_date_1y
             ).delete(synchronize_session=False)
             db.session.commit()
             logging.info(f"[{job_name}] Purged {deleted_count} old price records.")

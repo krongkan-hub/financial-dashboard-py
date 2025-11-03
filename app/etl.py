@@ -1,4 +1,4 @@
-# app/etl.py (MODIFIED: Implements 5-Year Rolling Window, Purge, and TOP 1000 Limit)
+# app/etl.py (MODIFIED: Job 1/3 = Top 1000, Job 2 = Top 50, with 5-Year Purge)
 
 import logging
 import pandas as pd
@@ -128,7 +128,7 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
         tickers_to_process = tickers_list_override
         logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
     else:
-        tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Changed to 1000
+        tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Set to 1000
         logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap tickers ({len(tickers_to_process)} total).")
     # --- [END MODIFIED] ---
 
@@ -308,7 +308,7 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
     # --- [END PURGE] ---
 
 
-# --- Job 2: Update Daily Prices (MODIFIED for TOP 1000 Limit & 5-Year Purge and Start Date) ---
+# --- Job 2: Update Daily Prices (MODIFIED for TOP 50 Limit & 5-Year Purge and Start Date) ---
 # --- [NEW HELPER FUNCTION FOR OOM FIX - UNCHANGED] ---
 def process_single_ticker_prices(data_tuple):
     ticker, start_date, end_date = data_tuple
@@ -371,9 +371,9 @@ def process_single_ticker_prices(data_tuple):
 # --- [END NEW HELPER FUNCTION FOR OOM FIX - UNCHANGED] ---
 
 def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
-    # --- [MODIFIED: 5-Year Window & TOP 1000] ---
+    # --- [MODIFIED: 5-Year Window & TOP 50] ---
     days_back_5y = 5 * 365 
-    job_name = "Job 2: Update Daily Prices (Top 1000, 5-Year Window)" # <<< MODIFIED Job Name
+    job_name = "Job 2: Update Daily Prices (Top 50, 5-Year Window)" # <<< MODIFIED Job Name
     # --- [END MODIFIED] ---
     
     if sql_insert is None:
@@ -392,10 +392,10 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             tickers_list = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_list)} tickers.")
         else:
-            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Changed from 50 to 1000
+            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:50] # <<< Set to 50
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
             tickers_list = list(set(tickers_for_price_update + index_tickers))
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< MODIFIED Log
+            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 50 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< MODIFIED Log
 
         if not tickers_list:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping price update.")
@@ -479,7 +479,7 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
             tickers_to_process = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
         else:
-            tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Changed from 50 to 1000
+            tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Set to 1000
             logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap tickers ({len(tickers_to_process)} total).") # <<< MODIFIED Log
 
         if not tickers_to_process:

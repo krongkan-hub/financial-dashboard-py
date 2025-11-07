@@ -25,7 +25,7 @@ from ...data_handler import (
 # --- [เพิ่ม Imports ใหม่] ---
 from ... import db, server
 from ...models import FactNewsSentiment # <<< เฉพาะ News ที่ยัง Query ตรง
-from ...constants import ALL_TICKERS_SORTED_BY_MC # <<< [เพิ่ม] สำหรับเช็ค Top 20 (ยังคงใช้กับ News)
+from ...constants import ALL_TICKERS_SORTED_BY_GROWTH # <<< [เพิ่ม] สำหรับเช็ค Top 20 (ยังคงใช้กับ News)
 # --- End Imports ---
 
 # ตั้งค่า logging (ถ้าต้องการให้ log แสดงผล)

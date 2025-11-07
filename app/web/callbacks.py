@@ -37,7 +37,7 @@ from ..data_handler import (
 from .pages import deep_dive
 from ..constants import (
     INDEX_TICKER_TO_NAME, SECTOR_TO_INDEX_MAPPING, COLOR_DISCRETE_MAP, SECTORS,
-    TOP_5_DEFAULT_TICKERS, ALL_TICKERS_SORTED_BY_MC
+    TOP_5_DEFAULT_TICKERS, ALL_TICKERS_SORTED_BY_GROWTH
 )
 from .auth import create_register_layout
 
@@ -295,7 +295,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
         # 1. Get the list of tickers for the selected sector
         if selected_sector == 'All':
-            tickers_to_display_list = ALL_TICKERS_SORTED_BY_MC
+            tickers_to_display_list = ALL_TICKERS_SORTED_BY_GROWTH
         else:
             tickers_to_display_list = SECTORS.get(selected_sector, [])
 

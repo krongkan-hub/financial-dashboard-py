@@ -14,7 +14,7 @@ from . import db, server
 from .models import DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements, FactNewsSentiment
 
 from .data_handler import get_news_and_sentiment, get_competitor_data 
-from .constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
+from .constants import ALL_TICKERS_SORTED_BY_GROWTH, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE # <<< [MODIFIED]
 
 # Import สำหรับ UPSERT
 try:
@@ -123,13 +123,14 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
 
     job_name = "Job 1: Update Summaries (Top 1000, 5-Year Purge)" # <<< MODIFIED Job Name
     
-    # --- [MODIFIED: TOP 1000 Limit] ---
+    # --- [MODIFIED: TOP 500 Limit] ---
     if tickers_list_override is not None:
         tickers_to_process = tickers_list_override
         logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
     else:
-        tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Set to 1000
-        logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap tickers ({len(tickers_to_process)} total).")
+        # ใช้ชื่อใหม่และจำกัดแค่ 500 ตัว
+        tickers_to_process = ALL_TICKERS_SORTED_BY_GROWTH[:500] # <<< [MODIFIED] Set to 500
+        logging.info(f"ETL Job: [{job_name}] Defaulting to Top 500 Growth tickers ({len(tickers_to_process)} total).")
     # --- [END MODIFIED] ---
 
     today = datetime.utcnow().date()
@@ -392,7 +393,7 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             tickers_list = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_list)} tickers.")
         else:
-            tickers_for_price_update = ALL_TICKERS_SORTED_BY_MC[:50] # <<< Set to 50
+            tickers_for_price_update = ALL_TICKERS_SORTED_BY_GROWTH[:50] # <<< Set to 50
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
             tickers_list = list(set(tickers_for_price_update + index_tickers))
             logging.info(f"ETL Job: [{job_name}] Defaulting to Top 50 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< MODIFIED Log
@@ -479,7 +480,7 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
             tickers_to_process = tickers_list_override
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
         else:
-            tickers_to_process = ALL_TICKERS_SORTED_BY_MC[:1000] # <<< Set to 1000
+            tickers_to_process = ALL_TICKERS_SORTED_BY_GROWTH[:1000] # <<< Set to 1000
             logging.info(f"ETL Job: [{job_name}] Defaulting to Top 1000 Market Cap tickers ({len(tickers_to_process)} total).") # <<< MODIFIED Log
 
         if not tickers_to_process:
@@ -682,7 +683,7 @@ def update_news_sentiment():
         return
 
     job_name = "Job 4: Update News/Sentiment (Top 20, 30-Day Purge)"
-    tickers_for_etl = ALL_TICKERS_SORTED_BY_MC[:20] 
+    tickers_for_etl = ALL_TICKERS_SORTED_BY_GROWTH[:20] 
     companies_list = []
     
     # --- [NEW: 30-Day Cutoff for News Purge] ---

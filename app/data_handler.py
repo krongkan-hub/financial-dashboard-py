@@ -23,7 +23,7 @@ from . import db, server
 from .models import FactFinancialStatements, FactCompanySummary, DimCompany, FactDailyPrices
 from sqlalchemy import func, distinct, text, desc
 from .config import Config 
-from .constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
+from .constants import ALL_TICKERS_SORTED_BY_GROWTH, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
 
 
 
@@ -1422,3 +1422,45 @@ def get_quarterly_financials(ticker: str, statement_type: str) -> Tuple[pd.DataF
         except Exception as live_e:
              logging.error(f"[Fallback] Live financial fetch failed for {ticker} '{statement_type}' after DB error: {live_e}", exc_info=True)
              return pd.DataFrame({"error": f"DB query failed ({db_e}) AND live yfinance fetch failed ({live_e})."}), source
+        
+# --- [NEW] Growth Fetching Helper ---
+@lru_cache(maxsize=10) 
+def get_yoy_growth_data(tickers: tuple) -> pd.DataFrame:
+    """
+    Fetches the latest Revenue Growth (YoY) from the database for sorting.
+    """
+    all_data = []
+    total = len(tickers)
+    logging.info(f"Starting lightweight growth fetch for {total} tickers from DB...")
+
+    try:
+        with server.app_context():
+            # 1. Find the latest date for each ticker in FactCompanySummary
+            latest_date_sq = db.session.query(
+                FactCompanySummary.ticker,
+                func.max(FactCompanySummary.date_updated).label('max_date')
+            ).filter(
+                FactCompanySummary.ticker.in_(tickers)
+            ).group_by(FactCompanySummary.ticker).subquery()
+
+            # 2. Query the latest data for Ticker and revenue_growth_yoy
+            query = db.session.query(
+                FactCompanySummary.ticker,
+                FactCompanySummary.revenue_growth_yoy
+            ).join(
+                latest_date_sq,
+                (FactCompanySummary.ticker == latest_date_sq.c.ticker) &
+                (FactCompanySummary.date_updated == latest_date_sq.c.max_date)
+            ).filter(
+                FactCompanySummary.revenue_growth_yoy.isnot(None) # Filter out None values
+            )
+
+            df = pd.read_sql(query.statement, db.engine)
+            df.rename(columns={'ticker': 'Ticker', 'revenue_growth_yoy': 'Revenue Growth (YoY)'}, inplace=True)
+            
+            logging.info(f"Finished growth fetch. Got data for {len(df)} out of {total} tickers.")
+            return df
+    except Exception as e:
+        logging.error(f"An error occurred processing growth data from DB: {e}", exc_info=True)
+        return pd.DataFrame()
+# --- [END NEW] ---

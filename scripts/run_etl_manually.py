@@ -12,7 +12,7 @@ project_root = os.path.dirname(script_dir)
 sys.path.append(project_root)
 from index import server
 from app.etl import update_company_summaries, update_daily_prices, update_financial_statements, update_news_sentiment
-from app.constants import ALL_TICKERS_SORTED_BY_MC, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
+from app.constants import ALL_TICKERS_SORTED_BY_GROWTH, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE # <<< [MODIFIED]
 # --- [END NEW IMPORT] ---
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,12 +32,12 @@ if __name__ == "__main__":
 
     start_time_total = time.time()
 
-    TOP_1500_BASE = ALL_TICKERS_SORTED_BY_MC[:50] #
+    TOP_500_BASE = ALL_TICKERS_SORTED_BY_GROWTH[:500] # <<< [MODIFIED] ใช้ Top 500
     INDEX_TICKERS = list(INDEX_TICKER_TO_NAME.keys())
     # Use set to ensure uniqueness when combining
-    TICKERS_FOR_JOB_2_3 = list(set(TOP_1500_BASE + INDEX_TICKERS))
+    TICKERS_FOR_JOB_2_3 = list(set(TOP_500_BASE + INDEX_TICKERS)) # <<< [MODIFIED] ใช้ตัวแปรใหม่
     # (4) แก้ไข Log ให้ถูกต้อง
-    logging.info(f"Defined list for Job 2 & 3: Top 1000 + Indices = {len(TICKERS_FOR_JOB_2_3)} unique tickers.")
+    logging.info(f"Defined list for Job 2 & 3: Top 500 Growth + Indices = {len(TICKERS_FOR_JOB_2_3)} unique tickers.")
     # --- [END NEW] ---
 
     with server.app_context():
@@ -47,8 +47,7 @@ if __name__ == "__main__":
             logging.info("--- Starting Manual Run: Job 1 (update_company_summaries for ALL tickers) ---")
             start_time_job1 = time.time()
             try:
-                # ใช้ ALL_TICKERS_SORTED_BY_MC เพื่อให้ Job 1 อัปเดตข้อมูล Dim และ FactCompanySummary ทั้งหมด
-                update_company_summaries(ALL_TICKERS_SORTED_BY_MC) # <<< ใช้ List เต็ม
+                update_company_summaries(ALL_TICKERS_SORTED_BY_GROWTH) # <<< ใช้ List เต็ม
                 elapsed_job1 = time.time() - start_time_job1
                 logging.info(f"--- Finished Manual Run: Job 1 (update_company_summaries) in {elapsed_job1:.2f} seconds ---")
             except Exception as e:

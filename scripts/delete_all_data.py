@@ -2,7 +2,7 @@
 import sys
 import os
 import logging
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text 
 # Setup sys.path to import from app
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
@@ -26,6 +26,12 @@ def delete_all_data_and_recreate_schema():
     
     with server.app_context():
         try:
+            # 0. [FIX] Temporarily increase statement timeout for DDL operations (PostgreSQL fix)
+            logging.info("0. Setting statement_timeout to 30 minutes (1800s) for current session...")
+            # ใช้ text() เพื่อรันคำสั่ง SQL ดิบ
+            db.session.execute(text("SET statement_timeout TO '1800s';")) 
+            db.session.commit()
+            
             # 1. Drop all tables
             logging.info("1. Dropping all existing tables...")
             db.drop_all()

@@ -1,6 +1,5 @@
 # data_handler.py (V-FINAL: ใช้วิธี Groupby-Apply (V8) เพื่อแก้ Bug merge_asof)
-# (MODIFIED: 2025-11-01 - แก้ไข _get_dcf_base_data_from_db ให้รองรับ Metric ทางเลือก)
-# (MODIFIED: 2025-11-02 - แก้ไข Timeout โดยการดึงราคาแบบ Batch รายปี)
+# (MODIFIED: 2025-11-07 - เปลี่ยน logic การ sort data เป็น Revenue CAGR (3Y) พร้อม Live Fallback)
 
 import os
 import requests
@@ -24,8 +23,6 @@ from .models import FactFinancialStatements, FactCompanySummary, DimCompany, Fac
 from sqlalchemy import func, distinct, text, desc
 from .config import Config 
 from .constants import ALL_TICKERS_SORTED_BY_GROWTH, INDEX_TICKER_TO_NAME, HISTORICAL_START_DATE
-
-
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -483,7 +480,7 @@ def calculate_exit_multiple_valuation(ticker: str, forecast_years: int, eps_grow
         info = yf.Ticker(ticker).info
         if not info:
             return {'error': 'Could not fetch company info from yfinance.'}
-        current_price, trailing_eps = info.get('currentPrice') or info.get('previousClose'), info.get('trailingEps')
+        current_price, trailing_eps = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose'), info.get('trailingEps')
         if not all([current_price, trailing_eps, trailing_eps > 0]):
             return {'error': 'Missing essential data (Price or EPS) for valuation.'}
         eps_growth_decimal = eps_growth_rate / 100.0
@@ -1177,7 +1174,7 @@ def get_deep_dive_header_data(ticker: str) -> dict:
 
 
             # Get logo using the helper function
-            logo_url = _get_logo_url(info)
+            logo_url = _get_logo_url(ticker, info) # <<< Use the existing helper
 
             header_data.update({
                 'company_name': info.get('longName'),
@@ -1423,15 +1420,15 @@ def get_quarterly_financials(ticker: str, statement_type: str) -> Tuple[pd.DataF
              logging.error(f"[Fallback] Live financial fetch failed for {ticker} '{statement_type}' after DB error: {live_e}", exc_info=True)
              return pd.DataFrame({"error": f"DB query failed ({db_e}) AND live yfinance fetch failed ({live_e})."}), source
         
-# --- [NEW] Growth Fetching Helper ---
-@lru_cache(maxsize=10) 
-def get_yoy_growth_data(tickers: tuple) -> pd.DataFrame:
+# --- [NEW] Sorting Fetching Helper (DB Only) ---
+def get_sorting_data(tickers: tuple, sort_column_db: str) -> pd.DataFrame:
     """
-    Fetches the latest Revenue Growth (YoY) from the database for sorting.
+    (DB Only) Fetches the latest data for the specified sorting column from the database.
+    Used as the first step in the caching orchestrator.
     """
     all_data = []
     total = len(tickers)
-    logging.info(f"Starting lightweight growth fetch for {total} tickers from DB...")
+    logging.info(f"Starting lightweight sort data fetch for {total} tickers from DB ({sort_column_db})...")
 
     try:
         with server.app_context():
@@ -1443,24 +1440,113 @@ def get_yoy_growth_data(tickers: tuple) -> pd.DataFrame:
                 FactCompanySummary.ticker.in_(tickers)
             ).group_by(FactCompanySummary.ticker).subquery()
 
-            # 2. Query the latest data for Ticker and revenue_growth_yoy
+            # 2. Query the latest data for Ticker and the specified column
             query = db.session.query(
                 FactCompanySummary.ticker,
-                FactCompanySummary.revenue_growth_yoy
+                getattr(FactCompanySummary, sort_column_db)
             ).join(
                 latest_date_sq,
                 (FactCompanySummary.ticker == latest_date_sq.c.ticker) &
                 (FactCompanySummary.date_updated == latest_date_sq.c.max_date)
             ).filter(
-                FactCompanySummary.revenue_growth_yoy.isnot(None) # Filter out None values
+                getattr(FactCompanySummary, sort_column_db).isnot(None) # Filter out None values
             )
 
             df = pd.read_sql(query.statement, db.engine)
-            df.rename(columns={'ticker': 'Ticker', 'revenue_growth_yoy': 'Revenue Growth (YoY)'}, inplace=True)
-            
-            logging.info(f"Finished growth fetch. Got data for {len(df)} out of {total} tickers.")
+        
+        if df.empty:
+            logging.info(f"Finished sort data fetch. Got data for 0 out of {total} tickers.")
             return df
+
+        # --- [FIX: Ensure column names are set correctly before renaming] ---
+        # We explicitly set the columns based on the SELECT order: Ticker (index 0) and Metric (index 1)
+        if len(df.columns) == 2:
+            metric_col_name_read = df.columns[1]
+        else:
+             # Fallback: should not happen for this query, but defensive coding.
+             metric_col_name_read = sort_column_db 
+
+        # Rename DB column (metric_col_name_read) to Display Name
+        display_name = sort_column_db.replace('_', ' ').title().replace('Yoy', '(YoY)').replace('Cagr 3y', 'CAGR (3Y)').replace('Growth', 'Growth (YoY)')
+        
+        # Rename the actual column returned by read_sql (metric_col_name_read) to the standard display name
+        df.rename(columns={'ticker': 'Ticker', metric_col_name_read: display_name}, inplace=True, errors='ignore')
+        
+        # Verify the rename succeeded (This is the most critical check)
+        if display_name not in df.columns:
+             logging.error(f"FATAL: Column rename failed. Expected column '{display_name}' not found. Columns: {df.columns.tolist()}")
+             return pd.DataFrame() 
+        # --- [END FIX] ---
+        
+        logging.info(f"Finished sort data fetch. Got data for {len(df)} out of {total} tickers.")
+        return df
+        
     except Exception as e:
-        logging.error(f"An error occurred processing growth data from DB: {e}", exc_info=True)
+        logging.error(f"An error occurred processing sorting data from DB: {e}", exc_info=True)
         return pd.DataFrame()
+        
+# --- [NEW] Sorting Fallback Orchestrator (used by update_constants.py) ---
+@lru_cache(maxsize=10) 
+def get_cagr_data_for_sorting(all_tickers: tuple) -> pd.DataFrame:
+    """
+    Orchestrates fetching Revenue CAGR (3Y) data from DB first, then falling back
+    to live yfinance fetch for any missing tickers.
+    """
+    DB_COLUMN = 'revenue_cagr_3y'
+    DISPLAY_COLUMN = 'Revenue CAGR (3Y)'
+    
+    # 1. Fetch data available in DB using the existing efficient query (returns display name column)
+    df_db_raw = get_sorting_data(all_tickers, DB_COLUMN)
+    
+    # Standardize column name to DB name for comparison
+    df_db = df_db_raw.rename(columns={DISPLAY_COLUMN: DB_COLUMN}, errors='ignore')
+        
+    # --- [FIX: Safely call dropna and filter for required column] ---
+    if not df_db.empty and DB_COLUMN in df_db.columns:
+        df_db = df_db.dropna(subset=[DB_COLUMN])
+    else:
+        # If the DataFrame is empty OR the required column is missing, reset it to empty 
+        df_db = pd.DataFrame()
+    # --- [END FIX] ---
+
+    db_fetched_tickers = set(df_db['Ticker'].tolist()) if not df_db.empty and 'Ticker' in df_db.columns else set()
+    missing_tickers = [t for t in all_tickers if t not in db_fetched_tickers]
+    
+    df_live = pd.DataFrame()
+    if missing_tickers:
+        logging.warning(f"Data missing in DB for {len(missing_tickers)} tickers. Falling back to live fetch.")
+        
+        # 2. Fetch comprehensive live data for missing tickers
+        df_live_raw = get_competitor_data(tuple(missing_tickers))
+        
+        if not df_live_raw.empty:
+            # 3. Filter and map the necessary CAGR column
+            # Select and rename to the standard DB column name for combining
+            if DISPLAY_COLUMN in df_live_raw.columns:
+                df_live = df_live_raw[['Ticker', DISPLAY_COLUMN]].rename(
+                    columns={DISPLAY_COLUMN: DB_COLUMN}
+                ).dropna(subset=[DB_COLUMN])
+            
+            logging.info(f"Successfully fetched {len(df_live)} live records.")
+        
+    # 4. Combine DB and Live Data
+    # Ensure both dataframes have the necessary columns before combining
+    if not df_db.empty:
+        df_db = df_db[['Ticker', DB_COLUMN]]
+        
+    if not df_live.empty:
+        df_live = df_live[['Ticker', DB_COLUMN]]
+    
+    df_combined = pd.concat([df_db, df_live], ignore_index=True).drop_duplicates(subset=['Ticker'])
+    
+    # 5. Final Formatting: Rename back to display column
+    df_combined.rename(columns={DB_COLUMN: DISPLAY_COLUMN}, inplace=True)
+    
+    if df_combined.empty:
+         logging.warning("No sorting data available from DB or Live fetch.")
+         return pd.DataFrame()
+
+    logging.info(f"Finished CAGR sorting data fetch. Got combined data for {len(df_combined)} records.")
+    return df_combined
+
 # --- [END NEW] ---

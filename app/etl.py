@@ -37,6 +37,9 @@ except ImportError:
 # ตั้งค่า logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# --- [NEW CONSTANT] FIXED CORE TICKERS (NVDA, AAPL, MSFT, GOOGL, META) ---
+FIXED_CORE_TICKERS = ['NVDA', 'AAPL', 'MSFT', 'GOOGL', 'META']
+# ----------------------------------------
 
 # --- [HELPER] FIX: Convert numpy types to Python native types for psycopg2 ---
 def _clean_numpy_types(data_dict: Dict) -> Dict:
@@ -123,14 +126,17 @@ def update_company_summaries(tickers_list_override: Optional[List[str]] = None):
 
     job_name = "Job 1: Update Summaries (Top 100, 5-Year Purge)" # <<< MODIFIED Job Name
     
-    # --- [MODIFIED: TOP 100 Limit] ---
+    # --- [MODIFIED: TOP 100 Limit + Fixed Core] ---
     if tickers_list_override is not None:
         tickers_to_process = tickers_list_override
         logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
     else:
         # ใช้ชื่อใหม่และจำกัดแค่ 100 ตัว
         tickers_to_process = ALL_TICKERS_SORTED_BY_GROWTH[:100] # <<< [MODIFIED] Set to 100
-        logging.info(f"ETL Job: [{job_name}] Defaulting to Top 100 Growth tickers ({len(tickers_to_process)} total).")
+        
+    # --- [NEW] Ensure FIXED_CORE_TICKERS are included ---
+    tickers_to_process = list(set(tickers_to_process + FIXED_CORE_TICKERS))
+    logging.info(f"ETL Job: [{job_name}] Added fixed core tickers. Total to process: {len(tickers_to_process)}")
     # --- [END MODIFIED] ---
 
     today = datetime.utcnow().date()
@@ -396,7 +402,11 @@ def update_daily_prices(tickers_list_override: Optional[List[str]] = None):
             tickers_for_price_update = ALL_TICKERS_SORTED_BY_GROWTH[:50] # <<< Set to 50
             index_tickers = list(INDEX_TICKER_TO_NAME.keys())
             tickers_list = list(set(tickers_for_price_update + index_tickers))
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 50 Market Cap + Index tickers ({len(tickers_list)} total unique).") # <<< MODIFIED Log
+        
+        # --- [NEW] Ensure FIXED_CORE_TICKERS are included ---
+        tickers_list = list(set(tickers_list + FIXED_CORE_TICKERS))
+        logging.info(f"ETL Job: [{job_name}] Added fixed core tickers. Total to process: {len(tickers_list)}")
+        # --- [END NEW] ---
 
         if not tickers_list:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping price update.")
@@ -481,7 +491,11 @@ def update_financial_statements(tickers_list_override: Optional[List[str]] = Non
             logging.info(f"ETL Job: [{job_name}] Using OVERRIDE list with {len(tickers_to_process)} tickers.")
         else:
             tickers_to_process = ALL_TICKERS_SORTED_BY_GROWTH[:1000] # <<< Set to 1000
-            logging.info(f"ETL Job: [{job_name}] Defaulting to Top 100 Market Cap tickers ({len(tickers_to_process)} total).") # <<< MODIFIED Log
+        
+        # --- [NEW] Ensure FIXED_CORE_TICKERS are included ---
+        tickers_to_process = list(set(tickers_to_process + FIXED_CORE_TICKERS))
+        logging.info(f"ETL Job: [{job_name}] Added fixed core tickers. Total to process: {len(tickers_to_process)}")
+        # --- [END NEW] ---
 
         if not tickers_to_process:
             logging.warning(f"ETL Job: [{job_name}] No tickers to process. Skipping job.")
@@ -684,6 +698,12 @@ def update_news_sentiment():
 
     job_name = "Job 4: Update News/Sentiment (Top 10, 30-Day Purge)"
     tickers_for_etl = ALL_TICKERS_SORTED_BY_GROWTH[:10] 
+    
+    # --- [NEW] Ensure FIXED_CORE_TICKERS are included ---
+    tickers_for_etl = list(set(tickers_for_etl + FIXED_CORE_TICKERS))
+    logging.info(f"ETL Job: [{job_name}] Added fixed core tickers. Total to process: {len(tickers_for_etl)}")
+    # --- [END NEW] ---
+
     companies_list = []
     
     # --- [NEW: 30-Day Cutoff for News Purge] ---

@@ -9,11 +9,10 @@ from pprint import pformat
 
 # --- Import from project files ---
 try:
-    # --- [MODIFIED] เปลี่ยนไปใช้ get_yoy_growth_data สำหรับ Growth Sort ---
-    # NOTE: ฟังก์ชันนี้จะดึงข้อมูล Growth จาก DB (FactCompanySummary)
-    from app.data_handler import get_yoy_growth_data 
+    # --- [MODIFIED] เปลี่ยนไปใช้ get_cagr_data_for_sorting สำหรับ Sort (รวม DB+Live) ---
+    from app.data_handler import get_cagr_data_for_sorting 
 except ImportError:
-    print("Error: Could not import get_yoy_growth_data from data_handler.py. (Check if data_handler.py is correct.)")
+    print("Error: Could not import get_cagr_data_for_sorting from data_handler.py. (Check if data_handler.py is correct.)")
     exit()
     
 try:
@@ -24,24 +23,27 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def sort_tickers_by_growth(): # <<< [MODIFIED: เปลี่ยนชื่อฟังก์ชันให้ตรงตามการทำงานจริง]
-    logging.info("--- [START] 1. Starting Ticker Sorting Process (by Revenue Growth) ---")
+def sort_tickers_by_growth(): # <<< Keep function name for simplicity, but update internal logic
+    logging.info("--- [START] 1. Starting Ticker Sorting Process (by Revenue CAGR (3Y) with Live Fallback) ---")
     
     # 1. รวบรวม Tickers ทั้งหมด
     all_tickers = list(set(t for tickers in SECTORS.values() for t in tickers))
     logging.info(f"--- Step 1/7: Found {len(all_tickers)} unique tickers across all sectors.")
 
-    # 2. ดึงข้อมูล Revenue Growth (YoY)
-    logging.info("--- Step 2/7: Querying Revenue Growth (YoY) data from database for sorting...")
-    df = get_yoy_growth_data(tuple(all_tickers)) 
+    # 2. ดึงข้อมูล Revenue CAGR (3Y) ด้วย Fallback Logic
+    DISPLAY_SORT_COLUMN = 'Revenue CAGR (3Y)' 
+    logging.info(f"--- Step 2/7: Fetching {DISPLAY_SORT_COLUMN} data from DB (with Live Fallback)...")
     
-    SORT_COLUMN = 'Revenue Growth (YoY)'
+    # [MODIFIED] Call the robust fallback function
+    df = get_cagr_data_for_sorting(tuple(all_tickers)) 
+    
+    SORT_COLUMN = DISPLAY_SORT_COLUMN
     if df.empty or SORT_COLUMN not in df.columns:
-        # NOTE: This error means ETL Job 1 (Summaries) has NOT been run or failed.
-        logging.error(f"--- [FATAL] Could not fetch '{SORT_COLUMN}' data from DB. Aborting update. (Did ETL Job 1 run?) ---")
+        # [MODIFIED] Change the error message
+        logging.error(f"--- [FATAL] Could not obtain any valid sorting data for '{SORT_COLUMN}' from DB or live fetch. Aborting update. ---")
         return
 
-    logging.info(f"--- Step 2/7: Successfully fetched Growth data for {len(df)} valid tickers.")
+    logging.info(f"--- Step 2/7: Successfully fetched combined sorting data for {len(df)} valid tickers.")
     
     valid_ticker_set = set(df['Ticker'])
 
@@ -49,25 +51,29 @@ def sort_tickers_by_growth(): # <<< [MODIFIED: เปลี่ยนชื่อ
     growth_map = df.set_index('Ticker')[SORT_COLUMN].to_dict() 
 
     # 4. หา 5 อันดับแรก (Top 5 Default Tickers) 
-    logging.info("--- Step 3/7: Calculating Top 5 Tickers based on Revenue Growth...")
-    top_5_df = df.nlargest(5, SORT_COLUMN) 
-    top_5_tickers = top_5_df['Ticker'].tolist()
-    logging.info(f"--- Step 3/7: Top 5 Tickers found: {top_5_tickers}")
+    logging.info("--- Step 3/7: Calculating Top 5 Tickers (FIXED) ---")
+    # [MODIFIED] Hardcode the list as requested
+    FIXED_TOP_5_TICKERS = ['NVDA', 'AAPL', 'MSFT', 'GOOGL', 'META']
+    top_5_tickers = FIXED_TOP_5_TICKERS
+    logging.info(f"--- Step 3/7: Fixed Top 5 Tickers used: {top_5_tickers}")
+
 
     # 5. สร้างลิสต์ Ticker "ทั้งหมด" ที่เรียงตาม Growth
-    logging.info(f"--- Step 4/7: Creating master list of all tickers, sorted by Revenue Growth (from {len(df)} data points)...")
+    logging.info(f"--- Step 4/7: Creating master list of all tickers, sorted by {SORT_COLUMN} (from {len(df)} data points)...")
+    # [MODIFIED] Sort by CAGR column
     all_tickers_df = df.nlargest(len(df), SORT_COLUMN)
     all_tickers_sorted = all_tickers_df['Ticker'].tolist()
     logging.info(f"--- Step 4/7: Master list created with {len(all_tickers_sorted)} tickers.")
 
     # 6. สร้าง SECTORS dictionary ใหม่ที่เรียงลำดับแล้ว
-    logging.info("--- Step 5/7: Re-sorting sectors internally by Revenue Growth...")
+    logging.info(f"--- Step 5/7: Re-sorting sectors internally by {SORT_COLUMN}...")
     sorted_sectors = {}
     total_removed = 0
     for sector, tickers in SECTORS.items():
         unique_tickers = list(set(tickers))
         valid_unique_tickers = [t for t in unique_tickers if t in valid_ticker_set]
         # Sort by Growth (reverse=True for highest growth first)
+        # [MODIFIED] Sort by CAGR (stored in growth_map)
         sorted_list = sorted(valid_unique_tickers, key=lambda t: growth_map.get(t, -float('inf')), reverse=True) 
         sorted_sectors[sector] = sorted_list
         removed_count = len(unique_tickers) - len(valid_unique_tickers)
@@ -91,11 +97,11 @@ def sort_tickers_by_growth(): # <<< [MODIFIED: เปลี่ยนชื่อ
             f.write("# --- [NEW] Top 5 Tickers for default view ---\n")
             f.write(f"TOP_5_DEFAULT_TICKERS = {pformat(top_5_tickers)}\n\n")
 
-            f.write("# --- [NEW] Sorted list of ALL tickers (by Revenue Growth) ---\n")
+            f.write(f"# --- [NEW] Sorted list of ALL tickers (by {SORT_COLUMN}) ---\n")
             f.write(f"ALL_TICKERS_SORTED_BY_GROWTH = {pformat(all_tickers_sorted)}\n\n")
 
             f.write("# Dictionary mapping sectors to their respective stock tickers.\n")
-            f.write("# (De-duplicated, filtered for valid tickers, and sorted by Revenue Growth as of last script run)\n")
+            f.write(f"# (De-duplicated, filtered for valid tickers, and sorted by {SORT_COLUMN} as of last script run)\n")
             f.write(f"SECTORS = {pformat(sorted_sectors, indent=4)}\n\n")
             
             f.write("# Dictionary mapping index tickers to their full names for display purposes.\n")

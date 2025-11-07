@@ -2,7 +2,7 @@ name: Daily ETL Job Runner
 
 on:
   schedule:
-    - cron: '0 1 * * *'  
+    - cron: '0 1 */2 * *'  # <<< [MODIFIED CRON SCHEDULE]
   workflow_dispatch:
 
 jobs:

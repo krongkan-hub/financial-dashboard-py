@@ -1238,6 +1238,9 @@ def get_historical_prices(ticker: str, period: str = "5y") -> Tuple[pd.DataFrame
     start_date = _period_to_start_date(period)
     end_date = datetime.utcnow().date() # Fetch up to today
 
+    df_prices = pd.DataFrame()
+    last_date_in_db = None
+    
     try:
         with server.app_context():
             query = db.session.query(
@@ -1250,24 +1253,30 @@ def get_historical_prices(ticker: str, period: str = "5y") -> Tuple[pd.DataFrame
 
             # Fetch results using pandas read_sql for efficiency
             df_prices = pd.read_sql(query.statement, db.engine, index_col='date')
-
+        
+        # --- [MODIFIED LOGIC START] ---
+        should_use_db = False
+        
         if not df_prices.empty:
-            # --- Check data recency ---
             last_date_in_db = df_prices.index.max()
             days_diff = (end_date - last_date_in_db).days
 
             # If data is reasonably recent (e.g., within 3 days, accounting for weekends), use DB data
             if days_diff <= 3:
-                logging.info(f"[Fallback] Found recent enough price history for {ticker} in DB (Last: {last_date_in_db}).")
-                df_prices.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
-                return df_prices, source
+                should_use_db = True
             else:
                 logging.warning(f"[Fallback] Price history for {ticker} in DB is outdated (Last: {last_date_in_db.date()}). Will try live fetch.")
 
-        else:
-             logging.info(f"[Fallback] Price history for {ticker} not found in DB for period '{period}'. Trying live fetch...")
-
-        # --- Fallback to Live Fetch ---
+        if should_use_db:
+            # If we reach here, data is recent and ready to return
+            logging.info(f"[Fallback] Found recent enough price history for {ticker} in DB (Last: {last_date_in_db.date()}).")
+            df_prices.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+            return df_prices, source
+        
+        # --- Live Fetch Fallback (Executed if df_prices was empty OR outdated) ---
+        if df_prices.empty:
+            logging.info(f"[Fallback] Price history for {ticker} not found in DB. Trying live fetch...")
+        
         source = 'live'
         try:
             # Use yfinance download
@@ -1285,7 +1294,7 @@ def get_historical_prices(ticker: str, period: str = "5y") -> Tuple[pd.DataFrame
             # --- [END FIX] ---
 
             # Rename columns if needed (yf.download might return slightly different names)
-            df_prices.rename(columns={'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close', 'Volume': 'Volume'}, inplace=True, errors='ignore')
+            df_prices.rename(columns={'Open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True, errors='ignore')
 
             # Ensure required columns exist
             required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']

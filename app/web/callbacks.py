@@ -1,7 +1,4 @@
-# callbacks.py (Refactored - Step 4 - FIXED pd.read_sql TypeError + Added Smart Peer Finder)
-# (เวอร์ชันสมบูรณ์ - เปลี่ยนไปดึงข้อมูลจาก DB ทั้งหมด)
-# [อัปเดต] แก้ไข update_ticker_options ให้ค้นหาได้ทั้ง Ticker และ ชื่อบริษัท
-# [FIXED 2025-11-02] แก้ไข Bug กราฟไม่แสดงผล Benchmark (ลบ .rename() และเพิ่ม labels=... ใน px.line() 2 จุด)
+# callbacks.py (FINAL VERSION WITH LIVE PRICE FALLBACK)
 
 import dash
 from dash import dcc, html, callback_context, dash_table
@@ -16,12 +13,13 @@ import numpy as np
 import json
 import logging
 from flask_login import current_user
+from typing import List, Tuple, Union # [NEW IMPORT]
 
 # Import core app objects from app.py
 from .. import app, db, server
 # --- [REFACTOR STEP 4 IMPORTS] ---
 # Import models ใหม่ที่เราจะใช้ Query
-from ..models import User, UserSelection, UserAssumptions, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements # <<< [UPDATE: Added FactFinancialStatements]
+from ..models import User, UserSelection, UserAssumptions, DimCompany, FactCompanySummary, FactDailyPrices, FactFinancialStatements
 from sqlalchemy import func, distinct
 from .layout import build_layout, create_navbar
 from datetime import datetime, timedelta # Import datetime
@@ -41,10 +39,15 @@ from ..constants import (
 )
 from .auth import create_register_layout
 
+# >>>>>>>>>>>>> NEW IMPORTS FOR LIVE FALLBACK <<<<<<<<<<<<<<<
+import yfinance as yf 
+# >>>>>>>>>>>>> END NEW IMPORTS FOR LIVE FALLBACK <<<<<<<<<<<<<<<
+
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ==================================================================
-# Table Helpers & Config (เหมือนเดิม)
+# Table Helpers & Config (Original Logic)
 # ==================================================================
 TABS_CONFIG = {
     "tab-performance": { "tab_name": "Performance" },
@@ -148,14 +151,108 @@ def apply_custom_scoring(df):
     return df
 
 # ==================================================================
+# >>>>>>>>>>>>> NEW HELPER FUNCTION FOR DASHBOARD PRICE FETCH <<<<<<<<<<<<<<<
+# ==================================================================
+def fetch_prices_with_fallback(symbols: tuple, start_date: datetime.date) -> pd.DataFrame:
+    """
+    Fetches price data from DB. If data is missing or incomplete for any symbol, 
+    fills the gap using live yfinance data.
+    """
+    if not symbols: return pd.DataFrame()
+    
+    symbols_list = list(symbols)
+    today = datetime.utcnow().date()
+    
+    df_db = pd.DataFrame()
+    live_fetch_needed = symbols_list
+    
+    # 1. Try fetching all existing data from DB
+    try:
+        with server.app_context():
+            # Query DB for all prices in the period
+            query = db.session.query(FactDailyPrices.date, FactDailyPrices.ticker, FactDailyPrices.close) \
+                              .filter(FactDailyPrices.ticker.in_(symbols_list),
+                                      FactDailyPrices.date >= start_date)
+            df_db = pd.read_sql(query.statement, db.engine)
+        
+        df_all = df_db.copy()
+        db_tickers = set(df_db['ticker'].unique())
+        
+        # 2. Identify missing or stale symbols (logic simplified)
+        missing_symbols = [s for s in symbols_list if s not in db_tickers]
+        stale_symbols = []
+        
+        if not df_db.empty:
+            for ticker in db_tickers:
+                last_db_date = df_db[df_db['ticker'] == ticker]['date'].max()
+                # Check for recency (use 3 days buffer for weekends/holidays)
+                if (today - last_db_date.date()).days > 3: 
+                    stale_symbols.append(ticker)
+                    
+        # 3. Determine which symbols need live fetch
+        live_fetch_needed = list(set(missing_symbols + stale_symbols))
+        
+        # Filter DB data to only keep non-stale/complete data (for performance)
+        if live_fetch_needed:
+            df_all = df_db[~df_db['ticker'].isin(live_fetch_needed)].copy()
+            
+    except Exception as e:
+        logging.warning(f"DB Query failed for Dashboard prices, forcing all to live fetch: {e}")
+        df_all = pd.DataFrame()
+        live_fetch_needed = symbols_list
+        
+    
+    if live_fetch_needed:
+        logging.info(f"Performing LIVE fallback fetch for {len(live_fetch_needed)} symbols: {live_fetch_needed}")
+        
+        try:
+            # Note: yfinance fetch is always up to 'today' by default when giving start/end
+            df_live = yf.download(live_fetch_needed, start=start_date, end=today, auto_adjust=True, progress=False)
+        except Exception as e:
+            logging.error(f"yfinance live fetch failed: {e}")
+            return df_all # Return what we got from DB (may be empty)
+            
+        if df_live.empty:
+            logging.warning("Live fetch returned empty data.")
+            return df_all 
+            
+        # Standardize DataFrame format to match DB result (date, ticker, close)
+        if isinstance(df_live.columns, pd.MultiIndex):
+             # Multi-ticker case
+            df_live = df_live['Close'].rename_axis(['Date']).reset_index().rename(columns={'Date': 'date'})
+            # Melt to long format: (date, ticker, close)
+            df_live = df_live.melt(id_vars='date', var_name='ticker', value_name='close')
+        elif isinstance(df_live, pd.DataFrame) and 'Close' in df_live.columns:
+            # Single ticker case
+            df_live = df_live.rename_axis(['Date']).reset_index().rename(columns={'Date': 'date', 'Close': 'close'})
+            if len(live_fetch_needed) == 1:
+                df_live['ticker'] = live_fetch_needed[0] # Add back ticker column
+            else:
+                 # If single ticker mode but multiple were requested (error handling)
+                 return df_all
+        else:
+            logging.error("Live fetched data format is unexpected.")
+            return df_all
+            
+        df_live = df_live[['date', 'ticker', 'close']].dropna(subset=['close'])
+        
+        # Combine DB and Live data. drop_duplicates handles the theoretical overlap/stale data
+        df_combined = pd.concat([df_all, df_live]).drop_duplicates(subset=['date', 'ticker'], keep='last')
+        
+        return df_combined
+
+    return df_all
+
+# ==================================================================
+# >>>>>>>>>>>>> END NEW HELPER FUNCTION <<<<<<<<<<<<<<<
+# ==================================================================
+
+# ==================================================================
 # Callback Registration
 # ==================================================================
 def register_callbacks(app, METRIC_DEFINITIONS):
 
-    # --- Callbacks อื่นๆ ทั้งหมด (display_page, update_navbar, load_user_data_to_store, ---
-    # --- add/remove tickers/indices, update summaries, update dropdown options, ---
-    # --- toggle modals, save assumptions, sync modal inputs) ---
-    # --- >>> เหมือนเดิม ยกเว้นส่วนที่เกี่ยวกับ Dropdown Options ที่มีการเพิ่มส่วน Peer Finder <<< ---
+    # --- Callbacks Original Logic (Sections 1-5 remain unchanged) ---
     @app.callback(Output('page-content', 'children'), Input('url', 'pathname'))
     def display_page(pathname):
         if pathname.startswith('/deepdive/'):
@@ -275,7 +372,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         ]
 
     # ==================================================================
-    # --- [START] อัปเดตฟังก์ชัน Dropdown ของ Ticker ---
+    # --- [START] อัปเดตฟังก์ชัน Dropdown ของ Ticker (Original Logic) ---
     # ==================================================================
     @app.callback(
         Output('ticker-select-dropdown', 'options'),
@@ -339,7 +436,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
         
         return options
     # ==================================================================
-    # --- [END] อัปเดตฟังก์ชัน Dropdown ของ Ticker ---
+    # --- [END] อัปเดตฟังก์ชัน Dropdown ของ Ticker (Original Logic) ---
     # ==================================================================
 
     @app.callback(Output('index-select-dropdown', 'options'), Input('user-selections-store', 'data'))
@@ -435,41 +532,32 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
         try:
             if active_tab == "tab-performance":
-                with server.app_context():
-                    start_of_year = datetime(datetime.now().year, 1, 1).date()
-                    query = db.session.query(FactDailyPrices.date, FactDailyPrices.ticker, FactDailyPrices.close) \
-                                      .filter(FactDailyPrices.ticker.in_(all_symbols),
-                                              FactDailyPrices.date >= start_of_year)
-                    # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
-                    raw_data = pd.read_sql(query.statement, db.engine)
+                # --- [MODIFICATION 1: Use Fallback Fetch] ---
+                start_of_year = datetime(datetime.now().year, 1, 1).date()
+                raw_data = fetch_prices_with_fallback(all_symbols, start_of_year)
+                # --- [END MODIFICATION 1] ---
 
-                if raw_data.empty: raise ValueError("No price data found in DB for YTD.")
+                if raw_data.empty: raise ValueError("No price data found (DB or Live) for YTD performance.")
 
                 ytd_data = raw_data.pivot(index='date', columns='ticker', values='close').sort_index().ffill()
                 if ytd_data.empty or len(ytd_data) < 2: raise ValueError("Not enough data after pivot.")
 
                 ytd_perf = (ytd_data / ytd_data.iloc[0]) - 1
                 
-                # --- [START BUG FIX 1] ---
-                # ytd_perf = ytd_perf.rename(columns=INDEX_TICKER_TO_NAME) # <--- [ลบ] บรรทัดนี้คือปัญหา
                 fig = px.line(ytd_perf, title='YTD Performance Comparison', 
                               color_discrete_map=COLOR_DISCRETE_MAP, 
-                              labels=INDEX_TICKER_TO_NAME) # <--- [เพิ่ม] labels=...
-                # --- [END BUG FIX 1] ---
+                              labels=INDEX_TICKER_TO_NAME) 
                 
                 fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 
             if active_tab == "tab-drawdown":
-                with server.app_context():
-                    one_year_ago = datetime.utcnow().date() - timedelta(days=365)
-                    query = db.session.query(FactDailyPrices.date, FactDailyPrices.ticker, FactDailyPrices.close) \
-                                      .filter(FactDailyPrices.ticker.in_(all_symbols),
-                                              FactDailyPrices.date >= one_year_ago)
-                    # --- [FIXED] ใช้ db.engine แทน db.session.bind ---
-                    raw_data = pd.read_sql(query.statement, db.engine)
+                # --- [MODIFICATION 2: Use Fallback Fetch] ---
+                one_year_ago = datetime.utcnow().date() - timedelta(days=365)
+                raw_data = fetch_prices_with_fallback(all_symbols, one_year_ago)
+                # --- [END MODIFICATION 2] ---
 
-                if raw_data.empty: raise ValueError("No price data found in DB for 1-Year Drawdown.")
+                if raw_data.empty: raise ValueError("No price data found (DB or Live) for 1-Year Drawdown.")
 
                 prices = raw_data.pivot(index='date', columns='ticker', values='close').sort_index().ffill()
                 if prices.empty: raise ValueError("Not enough data after pivot.")
@@ -477,12 +565,9 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 rolling_max = prices.cummax()
                 drawdown_data = (prices / rolling_max) - 1
                 
-                # --- [START BUG FIX 2] ---
-                # drawdown_data = drawdown_data.rename(columns=INDEX_TICKER_TO_NAME) # <--- [ลบ] บรรทัดนี้คือปัญหา
                 fig = px.line(drawdown_data, title='1-Year Drawdown Comparison', 
                               color_discrete_map=COLOR_DISCRETE_MAP, 
-                              labels=INDEX_TICKER_TO_NAME) # <--- [เพิ่ม] labels=...
-                # --- [END BUG FIX 2] ---
+                              labels=INDEX_TICKER_TO_NAME) 
                 
                 fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
@@ -760,7 +845,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
 
     # ==================================================================
-    # --- [START] NEW CALLBACKS FOR SMART PEER FINDER ---
+    # --- [START] NEW CALLBACKS FOR SMART PEER FINDER (Original Logic) ---
     # ==================================================================
 
     @app.callback(
@@ -881,7 +966,5 @@ def register_callbacks(app, METRIC_DEFINITIONS):
             return dash.no_update, None, [], [], ""
 
     # ==================================================================
-    # --- [END] NEW CALLBACKS FOR SMART PEER FINDER ---
+    # --- [END] NEW CALLBACKS FOR SMART PEER FINDER (Original Logic) ---
     # ==================================================================
-
-# <<< End of register_callbacks function definition

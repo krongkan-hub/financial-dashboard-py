@@ -159,7 +159,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         else:
             ticker_content = [html.Label("Selected Yields:", className="text-muted small")] + [
                 dbc.Badge([
-                    t, 
+                    # [MODIFIED]: ใช้ BOND_YIELD_MAP สำหรับแสดงชื่อเต็มของ Yields
+                    BOND_YIELD_MAP.get(t, t),
                     html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'bonds-remove-ticker-btn', 'index': t})
                 ], color="light", className="m-1 p-2 text-dark border") for t in tickers
             ]

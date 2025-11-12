@@ -10250,7 +10250,14 @@ INDEX_TICKER_TO_NAME = {   'HERO': 'Gaming (HERO)',
     'XLV': 'Healthcare (XLV)',
     'XRT': 'US Retail (XRT)',
     '^GSPC': 'S&P 500 Index',
-    '^NDX': 'NASDAQ 100 Index'}
+    '^NDX': 'NASDAQ 100 Index',
+    # --- [NEW] Treasury Yields and Bond ETFs for Data Ingestion ---
+    '^FVX': '5-Year Treasury Yield',
+    '^TNX': '10-Year Treasury Yield',
+    '^TYX': '30-Year Treasury Yield',
+    'LQD': 'Inv. Grade Corp Bond ETF',
+    'HYG': 'High-Yield Corp Bond ETF'
+}
 
 # Dictionary mapping sectors to relevant benchmark indices.
 SECTOR_TO_INDEX_MAPPING = {   'Basic Materials': ['XLB'],
@@ -10277,4 +10284,20 @@ COLOR_DISCRETE_MAP = {
         all_possible_symbols,
         px.colors.qualitative.Plotly * (len(all_possible_symbols) // 10 + 1)
     )
+}
+
+# --- Bond Specific Mappings (New for /bonds page) ---
+
+# For the main Yield selection dropdown
+BOND_YIELD_MAP = { 
+    '^FVX': '5-Year US Treasury', 
+    '^TNX': '10-Year US Treasury', 
+    '^TYX': '30-Year US Treasury' 
+}
+
+# For the comparative Benchmark selection dropdown
+BOND_BENCHMARK_MAP = { 
+    '^GSPC': 'S&P 500 Index', 
+    'LQD': 'Inv. Grade Corp Bond ETF', 
+    'HYG': 'High-Yield Corp Bond ETF' 
 }

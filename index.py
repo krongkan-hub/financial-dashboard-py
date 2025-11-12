@@ -16,6 +16,8 @@ from app.web.layout import METRIC_DEFINITIONS
 # --- [CHANGED] Import callback registration functions from app/web/ ---
 from app.web.auth import register_auth_callbacks
 from app.web.callbacks import register_callbacks
+from app.web.pages.bonds import create_bonds_layout, BOND_METRIC_DEFINITIONS
+from app.web.pages.bonds_callbacks import register_bonds_callbacks
 
 # --- Logout Route (เหมือนเดิม) ---
 @server.route('/logout')
@@ -32,6 +34,7 @@ app.layout = html.Div([
 # --- Register All Callbacks (เหมือนเดิม) ---
 register_callbacks(app, METRIC_DEFINITIONS)
 register_auth_callbacks(app, db, User)
+register_bonds_callbacks(app, BOND_METRIC_DEFINITIONS)
 
 # --- Run App (เหมือนเดิม) ---
 if __name__ == '__main__':

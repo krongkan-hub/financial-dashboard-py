@@ -5,7 +5,7 @@ import dash_table
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE
 from datetime import date
 
-# --- 4.6 (Optional) Bond Specific Metric Definitions ---
+# --- 4.6 (Optional) Bond Specific Metric Definitions (Unchanged) ---
 # This dictionary is used by the Definitions Modal on the bonds page.
 BOND_METRIC_DEFINITIONS = {
     "tab-yield-history": {
@@ -40,68 +40,79 @@ BOND_METRIC_DEFINITIONS = {
     },
 }
 
-# --- Shared Components (Used multiple times in the layout) ---
+# --- Shared Components ---
 
-# The Alert that displays selected tickers (Yields and Benchmarks)
-# Replaced 'ticker-summary-display' with 'bonds-summary-display' and 'index-summary-display' with 'bonds-benchmark-summary-display'
+# [FIXED: ใช้ Div ว่างเปล่าเหมือน Stocks เพื่อให้ Callback สร้าง Label และ Badge]
 selected_tickers_display = [
-    dbc.Alert(
-        [
-            html.H5("Selected Yields:", className="alert-heading"),
-            html.Div(id='bonds-summary-display', children="No Yields Selected"),
-        ],
-        color="info",
-        className="mb-2",
-        style={'fontSize': '0.9rem', 'padding': '0.5rem'}
-    ),
-    dbc.Alert(
-        [
-            html.H5("Selected Benchmarks:", className="alert-heading"),
-            html.Div(id='bonds-benchmark-summary-display', children="No Benchmarks Selected"),
-        ],
-        color="secondary",
-        className="mb-2",
-        style={'fontSize': '0.9rem', 'padding': '0.5rem'}
-    ),
+    html.Div(id='bonds-summary-display', className="mb-2"),
+    html.Div(id='bonds-benchmark-summary-display', className="mb-2"),
 ]
 
-# The main content area where graphs and tables are displayed
-# Replaced 'analysis-pane-content' and 'table-pane-content'
+# The main content area where graphs and tables are displayed (Corrected structure)
 main_content_pane = [
-    dbc.Tabs(
-        id="bonds-analysis-tabs",
-        active_tab="tab-yield-history",
-        className="nav-justified",
-        # --- 4.5 Graph Tabs Content Changed ---
-        children=[
-            dbc.Tab(label="HISTORICAL YIELDS", tab_id="tab-yield-history"),
-            dbc.Tab(label="YIELD CURVE", tab_id="tab-yield-curve"),
-            dbc.Tab(label="YIELD SPREAD", tab_id="tab-yield-spread"),
-        ]
-    ),
-    html.Div(id='bonds-analysis-pane-content', className="mt-3 card-body shadow p-3 mb-5 bg-white rounded"),
-
-    html.Hr(className="my-4"),
-
-    dbc.Row([
-        dbc.Col(
-            dbc.Tabs(
-                id="bonds-table-tabs",
-                active_tab="tab-rates-summary",
-                className="nav-justified",
-                # --- 4.5 Table Tabs Content Changed ---
-                children=[
-                    dbc.Tab(label="RATES SUMMARY", tab_id="tab-rates-summary"),
-                ]
-            ),
-            width=12
-        ),
+    # --- Graph Tabs ---
+    html.Div(className="custom-tabs-container", children=[
+        dbc.Tabs(
+            id="bonds-analysis-tabs",
+            active_tab="tab-yield-history",
+            children=[
+                dbc.Tab(label="HISTORICAL YIELDS", tab_id="tab-yield-history"),
+                dbc.Tab(label="YIELD CURVE", tab_id="tab-yield-curve"),
+                dbc.Tab(label="YIELD SPREAD", tab_id="tab-yield-spread"),
+            ]
+        )
     ]),
-    html.Div(id='bonds-table-pane-content', className="mt-3 card-body shadow p-3 mb-5 bg-white rounded"),
+
+    # --- Graph Content Pane ---
+    dbc.Card(dbc.CardBody(
+        dcc.Loading(html.Div(id='bonds-analysis-pane-content'))
+    ), className="mt-3"),
+
+    html.Hr(className="my-5"),
+
+    # --- Table Tabs ---
+    dbc.Row(
+        [
+            dbc.Col(
+                html.Div(className="custom-tabs-container", children=[
+                    dbc.Tabs(
+                        id="bonds-table-tabs",
+                        active_tab="tab-rates-summary",
+                        children=[
+                            dbc.Tab(label="RATES SUMMARY", tab_id="tab-rates-summary"),
+                        ]
+                    )
+                ]),
+                md=7
+            ),
+             # Buttons/Dropdown Col
+             dbc.Col(
+                dbc.Stack(
+                    [
+                        # Hidden Gear button for Forecast Modal (per instructions)
+                        dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
+                        # Info button (Icon only)
+                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="secondary", outline=True),
+                        dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
+                    ],
+                    direction="horizontal",
+                    gap=2,
+                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
+                ),
+                md=5
+            )
+        ],
+        align="center",
+        className="control-row mt-3"
+    ),
+    
+    # --- Table Content Pane ---
+    dbc.Card(dbc.CardBody(
+        dcc.Loading(html.Div(id='bonds-table-pane-content'))
+    ), className="mt-2")
 ]
 
-# --- Modal for Metric Definitions ---
-# Replaced all 'definitions-modal' and related IDs
+# --- Modal for Metric Definitions (Unchanged) ---
 definitions_modal = dbc.Modal(
     [
         dbc.ModalHeader(dbc.ModalTitle("Definition Dictionary")),
@@ -120,137 +131,145 @@ definitions_modal = dbc.Modal(
     is_open=False,
 )
 
-# --- 4.1 Main Layout Function Changed ---
+# --- Main Layout Function ---
 def create_bonds_layout():
     """Generates the layout for the /bonds page."""
     return dbc.Container(
         [
-            # --- Hidden Data Stores (4.2 IDs Changed) ---
+            # --- Hidden Data Stores ---
             dcc.Store(id='bonds-user-selections-store', data={'tickers': ['^TNX'], 'indices': ['^GSPC']}),
             dcc.Store(id='bonds-forecast-assumptions-store', data={}),
             dcc.Store(id='bonds-dcf-assumptions-store', data={}),
+            html.Div(id="navbar-container"), 
 
             dbc.Row(
                 [
                     # --- Left Sidebar (Controls) ---
                     dbc.Col(
-                        [
-                            html.H3("Bonds & Yields Analysis 💰"),
+                        dbc.Card(dbc.CardBody([
+                            # [FIX] ลบ "BONDS & YIELDS ANALYSIS 💰" ออกแล้ว
+                            html.Label("Add Yields to Analysis", className="fw-bold"),
+                            dcc.Dropdown(
+                                id='bonds-yield-type-dropdown',
+                                options=[{'label': k, 'value': k} for k in BOND_YIELD_MAP.keys()],
+                                value=list(BOND_YIELD_MAP.keys())[0],
+                                clearable=False,
+                                className="mb-2"
+                            ),
+                            dcc.Dropdown(
+                                id='bonds-yield-select-dropdown',
+                                options=[{'label': v, 'value': k} for k, v in BOND_YIELD_MAP.items()],
+                                placeholder="Select one or more tickers...",
+                                multi=True, 
+                                className="mt-2 sidebar-dropdown"
+                            ),
+                            # [FIX] ปุ่ม Add Yield: ใช้ color="primary" และสไตล์ Stocks
+                            dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Yield(s)"], id='bonds-add-yield-button', color="primary", className="mt-2 w-100", n_clicks=0),
+                            
                             html.Hr(),
 
-                            # --- Yield Selection (4.3 IDs & Text Changed) ---
-                            html.Div([
-                                html.Label("Add Yields to Analysis", className="mt-2 text-primary font-weight-bold"),
-                                dcc.Dropdown(
-                                    id='bonds-yield-type-dropdown',
-                                    options=[{'label': k, 'value': k} for k in BOND_YIELD_MAP.keys()], # Uses BOND_YIELD_MAP keys
-                                    value=list(BOND_YIELD_MAP.keys())[0], # Default to the first key
-                                    clearable=False,
-                                    className="mb-2"
-                                ),
-                                dcc.Dropdown(
-                                    id='bonds-yield-select-dropdown',
-                                    options=[{'label': v, 'value': k} for k, v in BOND_YIELD_MAP.items()], # Options populated in callback
-                                    placeholder="Select a Yield Ticker",
-                                    className="mb-2"
-                                ),
-                                dbc.Button("Add Yield", id='bonds-add-yield-button', color="primary", className="mb-3", n_clicks=0),
-                            ], className="border rounded p-3 mb-3"),
-
-                            # --- Benchmark Selection (4.3 IDs & Text Changed) ---
-                            html.Div([
-                                html.Label("Add Benchmarks", className="mt-2 text-info font-weight-bold"),
-                                dcc.Dropdown(
-                                    id='bonds-benchmark-select-dropdown',
-                                    options=[{'label': v, 'value': k} for k, v in BOND_BENCHMARK_MAP.items()], # Uses BOND_BENCHMARK_MAP
-                                    placeholder="Select an Index or ETF",
-                                    className="mb-2"
-                                ),
-                                dbc.Button("Add Benchmark", id='bonds-add-benchmark-button', color="info", className="mb-3", n_clicks=0),
-                            ], className="border rounded p-3 mb-3"),
-
-                            # --- Selected Items Display ---
-                            *selected_tickers_display,
-
-                            # --- Peer Comparison (4.3 IDs & Text Changed & Disabled) ---
-                            html.Div([
-                                html.Label("Find Similar (Coming Soon)", className="mt-2 text-warning font-weight-bold"),
-                                dcc.Dropdown(
-                                    id='bonds-peer-reference-dropdown',
-                                    placeholder="Reference Yield Ticker",
-                                    className="mb-2",
-                                    disabled=True  # Disabled for bonds page
-                                ),
-                                dcc.Dropdown(
-                                    id='bonds-peer-select-dropdown',
-                                    placeholder="Select Peer Tickers",
-                                    multi=True,
-                                    className="mb-2",
-                                    disabled=True # Disabled for bonds page
-                                ),
-                                dbc.Button("Add Peer", id='bonds-add-peer-button', color="warning", className="mb-3", n_clicks=0, disabled=True), # Disabled for bonds page
-                            ], className="border rounded p-3 mb-3", style={'opacity': 0.6}),
-
-                            html.Div(
-                                [
-                                    html.Hr(),
-                                    html.Small(f"Data from Yahoo Finance. Last update: {date.today().strftime('%Y-%m-%d')}"),
-                                    dbc.Button(
-                                        "Definitions ⓘ",
-                                        id="bonds-open-definitions-modal-btn-graphs",
-                                        color="secondary",
-                                        size="sm",
-                                        className="float-end",
-                                        n_clicks=0,
-                                    ),
-                                ],
-                                className="mt-3",
+                            html.Label("Add Benchmarks to Compare", className="fw-bold"),
+                            dcc.Dropdown(
+                                id='bonds-benchmark-select-dropdown',
+                                options=[{'label': v, 'value': k} for k, v in BOND_BENCHMARK_MAP.items()],
+                                placeholder="Select one or more indices...",
+                                multi=True, 
+                                className="mb-2 sidebar-dropdown"
                             ),
-                        ],
+                            # [FIX] ปุ่ม Add Benchmark: ใช้ color="primary" เหมือน Add Yield
+                            dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id='bonds-add-benchmark-button', color="primary", className="mt-2 w-100", n_clicks=0),
+
+                            # [FIX] ลบ Find Similar ออกไปแล้ว
+
+                            html.Hr(className="my-4"),
+
+                            # --- Selected Items Display (ใช้ Div ว่างเปล่า) ---
+                            *selected_tickers_display,
+                            
+                        ])),
                         md=3,
-                        className="sidebar"
+                        className="sidebar-fixed"
                     ),
 
                     # --- Right Content (Graphs & Tables) ---
                     dbc.Col(
                         [
-                            # --- Sort & Modal Buttons (4.4 IDs Changed) ---
-                            dbc.Row([
-                                dbc.Col(
-                                    html.Div([
-                                        dbc.Button("Valuation Assumptions (Coming Soon)", id="bonds-open-dcf-modal-btn", className="me-2", n_clicks=0, disabled=True),
-                                        dbc.Button("Definitions ⓘ", id="bonds-open-definitions-modal-btn-tables", className="me-2", n_clicks=0),
-                                        dcc.Dropdown(
-                                            id='bonds-sort-by-dropdown',
-                                            options=[
-                                                {'label': 'Sort by Yield (%)', 'value': 'latest_yield'},
-                                                {'label': 'Sort by 1-Day Change (bps)', 'value': 'change_bps'},
+                            # Graph Controls Row (Top Right)
+                            dbc.Row(
+                                [
+                                    dbc.Col(
+                                        html.Div(className="custom-tabs-container", children=[
+                                            dbc.Tabs(id="bonds-analysis-tabs", active_tab="tab-yield-history", children=[
+                                                dbc.Tab(label="HISTORICAL YIELDS", tab_id="tab-yield-history"),
+                                                dbc.Tab(label="YIELD CURVE", tab_id="tab-yield-curve"),
+                                                dbc.Tab(label="YIELD SPREAD", tab_id="tab-yield-spread"),
+                                            ])
+                                        ]),
+                                        md=8
+                                    ),
+                                    dbc.Col(
+                                        dbc.Stack(
+                                            [
+                                                # [FIX] Gear button (DCF/Forecast Modal - Hidden)
+                                                dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-dcf-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
+                                                # [FIX] Info button (Icon only)
+                                                dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-graphs", color="secondary", outline=True),
                                             ],
-                                            value='latest_yield',
-                                            placeholder="Sort Table By...",
-                                            style={'width': '200px', 'display': 'inline-block', 'verticalAlign': 'middle'}
+                                            direction="horizontal",
+                                            gap=2,
+                                            className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                         ),
-                                    ], className="d-flex justify-content-end mb-3"),
-                                    width=12
-                                )
-                            ]),
+                                        md=4
+                                    )
+                                ],
+                                align="center",
+                                className="control-row"
+                            ),
 
-                            # --- Main Content ---
-                            *main_content_pane,
+                            # Graph Content (ใช้ dbc.Card(dbc.CardBody(...)))
+                            dcc.Loading(html.Div(id='bonds-analysis-pane-content')),
+                            html.Hr(className="my-5"),
 
+                            # Table Controls Row (Bottom Right)
+                            dbc.Row(
+                                [
+                                    dbc.Col(
+                                        html.Div(className="custom-tabs-container", children=[
+                                            dbc.Tabs(id="bonds-table-tabs", active_tab="tab-rates-summary", children=[
+                                                dbc.Tab(label="RATES SUMMARY", tab_id="tab-rates-summary"),
+                                            ])
+                                        ]),
+                                        md=7
+                                    ),
+                                     dbc.Col(
+                                        dbc.Stack(
+                                            [
+                                                # [FIX] Gear button for forecast (Hidden for bonds)
+                                                dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
+                                                # [FIX] Info button (Icon only)
+                                                dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="secondary", outline=True),
+                                                # [FIX] Sort by dropdown
+                                                dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
+                                            ],
+                                            direction="horizontal",
+                                            gap=2,
+                                            className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
+                                        ),
+                                        md=5
+                                    )
+                                ],
+                                align="center",
+                                className="control-row mt-3"
+                            ),
+
+                            # Table Content
+                            dcc.Loading(html.Div(id="bonds-table-pane-content", className="mt-2"))
                         ],
-                        md=9
+                        md=9,
+                        className="content-offset"
                     ),
-                ]
-            ),
-            # --- Modals ---
-            definitions_modal,
-            # DCF/Forecast Modal (IDs Changed and Disabled for Bonds)
-            dbc.Modal([
-                dbc.ModalHeader(dbc.ModalTitle("Valuation Assumptions (Coming Soon)")),
-                dbc.ModalBody(html.P("Valuation models like DCF are not applicable to interest rate data and are disabled for this view.")),
-                dbc.ModalFooter(dbc.Button("Close", id="bonds-close-forecast-assumptions-modal", className="ms-auto", n_clicks=0)),
-            ], id="bonds-forecast-assumptions-modal", is_open=False, size="lg"),
+                ], className="g-4")
         ],
         fluid=True,
+        className="p-4 main-content-container"
     )

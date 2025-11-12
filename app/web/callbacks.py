@@ -255,40 +255,40 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
     # --- Callbacks Original Logic (Sections 1-5 remain unchanged) ---
     @app.callback(Output('page-content', 'children'), Input('url', 'pathname'))
-def display_page(pathname):
-    """
-    Router หลักของแอปพลิเคชัน Dash ที่ใช้ในการโหลด Layout ที่ถูกต้อง
-    ตาม URL path ที่ผู้ใช้งานเข้าถึง
-    """
-    
-    # 1. เส้นทางหลัก (Stocks Analysis)
-    if pathname == '/':
-        # ใช้ Layout เดิมของหน้า Stocks
-        return deep_dive.build_layout()
-    
-    # 2. เส้นทางสำหรับ Bonds Analysis (Route ใหม่)
-    elif pathname == '/bonds':
-        # ใช้ Layout ที่สร้างใหม่ใน bonds.py
-        return bonds.create_bonds_layout()
-    
-    # 3. เส้นทางสำหรับหน้าอื่น ๆ (ตัวอย่าง)
-    elif pathname == '/derivatives':
-        return html.Div([
-            html.H1("Derivatives Analysis (Coming Soon) 🚧", className="mt-5"),
-            html.P("หน้านี้กำลังอยู่ระหว่างการพัฒนา")
-        ])
+    def display_page(pathname):
+        """
+        Router หลักของแอปพลิเคชัน Dash ที่ใช้ในการโหลด Layout ที่ถูกต้อง
+        ตาม URL path ที่ผู้ใช้งานเข้าถึง
+        """
+        
+        # 1. เส้นทางหลัก (Stocks Analysis)
+        if pathname == '/':
+            # ใช้ Layout เดิมของหน้า Stocks
+            return deep_dive.build_layout()
+        
+        # 2. เส้นทางสำหรับ Bonds Analysis (Route ใหม่)
+        elif pathname == '/bonds':
+            # ใช้ Layout ที่สร้างใหม่ใน bonds.py
+            return bonds.create_bonds_layout()
+        
+        # 3. เส้นทางสำหรับหน้าอื่น ๆ (ตัวอย่าง)
+        elif pathname == '/derivatives':
+            return html.Div([
+                html.H1("Derivatives Analysis (Coming Soon) 🚧", className="mt-5"),
+                html.P("หน้านี้กำลังอยู่ระหว่างการพัฒนา")
+            ])
 
-    # 4. ไม่พบเส้นทาง (404 Not Found)
-    else:
-        return html.Div([
-            html.H1("404: Not found 😔", className="mt-5"),
-            html.P(f"ไม่พบเส้นทางที่ร้องขอ: {pathname}")
-        ], style={'textAlign': 'center'})
+        # 4. ไม่พบเส้นทาง (404 Not Found)
+        else:
+            return html.Div([
+                html.H1("404: Not found 😔", className="mt-5"),
+                html.P(f"ไม่พบเส้นทางที่ร้องขอ: {pathname}")
+            ], style={'textAlign': 'center'})
 
     @app.callback(Output('navbar-container', 'children'), Input('url', 'pathname'))
     def update_navbar(pathname):
         if pathname != '/register' and not pathname.startswith('/deepdive/'):
-             return create_navbar()
+            return create_navbar()
         return None
 
     @app.callback(

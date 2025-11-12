@@ -83,14 +83,9 @@ jobs:
       - name: 5. Train the ML Risk Model
         env:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
-        run: python scripts/run_ml_risk.py # <--- เพิ่มบรรทัดนี้
+        run: python scripts/run_ml_risk.py
 
-      - name: 6. Run the ML Clustering script
-        env:
-          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
-        run: python scripts/run_ml_cluster.py
-
-      - name: 7. Run the ML Risk Prediction script
+      - name: 6. Run the ML Risk Prediction script
         env:
           SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
         run: python scripts/run_batch_prediction_lstm.py

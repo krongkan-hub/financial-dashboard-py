@@ -753,7 +753,7 @@ def register_callbacks(app, METRIC_DEFINITIONS):
                 'logo_url': 'logo_url', # เก็บไว้ใช้ใน _prepare_display_dataframe
                 'trailing_eps': 'Trailing EPS', # เพิ่มคอลัมน์ใหม่
                 'ebitda_margin': 'EBITDA Margin', # เพิ่มคอลัมน์ใหม่
-                'peer_cluster_id': 'peer_cluster_id' # <<< [เพิ่ม] เก็บ cluster ID ไว้ด้วย
+                # 'peer_cluster_id': 'peer_cluster_id' # <<< [ลบ] cluster ID ออก
             }
             df_full.rename(columns={k: v for k, v in column_mapping.items() if k in df_full.columns}, inplace=True)
 
@@ -845,126 +845,9 @@ def register_callbacks(app, METRIC_DEFINITIONS):
 
 
     # ==================================================================
-    # --- [START] NEW CALLBACKS FOR SMART PEER FINDER (Original Logic) ---
-    # ==================================================================
-
-    @app.callback(
-        Output('peer-reference-stock-dropdown', 'options'),
-        Input('user-selections-store', 'data')
-    )
-    def update_peer_reference_options(store_data):
-        """Populate the reference stock dropdown with currently selected tickers."""
-        tickers = store_data.get('tickers', []) if store_data else []
-        if not tickers:
-            return [{'label': 'Select stocks first', 'value': '', 'disabled': True}]
-        return [{'label': t, 'value': t} for t in sorted(tickers)]
-
-    @app.callback(
-        Output('peer-select-dropdown', 'options'),
-        Output('peer-select-dropdown', 'value'), # Clear selection when reference changes
-        Output('peer-finder-status', 'children'),
-        Input('peer-reference-stock-dropdown', 'value'),
-        State('user-selections-store', 'data')
-    )
-    def update_peer_select_options(reference_ticker, store_data):
-        """Find peers for the selected reference stock and update the peer selection dropdown."""
-        if not reference_ticker:
-            return [], [], "" # No reference selected, clear options, value, and status
-
-        current_tickers = set(store_data.get('tickers', [])) if store_data else set()
-        peer_options = []
-        status_message = ""
-
-        try:
-            with server.app_context():
-                latest_date = db.session.query(func.max(FactCompanySummary.date_updated)).scalar()
-                if not latest_date:
-                    status_message = "Error: Could not find latest data date."
-                    return [], [], status_message
-
-                # 1. Query market_cap ของ reference stock เพิ่ม
-                ref_data = db.session.query(FactCompanySummary.peer_cluster_id, FactCompanySummary.market_cap) \
-                                    .filter(FactCompanySummary.date_updated == latest_date,
-                                            FactCompanySummary.ticker == reference_ticker) \
-                                    .first()
-
-                if ref_data and ref_data.peer_cluster_id is not None and ref_data.market_cap is not None:
-                    ref_cluster_id = ref_data.peer_cluster_id
-                    ref_market_cap = ref_data.market_cap # <--- เก็บ market cap ไว้
-
-                    # 2. Query peers พร้อม market cap
-                    query = db.session.query(FactCompanySummary.ticker, FactCompanySummary.market_cap) \
-                                    .filter(FactCompanySummary.date_updated == latest_date,
-                                            FactCompanySummary.peer_cluster_id == ref_cluster_id,
-                                            FactCompanySummary.ticker != reference_ticker)
-                    all_peers_in_cluster_with_mc = query.all() # ได้ list of tuples [(ticker, market_cap), ...]
-
-                    # 3. กรอง peer ที่มีอยู่แล้ว และคำนวณความต่าง
-                    peers_to_process = []
-                    for peer_ticker, peer_mc in all_peers_in_cluster_with_mc:
-                        if peer_ticker not in current_tickers and peer_mc is not None:
-                            # 4. คำนวณ absolute difference
-                            mc_diff = abs(peer_mc - ref_market_cap)
-                            peers_to_process.append({'ticker': peer_ticker, 'mc_diff': mc_diff})
-
-                    # 5. Sort peers ตาม mc_diff จากน้อยไปมาก
-                    peers_to_process.sort(key=lambda x: x['mc_diff'])
-
-                    peers_to_show = [p['ticker'] for p in peers_to_process] # เอาเฉพาะ ticker ที่เรียงแล้ว
-
-                    if peers_to_show:
-                        peer_options = [{'label': p, 'value': p} for p in peers_to_show] # สร้าง options จาก list ที่ sort แล้ว
-                        status_message = f"Found {len(peers_to_show)} potential peers for {reference_ticker}."
-                    else:
-                        status_message = f"No *new* peers found for {reference_ticker} in Cluster {ref_cluster_id}."
-                else:
-                    status_message = f"Peer cluster data not available for {reference_ticker}."
-
-        except Exception as e:
-            logging.error(f"Error finding peers for {reference_ticker}: {e}", exc_info=True)
-            status_message = f"Error finding peers for {reference_ticker}."
-
-        return peer_options, [], status_message # Return options, clear value, set status
-
-    @app.callback(
-        Output('user-selections-store', 'data', allow_duplicate=True),
-        Output('peer-reference-stock-dropdown', 'value', allow_duplicate=True), # Clear reference dropdown
-        Output('peer-select-dropdown', 'options', allow_duplicate=True),      # Clear peer options
-        Output('peer-select-dropdown', 'value', allow_duplicate=True),        # Clear peer selection
-        Output('peer-finder-status', 'children', allow_duplicate=True),        # Clear status
-        Input('add-peer-button', 'n_clicks'),
-        State('peer-select-dropdown', 'value'), # Peers selected by the user
-        State('user-selections-store', 'data'),
-        prevent_initial_call=True
-    )
-    def add_selected_peers_to_store(n_clicks, selected_peers, store_data):
-        """Adds the selected peers from the dropdown to the main user selection store."""
-        if not n_clicks or not selected_peers:
-            # If button not clicked or no peers selected, do nothing
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-
-        store_data = store_data or {'tickers': [], 'indices': []}
-        current_tickers = store_data.get('tickers', [])
-        updated = False
-
-        for peer in selected_peers:
-            if peer not in current_tickers:
-                current_tickers.append(peer)
-                updated = True
-
-        if updated:
-            store_data['tickers'] = current_tickers # Update the list in the store data
-            if current_user.is_authenticated:
-                with server.app_context():
-                    # Save the updated list (including newly added peers) to DB
-                    save_selections_to_db(current_user.id, current_tickers, 'stock')
-            # Return updated store data and clear the peer finder UI elements
-            return store_data, None, [], [], ""
-        else:
-            # No new peers were actually added (e.g., they were already there somehow)
-            # Just clear the peer finder UI
-            return dash.no_update, None, [], [], ""
-
-    # ==================================================================
-    # --- [END] NEW CALLBACKS FOR SMART PEER FINDER (Original Logic) ---
+    # --- [START] NEW CALLBACKS FOR SMART PEER FINDER (REMOVED) ---
+    # The following callbacks were removed as per user request:
+    # - update_peer_reference_options
+    # - update_peer_select_options
+    # - add_selected_peers_to_store
     # ==================================================================

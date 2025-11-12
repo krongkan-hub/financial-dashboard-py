@@ -364,61 +364,9 @@ def build_layout():
                     dcc.Dropdown(id='index-select-dropdown', placeholder="Select one or more indices...", multi=True),
                     dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id="add-index-button", n_clicks=0, className="mt-2 w-100"),
 
-                    # --- [START] New Section for Smart Peer Finder (MODIFIED) ---
-                    html.Hr(),
-                    # [MODIFIED] Use Stack to align Label and Icon
-                    dbc.Stack(
-                        [
-                            html.Label("Find Smart Peers", className="fw-bold mb-0"),
-                            html.I(
-                                className="bi bi-info-circle-fill ms-auto", # Icon
-                                id="smart-peer-info-icon", # Target ID for Popover
-                                style={'cursor': 'pointer', 'color': '#6c757d'} # Style
-                            )
-                        ],
-                        direction="horizontal",
-                        className="w-100"
-                    ),
-                    # [NEW] Popover component
-                    dbc.Popover(
-                        [
-                            dbc.PopoverHeader("What is Smart Peer Finder?"),
-                            dbc.PopoverBody(
-                                "This tool uses a K-Means Machine Learning model to find similar companies (peers) "
-                                "based on 20+ financial metrics. "
-                                "Benefit: Quickly discover comparable stocks that you might not have considered."
-                            ),
-                        ],
-                        id="smart-peer-popover",
-                        target="smart-peer-info-icon", # Triggers from the icon
-                        trigger="hover", # Show on hover
-                        placement="right",
-                    ),
-                    # [END MODIFICATION]
-                    dcc.Dropdown(
-                        id='peer-reference-stock-dropdown',
-                        placeholder="Select a reference stock...",
-                        clearable=True, 
-                        className="mt-2 sidebar-dropdown" # Added mt-2
-                    ),
-                    dcc.Dropdown(
-                        id='peer-select-dropdown',
-                        placeholder="Select peers to add...",
-                        multi=True, 
-                        className="mt-2 sidebar-dropdown"
-                    ),
-                    html.Div(id='peer-finder-status', className="text-muted small mt-1 mb-2"), 
-                    
-                    # --- [START] BUTTON MODIFICATION ---
-                    dbc.Button(
-                        [html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock(s)"], # <-- MODIFIED Icon and Text
-                        id="add-peer-button", # Keep the same ID
-                        n_clicks=0,
-                        className="w-100", # Keep original class
-                    ),
-                    # --- [END] BUTTON MODIFICATION ---
-                    
-                    # --- [END] New Section for Smart Peer Finder ---
+                    # --- [START] New Section for Smart Peer Finder (REMOVED) ---
+                    # The content for "Find Smart Peers" has been completely removed as per user request.
+                    # --- [END] New Section for Smart Peer Finder (REMOVED) ---
 
                     html.Hr(className="my-4"),
                     html.Div(id='ticker-summary-display'),

@@ -1,6 +1,5 @@
-# app/web/pages/bonds_callbacks.py
-
-from dash import Dash
+import dash # แก้ไข: เพิ่ม import dash เพื่อให้ใช้งาน dash.callback_context และ dash.no_update ได้
+from dash import Dash 
 from dash.dependencies import Input, Output, State, ALL, MATCH
 import dash_html_components as html
 import dash_table
@@ -74,7 +73,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 'peers': [] # No peers by default
             }
 
-        ctx = dash.callback_context
+        ctx = dash.callback_context # แก้ไข: dash ถูก import แล้ว
         if not ctx.triggered:
             # Initial load or no action
             return current_data
@@ -240,7 +239,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             df_curve['Maturity_Years'] = df_curve['ticker'].map(treasury_yields)
             
             if df_curve.empty:
-                return html.P(f"No latest data found for Treasury Yields on {latest_date}.")
+                return html.P(f"No latest data found for Treasury Yields on {latest_date.strftime('%Y-%m-%d')}.")
 
             # 3. Plotting the Yield Curve
             fig = px.line(
@@ -408,7 +407,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         prevent_initial_call=False
     )
     def toggle_definitions_modal(n_graphs, n_tables, n_close, graph_tab, table_tab, is_open):
-        ctx = dash.callback_context
+        ctx = dash.callback_context # แก้ไข: dash ถูก import แล้ว
         if not ctx.triggered:
             return is_open, html.P("Select a tab for definitions.")
 

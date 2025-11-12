@@ -28,6 +28,7 @@ def fetch_daily_prices(tickers):
         df_temp['close'] = base_yield + (np.random.randn(len(date_range)) * (0.5 if t.startswith('^') else 5))
         if t == '^TNX': df_temp['close'] += 1 
         if t == '^TYX': df_temp['close'] += 1.5 
+        if t == '^GSPC': df_temp['close'] *= 20 # S&P 500 is much higher than yields
         df_temp['ticker'] = t
         data.append(df_temp)
     
@@ -55,25 +56,30 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         Input('bonds-add-yield-button', 'n_clicks'),
         Input('bonds-add-benchmark-button', 'n_clicks'),
         Input({'type': 'bonds-remove-ticker-btn', 'index': ALL}, 'n_clicks'),
+        # [MODIFIED: Add URL input to ensure data loads on page navigation]
+        Input('url', 'pathname'), 
         State('bonds-user-selections-store', 'data'),
-        # Inputs must be lists due to multi=True in layout
         State('bonds-yield-select-dropdown', 'value'),
         State('bonds-benchmark-select-dropdown', 'value'),
         prevent_initial_call=False
     )
-    def load_bonds_data_to_store(add_ticker_clicks, add_index_clicks, remove_clicks, current_data, new_tickers_list, new_indices_list):
+    def load_bonds_data_to_store(add_ticker_clicks, add_index_clicks, remove_clicks, url_pathname, current_data, new_tickers_list, new_indices_list):
         """Initializes the store and manages adding/removing yields and benchmarks."""
         
         # --- Default Selections ---
-        if not current_data or not current_data.get('tickers'):
-            current_data = {
-                'tickers': ['^TNX'],
-                'indices': ['^GSPC'],
-            }
+        # [FIXED: Ensure initial_data is correctly structured and is returned on initial load]
+        initial_data = {
+            'tickers': ['^TNX'],
+            'indices': ['^GSPC'],
+        }
+        
+        if not current_data:
+            current_data = initial_data
 
         ctx = dash.callback_context
         if not ctx.triggered:
-            return current_data
+            # On initial load (no triggers), ensure default is set.
+            return initial_data 
 
         button_id = ctx.triggered[0]['prop_id'].split('.')[0]
         
@@ -110,7 +116,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
         # Ensure defaults remain if all are removed
         if not tickers and not indices:
-             current_data = {'tickers': ['^TNX'], 'indices': ['^GSPC']}
+             current_data = initial_data
         else:
             current_data['tickers'] = sorted(list(tickers))
             current_data['indices'] = sorted(list(indices))
@@ -147,6 +153,10 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
     def update_summary_display(data):
         """Renders selected Yields and Benchmarks as badges, mimicking the Stocks page style."""
 
+        # [FIXED] Ensure data is not None
+        if not data:
+            data = {'tickers': [], 'indices': []}
+            
         tickers = data.get('tickers', [])
         indices = data.get('indices', [])
         

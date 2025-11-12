@@ -42,12 +42,6 @@ BOND_METRIC_DEFINITIONS = {
 
 # --- Shared Components ---
 
-# [FIXED: ใช้ Div ว่างเปล่าเหมือน Stocks เพื่อให้ Callback สร้าง Label และ Badge]
-selected_tickers_display = [
-    html.Div(id='bonds-summary-display', className="mb-2"),
-    html.Div(id='bonds-benchmark-summary-display', className="mb-2"),
-]
-
 # The main content area where graphs and tables are displayed (Corrected structure)
 main_content_pane = [
     # --- Graph Tabs ---
@@ -159,7 +153,7 @@ def create_bonds_layout():
                             dcc.Dropdown(
                                 id='bonds-yield-select-dropdown',
                                 options=[{'label': v, 'value': k} for k, v in BOND_YIELD_MAP.items()],
-                                placeholder="Select one or more tickers...",
+                                placeholder="Select one or more yields...",
                                 multi=True, 
                                 className="mt-2 sidebar-dropdown"
                             ),
@@ -172,7 +166,7 @@ def create_bonds_layout():
                             dcc.Dropdown(
                                 id='bonds-benchmark-select-dropdown',
                                 options=[{'label': v, 'value': k} for k, v in BOND_BENCHMARK_MAP.items()],
-                                placeholder="Select one or more indices...",
+                                placeholder="Select one or more benchmarks...",
                                 multi=True, 
                                 className="mb-2 sidebar-dropdown"
                             ),
@@ -183,8 +177,10 @@ def create_bonds_layout():
 
                             html.Hr(className="my-4"),
 
-                            # --- Selected Items Display (ใช้ Div ว่างเปล่า) ---
-                            *selected_tickers_display,
+                            # --- Selected Items Display (ใช้ Div ว่างเปล่าเหมือน Stocks) ---
+                            html.Div(id='bonds-summary-display', className="mb-2"),
+                            html.Div(id='bonds-benchmark-summary-display', className="pt-0"), # pt-0 เพื่อให้ชิดกับ Div บน
+
                             
                         ])),
                         md=3,

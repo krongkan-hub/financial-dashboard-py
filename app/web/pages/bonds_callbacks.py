@@ -1,16 +1,15 @@
-import dash 
-from dash import Dash 
+import dash
+from dash import Dash, dcc, html, dash_table # <-- ADD dcc and dash_table here
 from dash.dependencies import Input, Output, State, ALL, MATCH
-import dash_html_components as html
-import dash_table
+# import dash_html_components as html # Removed redundant import
+# import dash_table # Removed redundant import
 import pandas as pd
-import numpy as np # <--- [แก้ไข] เพิ่มการนำเข้า numpy
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, datetime
-# from app.data.database import FactDailyPrices  # Assumption: Database access object (REMOVED)
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP 
-from app.web.pages.bonds import BOND_METRIC_DEFINITIONS # Import the new definitions
+from app.web.pages.bonds import BOND_METRIC_DEFINITIONS
 
 # --- 7.1 Changed function name ---
 def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
@@ -31,7 +30,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             df_temp = pd.DataFrame({'date': date_range})
             # Generate mock data: Treasury Yields are usually low, ETFs are higher
             base_yield = 4 if t.startswith('^') else 100
-            df_temp['close'] = base_yield + (pd.np.random.randn(len(date_range)) * (0.5 if t.startswith('^') else 5))
+            df_temp['close'] = base_yield + (np.random.randn(len(date_range)) * (0.5 if t.startswith('^') else 5))
             if t == '^TNX': df_temp['close'] += 1 
             if t == '^TYX': df_temp['close'] += 1.5 
             df_temp['ticker'] = t

@@ -1,9 +1,10 @@
-import dash # แก้ไข: เพิ่ม import dash เพื่อให้ใช้งาน dash.callback_context และ dash.no_update ได้
+import dash 
 from dash import Dash 
 from dash.dependencies import Input, Output, State, ALL, MATCH
 import dash_html_components as html
 import dash_table
 import pandas as pd
+import numpy as np # <--- [แก้ไข] เพิ่มการนำเข้า numpy
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, datetime

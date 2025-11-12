@@ -2,6 +2,7 @@ import dash
 from dash import Dash, dcc, html, dash_table, callback_context
 from dash.dependencies import Input, Output, State, ALL, MATCH
 from dash.dash_table.Format import Format, Scheme
+import dash_bootstrap_components as dbc 
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -390,9 +391,9 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             # [FIX] ใช้ Styles ที่เหมือน stocks ใน callbacks.py
             style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
             style_data={'border': '0px', 'backgroundColor': 'transparent'},
-            style_cell={'textAlign': 'right', 'padding': '14px', 'verticalAlign': 'middle'},
+            style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0'},
             style_header_conditional=[{'if': {'column_id': 'Maturity / Benchmark'}, 'textAlign': 'left'}],
-            style_cell_conditional=[{'if': {'column_id': 'Maturity / Benchmark'}, 'textAlign': 'left', 'width': '40%'}],
+            style_cell_conditional=[{'if': {'column_id': 'Maturity / Benchmark'}, 'textAlign': 'left', 'width': '40%', 'verticalAlign': 'middle'}],
             markdown_options={"html": True}
         )
         

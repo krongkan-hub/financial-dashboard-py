@@ -168,7 +168,8 @@ def create_bonds_layout():
                                 options=[{'label': v, 'value': k} for k, v in BOND_BENCHMARK_MAP.items()],
                                 placeholder="Select one or more benchmarks...",
                                 multi=True, 
-                                className="mb-2 sidebar-dropdown"
+                                # [MODIFIED] ลบ mt-2 ออก เพื่อให้ระยะห่างระหว่าง Label กับ Dropdown เท่ากับส่วน Yields
+                                className="sidebar-dropdown"
                             ),
                             # [FIX] ปุ่ม Add Benchmark: ใช้ color="primary" เหมือน Add Yield
                             dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id='bonds-add-benchmark-button', color="primary", className="mt-2 w-100", n_clicks=0),

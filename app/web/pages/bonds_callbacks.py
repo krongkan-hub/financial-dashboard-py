@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, datetime
-from app.data.database import FactDailyPrices  # Assumption: Database access object
+# from app.data.database import FactDailyPrices  # Assumption: Database access object (REMOVED)
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP 
 from app.web.pages.bonds import BOND_METRIC_DEFINITIONS # Import the new definitions
 
@@ -276,12 +276,12 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             ).dropna().reset_index()
             
             if df_filtered.empty or ticker_a not in df_filtered.columns or ticker_b not in df_filtered.columns:
-                return html.P(f"Insufficient time-series data to calculate spread between {full_map[ticker_a]} and {full_map[ticker_b]}.")
+                return html.P(f"Insufficient time-series data to calculate spread between {full_map.get(ticker_a, ticker_a)} and {full_map.get(ticker_b, ticker_b)}.")
 
             # Calculate Spread
             df_filtered['Spread'] = df_filtered[ticker_a] - df_filtered[ticker_b]
             
-            spread_name = f"{full_map[ticker_a]} minus {full_map[ticker_b]}"
+            spread_name = f"{full_map.get(ticker_a, ticker_a)} minus {full_map.get(ticker_b, ticker_b)}"
 
             # Plotting the Spread
             fig = px.line(

@@ -10288,16 +10288,30 @@ COLOR_DISCRETE_MAP = {
 
 # --- Bond Specific Mappings (New for /bonds page) ---
 
-# For the main Yield selection dropdown
+# For the main Yield selection dropdown (EXPANDED)
 BOND_YIELD_MAP = { 
+    # T-Bills
+    '^IRX': '4-Week US T-Bill',
+    '^STIX': '13-Week US T-Bill',
+    '^GTII': '26-Week US T-Bill',
+    # T-Notes / T-Bonds
+    '^TWS': '2-Year US Treasury', 
     '^FVX': '5-Year US Treasury', 
     '^TNX': '10-Year US Treasury', 
-    '^TYX': '30-Year US Treasury' 
+    '^TYX': '30-Year US Treasury',
+    # Corporate Indices
+    'LQD': 'Inv. Grade Corp Bond ETF', 
+    'HYG': 'High-Yield Corp Bond ETF',
+    # Real Yields
+    'TIP': '10-Year TIPS Yield (ETF Proxy)' 
 }
 
-# For the comparative Benchmark selection dropdown
+# For the comparative Benchmark selection dropdown (EXPANDED)
 BOND_BENCHMARK_MAP = { 
     '^GSPC': 'S&P 500 Index', 
-    'LQD': 'Inv. Grade Corp Bond ETF', 
-    'HYG': 'High-Yield Corp Bond ETF' 
+    '^SOFR': 'SOFR Rate (Proxy)', # อัตราดอกเบี้ยอ้างอิง USD
+    '^FFR': 'Fed Funds Rate (Proxy)', # อัตราดอกเบี้ยนโยบาย
+    '^MOVE': 'MOVE Index (Volatility)', # วัดความผันผวนของตลาดพันธบัตร
+    # THB Rates (For Hedging) - ใช้ BOND_BENCHMARK_MAP เป็นที่เก็บ THB Rate Proxy
+    'THB_RATE_1Y': 'THB Interest Rate Proxy (1Y)' 
 }

@@ -1,9 +1,12 @@
+# app/web/pages/bonds.py
+
 from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
+# นำเข้า BOND_YIELD_MAP, BOND_BENCHMARK_MAP จาก app.constants
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE
 from datetime import date
 
-# --- 4.6 (Optional) Bond Specific Metric Definitions (Unchanged) ---
+# --- 4.6 (Optional) Bond Specific Metric Definitions (UPDATED) ---
 # This dictionary is used by the Definitions Modal on the bonds page.
 BOND_METRIC_DEFINITIONS = {
     "tab-yield-history": {
@@ -11,100 +14,60 @@ BOND_METRIC_DEFINITIONS = {
         "description": "Historical performance data for selected Treasury Yields and Benchmarks.",
         "metrics": [
             {"metric": "Yield (%)", "definition": "The daily closing yield or price return of the selected instrument."},
+            {"metric": "THB Hedged Yield", "definition": "The theoretical yield (in THB terms) after hedging currency risk, calculated based on the THB/USD interest rate differential."},
             {"metric": "Date Range", "definition": f"Data is currently pulled from {HISTORICAL_START_DATE.strftime('%Y-%m-%d')} to the latest available day."},
         ]
     },
     "tab-yield-curve": {
         "title": "YIELD CURVE",
-        "description": "Visualizes the current yield curve (yield vs. maturity).",
+        "description": "Visualizes the current and past yield curves for comparison, highlighting shifts in market expectations. The curve is plotted using the selected US Treasury Yields.",
         "metrics": [
-            {"metric": "Yield Curve", "definition": "A line plot showing the interest rates for Treasury securities with different maturity dates. An inverted curve (short-term > long-term) is often a recession indicator."},
+            {"metric": "Yield Curve (Normal)", "definition": "Upward sloping (short-term < long-term). Signals expected economic growth."},
+            {"metric": "Yield Curve (Inverted)", "definition": "Downward sloping (short-term > long-term). Historically a strong predictor of economic recession."},
+            {"metric": "Comparison Lines", "definition": "Shows the curve's shape today vs. a week, month, or year ago, reflecting the Fed's impact on rates."},
         ]
     },
     "tab-yield-spread": {
         "title": "YIELD SPREAD",
-        "description": "The difference in yield between two selected instruments (e.g., 10-Year Treasury minus 2-Year Treasury).",
+        "description": "The difference in yield between multiple Series (e.g., HYG, LQD, 2Y T-Note) and a Single Benchmark (e.g., 10-Year Treasury).",
         "metrics": [
-            {"metric": "Spread", "definition": "The difference between the yields of two instruments. Widening or narrowing spreads reflect changes in market sentiment and risk perception."},
+            {"metric": "Spread (bps)", "definition": "The difference between the yields of two instruments, measured in basis points (bps). Widening or narrowing spreads reflect changes in market sentiment and credit risk perception. (100 bps = 1.00%)"},
+            {"metric": "Credit Spread", "definition": "The difference between Corporate Bond Yield (HYG/LQD) and a risk-free Treasury yield (^TNX). High spread = High credit risk."},
+        ]
+    },
+    "tab-yield-volatility": {
+        "title": "YIELD VOLATILITY",
+        "description": "Historical trends of bond market volatility using the MOVE Index (Merrill Lynch Option Volatility Estimate).",
+        "metrics": [
+            {"metric": "MOVE Index", "definition": "A volatility index for US Treasury bonds. A rising index indicates higher uncertainty and expected future volatility in the bond market."},
+            {"metric": "Duration", "definition": "Measures a bond's price sensitivity to changes in interest rates. A higher Duration implies higher volatility for a bond's price."},
         ]
     },
     "tab-rates-summary": {
         "title": "RATES SUMMARY",
-        "description": "A summary table showing the latest yield, 1-day change, and relevant metadata.",
+        "description": "A summary table showing the latest yield, daily/weekly/YTD change, key spreads, and relevant benchmarks.",
         "metrics": [
             {"metric": "Latest Yield (%)", "definition": "The closing yield on the last trading day."},
-            {"metric": "1-Day Change (bps)", "definition": "The change in yield from the previous day, measured in basis points (bps). 100 bps = 1.00%."},
+            {"metric": "Change (bps)", "definition": "The change in yield over a period, measured in basis points."},
+            {"metric": "THB Hedged Yield", "definition": "The theoretical yield an investor would receive if the USD Bond yield was hedged back to THB, calculated using the THB/USD interest rate differential."},
+            {"metric": "Key Spreads", "definition": "Calculated spreads such as 10Y-2Y and Credit Spread (HYG-10Y)."},
+        ]
+    },
+    "tab-individual-metrics": {
+        "title": "INDIVIDUAL BOND METRICS",
+        "description": "Detailed pricing, credit, and risk analysis for the currently focused bond/yield. Metrics are calculated assuming a representative bond based on the selected yield.",
+        "metrics": [
+            {"metric": "Credit Rating (S&P/Moody's/Fitch)", "definition": "The solvency rating (e.g., AAA, BBB-) assigned by major rating agencies."},
+            {"metric": "Status (Premium/Par/Discount)", "definition": "Determines if the bond's price is above, equal to, or below its Par Value ($100)."},
+            {"metric": "Coupon Rate, YTM, Current Yield", "definition": "Key measures of income, expected total return, and current return."},
+            {"metric": "Duration & Convexity", "definition": "Key measures of price volatility and interest rate risk. Convexity refines the Duration estimate."},
+            {"metric": "Accrued Interest & Clean Price", "definition": "Accrued Interest is the portion of the next coupon the buyer pays the seller. Clean Price is the price excluding this interest."},
+            {"metric": "Valuation (Intrinsic Value)", "definition": "An estimate of the bond's fair price compared to its market price."},
         ]
     },
 }
 
 # --- Shared Components ---
-
-# The main content area where graphs and tables are displayed (Corrected structure)
-main_content_pane = [
-    # --- Graph Tabs ---
-    html.Div(className="custom-tabs-container", children=[
-        dbc.Tabs(
-            id="bonds-analysis-tabs",
-            active_tab="tab-yield-history",
-            children=[
-                dbc.Tab(label="HISTORICAL YIELDS", tab_id="tab-yield-history"),
-                dbc.Tab(label="YIELD CURVE", tab_id="tab-yield-curve"),
-                dbc.Tab(label="YIELD SPREAD", tab_id="tab-yield-spread"),
-            ]
-        )
-    ]),
-
-    # --- Graph Content Pane ---
-    dbc.Card(dbc.CardBody(
-        dcc.Loading(html.Div(id='bonds-analysis-pane-content'))
-    ), className="mt-3"),
-
-    html.Hr(className="my-5"),
-
-    # --- Table Tabs ---
-    dbc.Row(
-        [
-            dbc.Col(
-                html.Div(className="custom-tabs-container", children=[
-                    dbc.Tabs(
-                        id="bonds-table-tabs",
-                        active_tab="tab-rates-summary",
-                        children=[
-                            dbc.Tab(label="RATES SUMMARY", tab_id="tab-rates-summary"),
-                        ]
-                    )
-                ]),
-                md=7
-            ),
-             # Buttons/Dropdown Col
-             dbc.Col(
-                dbc.Stack(
-                    [
-                        # Hidden Gear button for Forecast Modal (per instructions)
-                        dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                        # Info button (Icon only)
-                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="secondary", outline=True),
-                        dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
-                    ],
-                    direction="horizontal",
-                    gap=2,
-                    className="justify-content-start justify-content-lg-end"
-                ),
-                md=5
-            )
-        ],
-        align="center",
-        className="control-row"
-    ),
-    
-    # --- Table Content Pane ---
-    dbc.Card(dbc.CardBody(
-        dcc.Loading(html.Div(id='bonds-table-pane-content'))
-    ), className="mt-2")
-]
-
-# --- Modal for Metric Definitions (Unchanged) ---
 definitions_modal = dbc.Modal(
     [
         dbc.ModalHeader(dbc.ModalTitle("Definition Dictionary")),
@@ -126,36 +89,46 @@ definitions_modal = dbc.Modal(
 # --- Main Layout Function ---
 def create_bonds_layout():
     """Generates the layout for the /bonds page."""
+    
+    # ดึงค่าล่าสุดจาก BOND_YIELD_MAP และ BOND_BENCHMARK_MAP 
+    yield_options = [{'label': v, 'value': k} for k, v in BOND_YIELD_MAP.items()]
+    benchmark_options = [{'label': v, 'value': k} for k, v in BOND_BENCHMARK_MAP.items()]
+    
     return dbc.Container(
         [
             # --- Hidden Data Stores ---
-            dcc.Store(id='bonds-user-selections-store', data={'tickers': ['^TNX'], 'indices': ['^GSPC']}),
+            # [MODIFIED] Set default to Yield Curve components
+            dcc.Store(id='bonds-user-selections-store', data={'tickers': ['^TNX', '^TWS', '^TYX'], 'indices': ['^GSPC']}),
+            # [NEW] Store the current exchange/rate environment
+            dcc.Store(id='bonds-fx-rates-store', data={'THB_RATE_1Y': 0.025, 'USD_RATE_1Y': 0.055}), 
             dcc.Store(id='bonds-forecast-assumptions-store', data={}),
             dcc.Store(id='bonds-dcf-assumptions-store', data={}),
             html.Div(id="navbar-container"), 
+            
+            # [NEW] Definition Modal
+            definitions_modal,
 
             dbc.Row(
                 [
                     # --- Left Sidebar (Controls) ---
                     dbc.Col(
                         dbc.Card(dbc.CardBody([
-                            # [FIX] ลบ "BONDS & YIELDS ANALYSIS 💰" ออกแล้ว
                             html.Label("Add Yields to Analysis", className="fw-bold"),
+                            # Dropdown นี้ถูกใช้แค่เป็น Trigger ใน Callback
                             dcc.Dropdown(
                                 id='bonds-yield-type-dropdown',
-                                options=[{'label': k, 'value': k} for k in BOND_YIELD_MAP.keys()],
+                                options=yield_options, 
                                 value=list(BOND_YIELD_MAP.keys())[0],
                                 clearable=False,
                                 className="mb-2"
                             ),
                             dcc.Dropdown(
                                 id='bonds-yield-select-dropdown',
-                                options=[{'label': v, 'value': k} for k, v in BOND_YIELD_MAP.items()],
+                                options=yield_options,
                                 placeholder="Select one or more yields...",
                                 multi=True, 
                                 className="mt-2 sidebar-dropdown"
                             ),
-                            # [FIX] ปุ่ม Add Yield: ใช้ color="primary" และสไตล์ Stocks
                             dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Yield(s)"], id='bonds-add-yield-button', color="primary", className="mt-2 w-100", n_clicks=0),
                             
                             html.Hr(),
@@ -163,23 +136,28 @@ def create_bonds_layout():
                             html.Label("Add Benchmarks to Compare", className="fw-bold"),
                             dcc.Dropdown(
                                 id='bonds-benchmark-select-dropdown',
-                                options=[{'label': v, 'value': k} for k, v in BOND_BENCHMARK_MAP.items()],
+                                options=benchmark_options,
                                 placeholder="Select one or more benchmarks...",
                                 multi=True, 
-                                # [MODIFIED] ลบ mt-2 ออก เพื่อให้ระยะห่างระหว่าง Label กับ Dropdown เท่ากับส่วน Yields
                                 className="sidebar-dropdown"
                             ),
-                            # [FIX] ปุ่ม Add Benchmark: ใช้ color="primary" เหมือน Add Yield
                             dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id='bonds-add-benchmark-button', color="primary", className="mt-2 w-100", n_clicks=0),
 
-                            # [FIX] ลบ Find Similar ออกไปแล้ว
-
                             html.Hr(className="my-4"),
+                            
+                            # --- [NEW] THB Hedged View Toggle ---
+                            html.Label("VIEW OPTIONS", className="fw-bold"),
+                            dbc.Checklist(
+                                options=[{"label": "Show THB Hedged Yields (THB View)", "value": True}],
+                                value=[],
+                                id="bonds-thb-view-toggle",
+                                switch=True,
+                                className="mb-3"
+                            ),
+                            # --- END NEW ---
 
-                            # --- Selected Items Display (ใช้ Div ว่างเปล่าเหมือน Stocks) ---
                             html.Div(id='bonds-summary-display', className="mb-2"),
-                            html.Div(id='bonds-benchmark-summary-display', className="pt-0"), # pt-0 เพื่อให้ชิดกับ Div บน
-
+                            html.Div(id='bonds-benchmark-summary-display', className="pt-0"),
                             
                         ])),
                         md=3,
@@ -198,6 +176,7 @@ def create_bonds_layout():
                                                 dbc.Tab(label="HISTORICAL YIELDS", tab_id="tab-yield-history"),
                                                 dbc.Tab(label="YIELD CURVE", tab_id="tab-yield-curve"),
                                                 dbc.Tab(label="YIELD SPREAD", tab_id="tab-yield-spread"),
+                                                dbc.Tab(label="YIELD VOLATILITY", tab_id="tab-yield-volatility"),
                                             ])
                                         ]),
                                         md=8
@@ -205,9 +184,7 @@ def create_bonds_layout():
                                     dbc.Col(
                                         dbc.Stack(
                                             [
-                                                # [FIX] Gear button (DCF/Forecast Modal - Hidden)
                                                 dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-dcf-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                                                # [FIX] Info button (Icon only)
                                                 dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-graphs", color="secondary", outline=True),
                                             ],
                                             direction="horizontal",
@@ -235,6 +212,7 @@ def create_bonds_layout():
                                         html.Div(className="custom-tabs-container", children=[
                                             dbc.Tabs(id="bonds-table-tabs", active_tab="tab-rates-summary", children=[
                                                 dbc.Tab(label="RATES SUMMARY", tab_id="tab-rates-summary"),
+                                                dbc.Tab(label="INDIVIDUAL METRICS", tab_id="tab-individual-metrics"),
                                             ])
                                         ]),
                                         md=7
@@ -242,11 +220,8 @@ def create_bonds_layout():
                                      dbc.Col(
                                         dbc.Stack(
                                             [
-                                                # [FIX] Gear button for forecast (Hidden for bonds)
                                                 dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                                                # [FIX] Info button (Icon only)
                                                 dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="secondary", outline=True),
-                                                # [FIX] Sort by dropdown
                                                 dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
                                             ],
                                             direction="horizontal",

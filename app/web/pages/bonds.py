@@ -53,16 +53,35 @@ BOND_METRIC_DEFINITIONS = {
             {"metric": "Key Spreads", "definition": "Calculated spreads such as 10Y-2Y and Credit Spread (HYG-10Y)."},
         ]
     },
-    "tab-individual-metrics": {
-        "title": "INDIVIDUAL BOND METRICS",
-        "description": "Detailed pricing, credit, and risk analysis for the currently focused bond/yield. Metrics are calculated assuming a representative bond based on the selected yield.",
+    # [NEW TAB 1: CREDIT & STATUS]
+    "tab-bond-credit": {
+        "title": "BOND CREDIT & STATUS",
+        "description": "Analysis of the bond's default risk and its current market pricing status.",
         "metrics": [
             {"metric": "Credit Rating (S&P/Moody's/Fitch)", "definition": "The solvency rating (e.g., AAA, BBB-) assigned by major rating agencies."},
             {"metric": "Status (Premium/Par/Discount)", "definition": "Determines if the bond's price is above, equal to, or below its Par Value ($100)."},
-            {"metric": "Coupon Rate, YTM, Current Yield", "definition": "Key measures of income, expected total return, and current return."},
-            {"metric": "Duration & Convexity", "definition": "Key measures of price volatility and interest rate risk. Convexity refines the Duration estimate."},
-            {"metric": "Accrued Interest & Clean Price", "definition": "Accrued Interest is the portion of the next coupon the buyer pays the seller. Clean Price is the price excluding this interest."},
-            {"metric": "Valuation (Intrinsic Value)", "definition": "An estimate of the bond's fair price compared to its market price."},
+        ]
+    },
+    # [NEW TAB 2: DURATION & RISK]
+    "tab-bond-risk": {
+        "title": "BOND DURATION & RISK",
+        "description": "Measures of the bond's price sensitivity to interest rate changes.",
+        "metrics": [
+            {"metric": "Duration (Modified)", "definition": "Measures a bond's price sensitivity to changes in interest rates. A higher Duration implies higher volatility for a bond's price."},
+            {"metric": "Convexity", "definition": "Measures the rate of change of the bond's Duration. It refines the Duration estimate."},
+            {"metric": "Valuation Spread (%)", "definition": "The percentage difference between the Intrinsic Value and the current market Dirty Price."},
+        ]
+    },
+    # [NEW TAB 3: YIELD & PRICING]
+    "tab-bond-pricing": {
+        "title": "BOND YIELD & PRICING",
+        "description": "Key measures of income, expected total return, and price components.",
+        "metrics": [
+            {"metric": "Coupon Rate (%)", "definition": "The annual interest rate paid by the bond issuer."},
+            {"metric": "YTM (%)", "definition": "The total anticipated return if the bond is held until maturity."},
+            {"metric": "Clean Price ($)", "definition": "The bond's price excluding any accrued interest."},
+            {"metric": "Accrued Interest ($)", "definition": "The portion of the next coupon the buyer pays the seller."},
+            {"metric": "Dirty Price ($)", "definition": "The actual market price including accrued interest (Clean Price + Accrued Interest)."},
         ]
     },
 }
@@ -212,7 +231,11 @@ def create_bonds_layout():
                                         html.Div(className="custom-tabs-container", children=[
                                             dbc.Tabs(id="bonds-table-tabs", active_tab="tab-rates-summary", children=[
                                                 dbc.Tab(label="RATES SUMMARY", tab_id="tab-rates-summary"),
-                                                dbc.Tab(label="INDIVIDUAL METRICS", tab_id="tab-individual-metrics"),
+                                                # --- [MODIFIED: Split INDIVIDUAL METRICS into 3 tabs] ---
+                                                dbc.Tab(label="CREDIT & STATUS", tab_id="tab-bond-credit"),
+                                                dbc.Tab(label="DURATION & RISK", tab_id="tab-bond-risk"),
+                                                dbc.Tab(label="YIELD & PRICING", tab_id="tab-bond-pricing"),
+                                                # --- [END MODIFIED] ---
                                             ])
                                         ]),
                                         md=7

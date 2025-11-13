@@ -1,6 +1,5 @@
-from dash import dcc, html
+from dash import dcc, html, dash_table # FIX: Import dash_table from the main dash package
 import dash_bootstrap_components as dbc
-import dash_table
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE
 from datetime import date
 

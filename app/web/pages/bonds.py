@@ -1,4 +1,4 @@
-from dash import dcc, html, dash_table # FIX: Import dash_table from the main dash package
+from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE
 from datetime import date
@@ -89,13 +89,13 @@ main_content_pane = [
                     ],
                     direction="horizontal",
                     gap=2,
-                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
+                    className="justify-content-start justify-content-lg-end"
                 ),
                 md=5
             )
         ],
         align="center",
-        className="control-row mt-3"
+        className="control-row"
     ),
     
     # --- Table Content Pane ---
@@ -212,7 +212,7 @@ def create_bonds_layout():
                                             ],
                                             direction="horizontal",
                                             gap=2,
-                                            className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
+                                            className="justify-content-start justify-content-lg-end"
                                         ),
                                         md=4
                                     )
@@ -222,7 +222,10 @@ def create_bonds_layout():
                             ),
 
                             # Graph Content (ใช้ dbc.Card(dbc.CardBody(...)))
-                            dcc.Loading(html.Div(id='bonds-analysis-pane-content')),
+                            dbc.Card(dbc.CardBody(
+                                dcc.Loading(html.Div(id='bonds-analysis-pane-content'))
+                            ), className="mt-3"),
+
                             html.Hr(className="my-5"),
 
                             # Table Controls Row (Bottom Right)
@@ -248,13 +251,13 @@ def create_bonds_layout():
                                             ],
                                             direction="horizontal",
                                             gap=2,
-                                            className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
+                                            className="justify-content-start justify-content-lg-end"
                                         ),
                                         md=5
                                     )
                                 ],
                                 align="center",
-                                className="control-row mt-3"
+                                className="control-row" 
                             ),
 
                             # Table Content

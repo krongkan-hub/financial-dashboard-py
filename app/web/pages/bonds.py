@@ -225,6 +225,7 @@ def create_bonds_layout():
                             html.Hr(className="my-5"),
 
                             # Table Controls Row (Bottom Right)
+                            # [FIX] แยกปุ่ม Sort by ออกจาก Stack เพื่อไม่ให้บัง Tabs
                             dbc.Row(
                                 [
                                     dbc.Col(
@@ -238,24 +239,35 @@ def create_bonds_layout():
                                                 # --- [END MODIFIED] ---
                                             ])
                                         ]),
-                                        md=7
+                                        # [FIX]: เพิ่มความกว้างให้ปุ่มแท็บมีพื้นที่มากขึ้น
+                                        width=12, md=8 
                                     ),
                                      dbc.Col(
                                         dbc.Stack(
                                             [
                                                 dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
                                                 dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="secondary", outline=True),
-                                                dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
                                             ],
                                             direction="horizontal",
                                             gap=2,
-                                            className="justify-content-start justify-content-lg-end"
+                                            className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                         ),
-                                        md=5
+                                        # [FIX]: ลดความกว้างคอลัมน์เหลือ md=4 และเอา Dropdown ออก
+                                        width=12, md=4 
                                     )
                                 ],
                                 align="center",
                                 className="control-row" 
+                            ),
+                            
+                            # [NEW ROW] สำหรับปุ่ม Sort By (เพื่อไม่ให้บัง Tabs)
+                            dbc.Row(
+                                dbc.Col(
+                                    dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'}),
+                                    # จัดวางปุ่ม Sort By ให้อยู่ทางขวา
+                                    width=12, md={'size': 4, 'offset': 8}, lg={'size': 3, 'offset': 9},
+                                    className="mt-2"
+                                )
                             ),
 
                             # Table Content

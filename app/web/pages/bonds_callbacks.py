@@ -58,7 +58,8 @@ def fetch_daily_prices(tickers, start_date=datetime(2020, 1, 1).date()):
     df['previous_close'] = df.groupby('ticker')['close'].shift(1)
     # [NEW] Calculate 1 Week/YTD Change (Mock)
     df['weekly_change'] = df.groupby('ticker')['close'].diff(periods=5) * 10000 
-    df['ytd_change'] = df.groupby('ticker')['close'] - df.groupby('ticker')['close'].transform(lambda x: x.iloc[0]) # Mock YTD difference
+    # FIX: Calculate YTD change by subtracting the first element of each group from the current element using the robust 'first' argument.
+    df['ytd_change'] = df['close'] - df.groupby('ticker')['close'].transform('first')
     return df
 
 # [NEW MOCK] Mock function for advanced individual bond metrics

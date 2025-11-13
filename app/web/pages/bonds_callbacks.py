@@ -10,7 +10,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import date, datetime, timedelta # [MODIFIED: Add timedelta]
+from datetime import date, datetime, timedelta 
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP 
 from app.web.pages.bonds import BOND_METRIC_DEFINITIONS
 
@@ -26,8 +26,8 @@ def fetch_daily_prices(tickers, start_date=datetime(2020, 1, 1).date()):
         
         # --- Yield Simulation ---
         if t in ['^IRX', '^STIX', '^GTII', '^TWS', '^FVX', '^TNX', '^TYX']:
-            base_yield = 4.0 + (5 - 4) * (t in ['^IRX', '^STIX', '^GTII']) # T-Bills are often higher
-            if t == '^TYX': base_yield -= 0.5 # Long end often lower
+            base_yield = 4.0 + (5 - 4) * (t in ['^IRX', '^STIX', '^GTII']) 
+            if t == '^TYX': base_yield -= 0.5 
             df_temp['close'] = base_yield + (np.random.randn(len(date_range)) * 0.4)
             
         # --- Benchmark Simulation ---
@@ -56,19 +56,14 @@ def fetch_daily_prices(tickers, start_date=datetime(2020, 1, 1).date()):
         
     df = pd.concat(data)
     df['previous_close'] = df.groupby('ticker')['close'].shift(1)
-    # [NEW] Calculate 1 Week/YTD Change (Mock)
     df['weekly_change'] = df.groupby('ticker')['close'].diff(periods=5) * 10000 
-    # FIX: Calculate YTD change by subtracting the first element of each group from the current element using the robust 'first' argument.
     df['ytd_change'] = df['close'] - df.groupby('ticker')['close'].transform('first')
     return df
 
 # [NEW MOCK] Mock function for advanced individual bond metrics
 def mock_individual_bond_metrics(ticker):
-    # This is a complex function and should return a dict/DataFrame for the selected ticker.
-    # We mock it to include all required fields: Rating, Coupon, YTM, Duration, Pricing Status
-    
     # Use ticker name to create some variance
-    np.random.seed(hash(ticker) % 4294967295) # Simple seed based on string
+    np.random.seed(hash(ticker) % 4294967295) 
 
     rating = np.random.choice(['AAA', 'AA+', 'A-', 'BBB', 'BB+', 'B-'])
     coupon_rate = np.random.uniform(2.0, 7.0)
@@ -78,7 +73,6 @@ def mock_individual_bond_metrics(ticker):
     convexity = np.random.uniform(0.5, 2.5)
     
     current_price = np.random.uniform(90.0, 110.0)
-    par_value = 100.0
     
     if current_price > 105: status = "Premium Bond"
     elif current_price < 95: status = "Discount Bond"
@@ -87,12 +81,11 @@ def mock_individual_bond_metrics(ticker):
     accrued_interest = np.random.uniform(0.1, 1.5)
     clean_price = current_price - accrued_interest
     
-    # Intrinsic Value Mock: Simple 5% valuation buffer
     intrinsic_value = current_price * (1 + np.random.uniform(-0.02, 0.05))
 
     return {
         'Ticker': ticker,
-        'Maturity': '10-Year' if ticker == '^TNX' else '5-Year' if ticker == '^FVX' else '30-Year',
+        'Maturity / Benchmark': '10-Year' if ticker == '^TNX' else '5-Year' if ticker == '^FVX' else '30-Year', # Renamed column
         'Credit Rating (S&P)': rating,
         'Coupon Rate (%)': coupon_rate,
         'YTM (%)': ytm,
@@ -107,7 +100,6 @@ def mock_individual_bond_metrics(ticker):
     }
 
 # --- Utility Functions (Adapted for Bonds) ---
-# ... (get_user_symbols เดิม) ...
 def get_user_symbols(data):
     """Helper to extract active symbols (Yields and Benchmarks)."""
     tickers = data.get('tickers', [])
@@ -115,7 +107,6 @@ def get_user_symbols(data):
     all_symbols = list(set(tickers + indices))
     return all_symbols, tickers, indices
 
-# [NEW HELPER]
 def apply_thb_hedging(df, thb_rate_proxy=0.025, usd_rate_proxy=0.055):
     """
     Applies the THB Hedged Yield adjustment to the 'close' column (in percentage points).
@@ -124,20 +115,63 @@ def apply_thb_hedging(df, thb_rate_proxy=0.025, usd_rate_proxy=0.055):
     if df.empty: return df
     
     df_adj = df.copy()
-    
-    # Assuming the USD Yield ('close') is in percent, convert all rates to decimal first
-    # Rate Differential (RD) = THB Rate - USD Rate
     rate_differential = thb_rate_proxy - usd_rate_proxy
-    
-    # We apply the RD to the yield in percentage points
     df_adj['close_hedged'] = df_adj['close'] + (rate_differential * 100)
     return df_adj
+
+# [CRITICAL FIX 1: Standalone Column Generation Helper]
+def _generate_datatable_columns_detail(df):
+    columns = []
+    for col in df.columns:
+        col_def = {"name": col, "id": col}
+        if 'Price' in col or 'Interest' in col:
+            col_def.update({'type': 'numeric', 'format': Format(precision=3, scheme=Scheme.fixed)})
+        elif '%' in col or 'YTM' in col or 'Coupon' in col or 'Duration' in col:
+            col_def.update({'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
+        columns.append(col_def)
+    return columns
+
+# [CRITICAL FIX 2: Simple Data Fetch Helper (returns DataFrame or Alert)]
+def _get_detail_table_data(eligible_tickers):
+    """Fetches or generates the detailed metrics DataFrame."""
+    if not eligible_tickers:
+        return dbc.Alert("Please select at least one core Treasury or Corporate ETF Yield for in-depth analysis.", color="info", className="mt-3 text-center")
+
+    df_details = pd.DataFrame([mock_individual_bond_metrics(t) for t in eligible_tickers])
+    
+    # Returns DataFrame (length 1) OR Alert (length 1)
+    return df_details
+    
+# [CRITICAL FIX 3: Renderer Helper (always returns 3 elements)]
+def _render_detailed_table(df_table, cols_to_show, sort_col):
+    df_table = df_table[cols_to_show].copy()
+    sort_options = [{'label': col, 'value': col} for col in cols_to_show if col not in ['Ticker', 'Status', 'Credit Rating (S&P)']]
+
+    if sort_col and sort_col in df_table.columns:
+        try:
+            df_table.sort_values(by=sort_col, ascending=False, inplace=True)
+        except Exception:
+             df_table.sort_values(by=sort_col, ascending=False, key=lambda col: col.astype(str), inplace=True)
+
+    table = dash_table.DataTable(
+        id='bonds-individual-metrics-table',
+        columns=_generate_datatable_columns_detail(df_table), # Uses the standalone helper
+        data=df_table.to_dict('records'),
+        style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
+        style_data={'border': '0px', 'backgroundColor': 'transparent'},
+        style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0'},
+        style_header_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}],
+        style_cell_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left', 'width': '10%', 'verticalAlign': 'middle'}],
+        markdown_options={"html": True}
+    )
+    # Returns [children], options, value (Length 3)
+    return [table], sort_options, sort_col
+
 
 # --- Main Registration Function ---
 def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
     # --- 8.1 Load Data Store (bonds-user-selections-store) ---
-    # ... (Callback เดิม) ...
     @app.callback(
         Output('bonds-user-selections-store', 'data'),
         Input('bonds-add-yield-button', 'n_clicks'),
@@ -153,7 +187,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         """Initializes the store and manages adding/removing yields and benchmarks."""
         
         initial_data = {
-            'tickers': ['^TNX', '^TWS', '^TYX'], # [MODIFIED] Set default to Yield Curve components
+            'tickers': ['^TNX', '^TWS', '^TYX'], 
             'indices': ['^GSPC'],
         }
         
@@ -190,7 +224,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             current_data['indices'] = sorted(list(indices))
 
         return current_data
-    # ... (Callbacks Update Dropdowns and Summary Display เดิม) ...
 
     @app.callback(
         Output('bonds-yield-select-dropdown', 'options'),
@@ -258,7 +291,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         if thb_view_active:
             thb_rate = fx_rates.get('THB_RATE_1Y', 0.025)
             usd_rate = fx_rates.get('USD_RATE_1Y', 0.055)
-            # Only apply hedging to yields (tickers)
             df_yields = df_all[df_all['ticker'].isin(tickers)].copy()
             df_benchmarks = df_all[df_all['ticker'].isin(indices)].copy()
             
@@ -298,7 +330,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             if not active_yield_tickers:
                  return dbc.Alert("Please select US Treasury Yields (^TWS, ^TNX, ^TYX, etc.) to plot the Yield Curve.", color="info", className="mt-3 text-center")
 
-            # Mock old dates for comparison lines
             latest_date = df_all['date'].max()
             compare_dates = {
                 "Today": latest_date,
@@ -309,7 +340,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             
             df_curve_data = []
             for name, comp_date in compare_dates.items():
-                # Find the closest available date in the dataset
                 df_closest_date = df_all[df_all['ticker'].isin(active_yield_tickers)].iloc[(df_all['date'] - comp_date).abs().argsort()[:len(active_yield_tickers)]].copy()
                 
                 df_curve = df_closest_date[df_closest_date['ticker'].isin(active_yield_tickers)].copy()
@@ -339,11 +369,9 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
         # --- Tab: YIELD SPREAD (tab-yield-spread) ---
         elif active_tab == "tab-yield-spread":
-            # --- [NEW LOGIC: Single Benchmark Rule] ---
             if len(all_symbols) < 2:
                 return dbc.Alert("Please select at least two instruments (Yields/Benchmarks) to calculate a Spread.", color="info", className="mt-3 text-center")
             
-            # Use the first index as the required single benchmark
             benchmark = all_symbols[0] 
             series_to_compare = all_symbols[1:] 
             
@@ -361,7 +389,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 if series in df_pivot.columns:
                     df_series = df_pivot.dropna(subset=[benchmark, series]).copy()
                     
-                    # Calculate Spread (Series - Benchmark)
                     df_series['Spread'] = (df_series[series] - df_series[benchmark]) * 100
                     df_series['Spread Name'] = f"{full_map.get(series, series)} - {full_map.get(benchmark, benchmark)}"
                     df_series['Ticker'] = series
@@ -371,7 +398,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
             df_final_spread = pd.concat(spread_data)
 
-            # Plotting the Spread
             fig = px.line(
                 df_final_spread,
                 x='date',
@@ -386,7 +412,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
         # --- Tab: YIELD VOLATILITY (tab-yield-volatility) ---
         elif active_tab == "tab-yield-volatility":
-            # The MOVE Index is already mocked in fetch_daily_prices
             move_ticker = '^MOVE'
             df_move = df_all[df_all['ticker'] == move_ticker].copy()
             
@@ -414,8 +439,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         Input('bonds-table-tabs', 'active_tab'),
         Input('bonds-user-selections-store', 'data'),
         Input('bonds-sort-by-dropdown', 'value'),
-        Input('bonds-thb-view-toggle', 'value'), # [NEW INPUT]
-        State('bonds-fx-rates-store', 'data'),  # [NEW STATE]
+        Input('bonds-thb-view-toggle', 'value'), 
+        State('bonds-fx-rates-store', 'data'),  
         prevent_initial_call=True
     )
     def render_bond_table_content(active_tab, data, sort_by, thb_view_enabled, fx_rates):
@@ -426,55 +451,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
         # --- Helper for Detailed Metric Tabs ---
         eligible_tickers = [t for t in tickers if t in ['^IRX', '^TWS', '^TNX', '^FVX', '^TYX', 'LQD', 'HYG', 'TIP']]
-        
-        def _get_detail_table_data():
-            if not eligible_tickers:
-                return dbc.Alert("Please select at least one core Treasury or Corporate ETF Yield for in-depth analysis.", color="info", className="mt-3 text-center"), [], None
-
-            df_details = pd.DataFrame([mock_individual_bond_metrics(t) for t in eligible_tickers])
-            
-            # Helper to generate columns definition for detailed tables
-            def _generate_datatable_columns_detail(df):
-                columns = []
-                for col in df.columns:
-                    col_def = {"name": col, "id": col}
-                    if 'Price' in col or 'Interest' in col:
-                        col_def.update({'type': 'numeric', 'format': Format(precision=3, scheme=Scheme.fixed)})
-                    elif '%' in col or 'YTM' in col or 'Coupon' in col or 'Duration' in col:
-                        col_def.update({'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
-                    columns.append(col_def)
-                return columns
-
-            return df_details, _generate_datatable_columns_detail
-
-        # --- Common Table Rendering Logic for Detailed Tabs ---
-        def _render_detailed_table(df_table, cols_to_show, sort_col):
-            df_table = df_table[cols_to_show].copy()
-            sort_options = [{'label': col, 'value': col} for col in cols_to_show if col not in ['Ticker', 'Status', 'Credit Rating (S&P)']]
-
-            if sort_col and sort_col in df_table.columns:
-                try:
-                    df_table.sort_values(by=sort_col, ascending=False, inplace=True)
-                except Exception:
-                     df_table.sort_values(by=sort_col, ascending=False, key=lambda col: col.astype(str), inplace=True)
-
-            table = dash_table.DataTable(
-                id='bonds-individual-metrics-table',
-                columns=_generate_datatable_columns_detail(df_table),
-                data=df_table.to_dict('records'),
-                style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
-                style_data={'border': '0px', 'backgroundColor': 'transparent'},
-                style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0'},
-                style_header_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}],
-                style_cell_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left', 'width': '10%', 'verticalAlign': 'middle'}],
-                markdown_options={"html": True}
-            )
-            return [table], sort_options, sort_col
-        # --- End Common Table Rendering Logic ---
-
-
-        if not all_symbols:
-            return dbc.Alert("Please select at least one instrument for the summary table.", color="info", className="mt-3 text-center"), [], None
         
         # --- Tab: RATES SUMMARY (tab-rates-summary) ---
         if active_tab == "tab-rates-summary":
@@ -495,19 +471,16 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             latest_date = df_daily['date'].max()
             df_latest = df_daily[df_daily['date'] == latest_date].copy()
             
-            # --- Calculate Daily/Weekly/YTD Change (Mocked) ---
             df_summary = df_latest[['ticker', 'close', 'previous_close', 'weekly_change', 'ytd_change']].rename(columns={'close': 'latest_yield'})
             df_summary['1-Day Change (bps)'] = (df_summary['latest_yield'] - df_summary['previous_close']) * 10000
-            df_summary['1-Week Change (bps)'] = df_summary['weekly_change'] # Already in bps
-            df_summary['YTD Change (%)'] = df_summary['ytd_change'] # Mock YTD change
+            df_summary['1-Week Change (bps)'] = df_summary['weekly_change']
+            df_summary['YTD Change (%)'] = df_summary['ytd_change'] 
             
-            # --- Calculate Key Spreads ---
             df_spread = df_daily.pivot(index='date', columns='ticker', values='close')
             spreads = []
             
-            # Mock 10Y-2Y Spread
             if '^TNX' in df_spread.columns and '^TWS' in df_spread.columns:
-                spread_val = (df_spread['^TNX'] - df_spread['^TWS']).iloc[-1] * 100 # Last point in bps
+                spread_val = (df_spread['^TNX'] - df_spread['^TWS']).iloc[-1] * 100 
                 spreads.append({
                     'Maturity / Benchmark': 'Spread: US 10Y - 2Y (bps)',
                     'latest_yield': spread_val,
@@ -516,9 +489,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                     'YTD Change (%)': np.nan 
                 })
                 
-            # Mock Credit Spread (HYG - 10Y)
             if 'HYG' in df_spread.columns and '^TNX' in df_spread.columns:
-                spread_val = (df_spread['HYG'] - df_spread['^TNX']).iloc[-1] * 100 # Last point in bps
+                spread_val = (df_spread['HYG'] - df_spread['^TNX']).iloc[-1] * 100 
                 spreads.append({
                     'Maturity / Benchmark': 'Spread: HYG - 10Y (bps)',
                     'latest_yield': spread_val,
@@ -536,10 +508,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 'YTD Change (%)'
             ]].copy()
             
-            # Concat with spreads
             df_table = pd.concat([df_table, pd.DataFrame(spreads)]).fillna(value={'latest_yield': np.nan})
 
-            # Rename columns for display
             df_table.columns = [
                 'Maturity / Benchmark', 
                 yield_col_name, 
@@ -554,7 +524,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             if sort_by and sort_by in df_table.columns:
                 df_table = df_table.sort_values(by=sort_by, ascending=False)
             
-            def _generate_datatable_columns(df):
+            def _generate_datatable_columns_summary(df):
                 columns = []
                 for col in df.columns:
                     col_def = {"name": col, "id": col}
@@ -569,9 +539,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
             table = dash_table.DataTable(
                 id='bonds-rates-summary-table',
-                columns=_generate_datatable_columns(df_table),
+                columns=_generate_datatable_columns_summary(df_table),
                 data=df_table.to_dict('records'),
-                # ... (Style เดิม) ...
                 style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
                 style_data={'border': '0px', 'backgroundColor': 'transparent'},
                 style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0'},
@@ -584,34 +553,36 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
         # --- Tab: CREDIT & STATUS (tab-bond-credit) ---
         elif active_tab == "tab-bond-credit":
-            result = _get_detail_table_data()
-            if isinstance(result, tuple) and len(result) == 3:
-                df_details, _generate_datatable_columns_detail = result
-            else:
-                return result # Return the Alert
+            df_details_or_alert = _get_detail_table_data(eligible_tickers)
             
+            if isinstance(df_details_or_alert, dbc.Alert):
+                 return df_details_or_alert, [], None # <--- FIX: Ensure 3 outputs
+
+            df_details = df_details_or_alert
             cols_to_show = ['Ticker', 'Credit Rating (S&P)', 'Status']
-            return _render_detailed_table(df_details, cols_to_show, sort_by)
+            return _render_detailed_table(df_details, cols_to_show, sort_by) 
+
 
         # --- Tab: DURATION & RISK (tab-bond-risk) ---
         elif active_tab == "tab-bond-risk":
-            result = _get_detail_table_data()
-            if isinstance(result, tuple) and len(result) == 3:
-                df_details, _generate_datatable_columns_detail = result
-            else:
-                return result # Return the Alert
+            df_details_or_alert = _get_detail_table_data(eligible_tickers)
             
+            if isinstance(df_details_or_alert, dbc.Alert):
+                 return df_details_or_alert, [], None # <--- FIX: Ensure 3 outputs
+
+            df_details = df_details_or_alert
             cols_to_show = ['Ticker', 'Duration (Modified)', 'Convexity', 'Valuation Spread (%)']
             return _render_detailed_table(df_details, cols_to_show, sort_by)
 
+
         # --- Tab: YIELD & PRICING (tab-bond-pricing) ---
         elif active_tab == "tab-bond-pricing":
-            result = _get_detail_table_data()
-            if isinstance(result, tuple) and len(result) == 3:
-                df_details, _generate_datatable_columns_detail = result
-            else:
-                return result # Return the Alert
+            df_details_or_alert = _get_detail_table_data(eligible_tickers)
+            
+            if isinstance(df_details_or_alert, dbc.Alert):
+                 return df_details_or_alert, [], None # <--- FIX: Ensure 3 outputs
 
+            df_details = df_details_or_alert
             cols_to_show = ['Ticker', 'Coupon Rate (%)', 'YTM (%)', 'Clean Price ($)', 'Accrued Interest ($)', 'Dirty Price ($)']
             return _render_detailed_table(df_details, cols_to_show, sort_by)
 
@@ -620,7 +591,6 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
 
     # --- Modal Callbacks (Unchanged Logic, Corrected IDs) ---
-    # ... (Toggle Definitions Modal และ Toggle Forecast Modal เดิม) ...
     @app.callback(
         Output("bonds-definitions-modal", "is_open"),
         Output("bonds-definitions-modal-content", "children"),

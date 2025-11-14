@@ -62,6 +62,7 @@ def fetch_daily_prices(tickers, start_date=datetime(2020, 1, 1).date()):
 
 # [NEW MOCK] Mock function for advanced individual bond metrics
 def mock_individual_bond_metrics(ticker):
+    """Generates mock data for individual bond metrics including Credit Rating, PAR, YTM, and Prices."""
     # Use ticker name to create some variance
     np.random.seed(hash(ticker) % 4294967295) 
 
@@ -74,6 +75,7 @@ def mock_individual_bond_metrics(ticker):
     
     current_price = np.random.uniform(90.0, 110.0)
     
+    # Logic for PAR status (Premium/Par/Discount)
     if current_price > 105: status = "Premium Bond"
     elif current_price < 95: status = "Discount Bond"
     else: status = "Par Bond"
@@ -85,11 +87,11 @@ def mock_individual_bond_metrics(ticker):
 
     return {
         'Ticker': ticker,
-        'Maturity / Benchmark': '10-Year' if ticker == '^TNX' else '5-Year' if ticker == '^FVX' else '30-Year', # Renamed column
+        'Maturity / Benchmark': '10-Year' if ticker == '^TNX' else '5-Year' if ticker == '^FVX' else '30-Year', 
         'Credit Rating (S&P)': rating,
         'Coupon Rate (%)': coupon_rate,
         'YTM (%)': ytm,
-        'Status': status,
+        'PAR': status, # <--- KEY CHANGED from 'Status' to 'PAR'
         'Duration (Modified)': duration,
         'Convexity': convexity,
         'Clean Price ($)': clean_price,
@@ -121,19 +123,27 @@ def apply_thb_hedging(df, thb_rate_proxy=0.025, usd_rate_proxy=0.055):
 
 # [CRITICAL FIX 1: Standalone Column Generation Helper]
 def _generate_datatable_columns_detail(df):
+    """Generates column definitions for the detail table with appropriate formatting."""
     columns = []
     for col in df.columns:
         col_def = {"name": col, "id": col}
-        if 'Price' in col or 'Interest' in col:
+        # Fixed point formatting for currency/price
+        if 'Price' in col or 'Interest' in col or 'Intrinsic Value' in col:
             col_def.update({'type': 'numeric', 'format': Format(precision=3, scheme=Scheme.fixed)})
-        elif '%' in col or 'YTM' in col or 'Coupon' in col or 'Duration' in col:
+        # Fixed point formatting for percentages/ratios
+        elif '%' in col or 'YTM' in col or 'Coupon' in col or 'Duration' in col or 'Convexity' in col:
             col_def.update({'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
+        # Text formatting for Ticker, Rating, PAR status
+        else:
+             col_def.update({"type": "text"})
+             
         columns.append(col_def)
     return columns
 
 # [CRITICAL FIX 2: Simple Data Fetch Helper (returns DataFrame or Alert)]
 def _get_detail_table_data(eligible_tickers):
     """Fetches or generates the detailed metrics DataFrame."""
+    # Treasury and Corporate ETFs that can be analyzed in detail
     if not eligible_tickers:
         return dbc.Alert("Please select at least one core Treasury or Corporate ETF Yield for in-depth analysis.", color="info", className="mt-3 text-center")
 
@@ -144,13 +154,19 @@ def _get_detail_table_data(eligible_tickers):
     
 # [CRITICAL FIX 3: Renderer Helper (always returns 3 elements)]
 def _render_detailed_table(df_table, cols_to_show, sort_col):
+    """Generates the DataTable and dropdown options based on the data and columns to show."""
     df_table = df_table[cols_to_show].copy()
-    sort_options = [{'label': col, 'value': col} for col in cols_to_show if col not in ['Ticker', 'Status', 'Credit Rating (S&P)']]
+    
+    # Sort options: Exclude descriptive/text columns
+    sort_options = [{'label': col, 'value': col} for col in cols_to_show if col not in ['Ticker', 'PAR', 'Credit Rating (S&P)']]
 
+    # Sorting logic
     if sort_col and sort_col in df_table.columns:
         try:
+            # Try numeric sort first
             df_table.sort_values(by=sort_col, ascending=False, inplace=True)
         except Exception:
+             # Fallback to string sort if numeric fails
              df_table.sort_values(by=sort_col, ascending=False, key=lambda col: col.astype(str), inplace=True)
 
     table = dash_table.DataTable(
@@ -191,6 +207,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             'indices': ['^GSPC'],
         }
         
+        if url_pathname != '/bonds': return dash.no_update # Only update if we are on the bonds page or initial load
         if not current_data: current_data = initial_data
 
         ctx = dash.callback_context
@@ -344,8 +361,11 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 df_closest_date = df_all[df_all['ticker'].isin(active_yield_tickers)].copy()
                 
                 # Find the closest date for each period, per ticker
-                df_curve = df_closest_date.iloc[(df_closest_date['date'] - comp_date).abs().argsort()[:len(active_yield_tickers)]].copy()
-
+                df_closest_date['diff'] = (df_closest_date['date'] - comp_date).abs()
+                
+                # Group by ticker and take the row with minimum 'diff' (closest date)
+                df_curve = df_closest_date.loc[df_closest_date.groupby('ticker')['diff'].idxmin()].copy()
+                
                 df_curve['Maturity_Years'] = df_curve['ticker'].map(treasury_yields)
                 df_curve['Period'] = name
                 df_curve_data.append(df_curve)
@@ -392,7 +412,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 if series in df_pivot.columns:
                     df_series = df_pivot.dropna(subset=[benchmark, series]).copy()
                     
-                    df_series['Spread'] = (df_series[series] - df_series[benchmark]) * 100
+                    # Spread is in bps (100 * (Y_Series - Y_Benchmark))
+                    df_series['Spread'] = (df_series[series] - df_series[benchmark]) * 100 
                     df_series['Spread Name'] = f"{full_map.get(series, series)} - {full_map.get(benchmark, benchmark)}"
                     df_series['Ticker'] = series
                     spread_data.append(df_series[['date', 'Spread', 'Spread Name', 'Ticker']])
@@ -453,17 +474,19 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         full_map = {**BOND_YIELD_MAP, **BOND_BENCHMARK_MAP}
 
         # --- Helper for Detailed Metric Tabs ---
+        # Only Treasury and Corporate ETF yields are eligible for mock detail analysis
         eligible_tickers = [t for t in tickers if t in ['^IRX', '^TWS', '^TNX', '^FVX', '^TYX', 'LQD', 'HYG', 'TIP']]
         
         # --- Tab: CREDIT & STATUS (tab-bond-credit) ---
-        if active_tab == "tab-bond-credit": # Changed to IF since it's the first condition
+        if active_tab == "tab-bond-credit": 
             df_details_or_alert = _get_detail_table_data(eligible_tickers)
             
             if isinstance(df_details_or_alert, dbc.Alert):
-                 return df_details_or_alert, [], None # <--- FIX: Ensure 3 outputs
+                 return df_details_or_alert, [], None
 
             df_details = df_details_or_alert
-            cols_to_show = ['Ticker', 'Credit Rating (S&P)', 'Status']
+            # UPDATED: Added PAR, Coupon Rate (%), YTM (%)
+            cols_to_show = ['Ticker', 'Credit Rating (S&P)', 'PAR', 'Coupon Rate (%)', 'YTM (%)'] 
             return _render_detailed_table(df_details, cols_to_show, sort_by) 
 
 
@@ -472,22 +495,23 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             df_details_or_alert = _get_detail_table_data(eligible_tickers)
             
             if isinstance(df_details_or_alert, dbc.Alert):
-                 return df_details_or_alert, [], None # <--- FIX: Ensure 3 outputs
+                 return df_details_or_alert, [], None
 
             df_details = df_details_or_alert
             cols_to_show = ['Ticker', 'Duration (Modified)', 'Convexity', 'Valuation Spread (%)']
             return _render_detailed_table(df_details, cols_to_show, sort_by)
 
 
-        # --- Tab: YIELD & PRICING (tab-bond-pricing) ---
+        # --- Tab: YIELD & DIRTY PRICE (tab-bond-pricing) ---
         elif active_tab == "tab-bond-pricing":
             df_details_or_alert = _get_detail_table_data(eligible_tickers)
             
             if isinstance(df_details_or_alert, dbc.Alert):
-                 return df_details_or_alert, [], None # <--- FIX: Ensure 3 outputs
+                 return df_details_or_alert, [], None
 
             df_details = df_details_or_alert
-            cols_to_show = ['Ticker', 'Coupon Rate (%)', 'YTM (%)', 'Clean Price ($)', 'Accrued Interest ($)', 'Dirty Price ($)']
+            # UPDATED: Removed moved metrics, kept Dirty Price ($) + Valuation Spread (%)
+            cols_to_show = ['Ticker', 'Clean Price ($)', 'Accrued Interest ($)', 'Dirty Price ($)', 'Valuation Spread (%)']
             return _render_detailed_table(df_details, cols_to_show, sort_by)
 
 

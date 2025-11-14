@@ -7,7 +7,7 @@ from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICK
 from datetime import date
 
 # --- 4.6 (Optional) Bond Specific Metric Definitions (UPDATED) ---
-# This dictionary is used by the Definitions Modal on the bonds page.
+# Dictionary นี้ใช้สำหรับ Modal คำจำกัดความ (Definition Modal) ในหน้า Bonds
 BOND_METRIC_DEFINITIONS = {
     "tab-yield-history": {
         "title": "HISTORICAL YIELDS",
@@ -43,16 +43,18 @@ BOND_METRIC_DEFINITIONS = {
             {"metric": "Duration", "definition": "Measures a bond's price sensitivity to changes in interest rates. A higher Duration implies higher volatility for a bond's price."},
         ]
     },
-    # [NEW TAB 1: CREDIT & STATUS]
+    # [MODIFIED TAB 1: CREDIT & STATUS] - เพิ่ม Coupon Rate และ YTM
     "tab-bond-credit": {
         "title": "BOND CREDIT & STATUS",
-        "description": "Analysis of the bond's default risk and its current market pricing status.",
+        "description": "Analysis of the bond's default risk and its current market pricing status, including key income and return measures.",
         "metrics": [
             {"metric": "Credit Rating (S&P/Moody's/Fitch)", "definition": "The solvency rating (e.g., AAA, BBB-) assigned by major rating agencies."},
-            {"metric": "Status (Premium/Par/Discount)", "definition": "Determines if the bond's price is above, equal to, or below its Par Value ($100)."},
+            {"metric": "PAR (Premium/Par/Discount)", "definition": "Determines if the bond's Dirty Price is above (Premium), equal to (Par), or below (Discount) its Par Value ($100)."},
+            {"metric": "Coupon Rate (%)", "definition": "The annual interest rate paid by the bond issuer."},
+            {"metric": "YTM (%)", "definition": "The total anticipated return if the bond is held until maturity (assuming the bond is held until maturity and coupons are reinvested)."},
         ]
     },
-    # [NEW TAB 2: DURATION & RISK]
+    # [NEW TAB 2: DURATION & RISK] - ไม่เปลี่ยนแปลง
     "tab-bond-risk": {
         "title": "BOND DURATION & RISK",
         "description": "Measures of the bond's price sensitivity to interest rate changes.",
@@ -62,21 +64,20 @@ BOND_METRIC_DEFINITIONS = {
             {"metric": "Valuation Spread (%)", "definition": "The percentage difference between the Intrinsic Value and the current market Dirty Price."},
         ]
     },
-    # [NEW TAB 3: YIELD & PRICING]
+    # [MODIFIED TAB 3: YIELD & PRICING] - เปลี่ยนชื่อ Title และเหลือเฉพาะ Price Components
     "tab-bond-pricing": {
-        "title": "BOND YIELD & PRICING",
-        "description": "Key measures of income, expected total return, and price components.",
+        "title": "BOND YIELD & DIRTY PRICE",
+        "description": "The bond's price components and valuation metrics.",
         "metrics": [
-            {"metric": "Coupon Rate (%)", "definition": "The annual interest rate paid by the bond issuer."},
-            {"metric": "YTM (%)", "definition": "The total anticipated return if the bond is held until maturity."},
             {"metric": "Clean Price ($)", "definition": "The bond's price excluding any accrued interest."},
             {"metric": "Accrued Interest ($)", "definition": "The portion of the next coupon the buyer pays the seller."},
             {"metric": "Dirty Price ($)", "definition": "The actual market price including accrued interest (Clean Price + Accrued Interest)."},
+            {"metric": "Valuation Spread (%)", "definition": "The percentage difference between the Intrinsic Value and the current market Dirty Price."},
         ]
     },
 }
 
-# --- Shared Components ---
+# --- Shared Components (Modal) ---
 definitions_modal = dbc.Modal(
     [
         dbc.ModalHeader(dbc.ModalTitle("Definition Dictionary")),
@@ -224,7 +225,8 @@ def create_bonds_layout():
                                                 # --- [MODIFIED: Split INDIVIDUAL METRICS into 3 tabs] ---
                                                 dbc.Tab(label="CREDIT & STATUS", tab_id="tab-bond-credit"),
                                                 dbc.Tab(label="DURATION & RISK", tab_id="tab-bond-risk"),
-                                                dbc.Tab(label="YIELD & PRICING", tab_id="tab-bond-pricing"),
+                                                # เปลี่ยน Label ให้สอดคล้องกับ Dirty Price
+                                                dbc.Tab(label="YIELD & DIRTY PRICE", tab_id="tab-bond-pricing"),
                                                 # --- [END MODIFIED] ---
                                             ])
                                         ]),

@@ -295,7 +295,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             df_benchmarks = df_all[df_all['ticker'].isin(indices)].copy()
             
             df_yields = apply_thb_hedging(df_yields, thb_rate, usd_rate)
-            df_yields['close'] = df_yields['close_hedged']
+            df_yields.loc[:, 'close'] = df_yields['close_hedged']
             
             df_all = pd.concat([df_yields, df_benchmarks])
             y_axis_title = 'Yield (THB Hedged %) / Price'
@@ -340,9 +340,12 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
             
             df_curve_data = []
             for name, comp_date in compare_dates.items():
-                df_closest_date = df_all[df_all['ticker'].isin(active_yield_tickers)].iloc[(df_all['date'] - comp_date).abs().argsort()[:len(active_yield_tickers)]].copy()
+                # Filter by active yields and copy to avoid SettingWithCopyWarning
+                df_closest_date = df_all[df_all['ticker'].isin(active_yield_tickers)].copy()
                 
-                df_curve = df_closest_date[df_closest_date['ticker'].isin(active_yield_tickers)].copy()
+                # Find the closest date for each period, per ticker
+                df_curve = df_closest_date.iloc[(df_closest_date['date'] - comp_date).abs().argsort()[:len(active_yield_tickers)]].copy()
+
                 df_curve['Maturity_Years'] = df_curve['ticker'].map(treasury_yields)
                 df_curve['Period'] = name
                 df_curve_data.append(df_curve)
@@ -370,7 +373,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         # --- Tab: YIELD SPREAD (tab-yield-spread) ---
         elif active_tab == "tab-yield-spread":
             if len(all_symbols) < 2:
-                return dbc.Alert("Please select at least two instruments (Yields/Benchmarks) to calculate a Spread.", color="info", className="mt-3 text-center")
+                return dbc.Alert("Please select at least two instruments (Yields/Benchmanks) to calculate a Spread.", color="info", className="mt-3 text-center")
             
             benchmark = all_symbols[0] 
             series_to_compare = all_symbols[1:] 
@@ -452,107 +455,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         # --- Helper for Detailed Metric Tabs ---
         eligible_tickers = [t for t in tickers if t in ['^IRX', '^TWS', '^TNX', '^FVX', '^TYX', 'LQD', 'HYG', 'TIP']]
         
-        # --- Tab: RATES SUMMARY (tab-rates-summary) ---
-        if active_tab == "tab-rates-summary":
-            df_daily = fetch_daily_prices(all_symbols)
-            if df_daily.empty:
-                return dbc.Alert("No data available to generate the summary table.", color="warning", className="mt-3 text-center"), [], None
-
-            if thb_view_active:
-                thb_rate = fx_rates.get('THB_RATE_1Y', 0.025)
-                usd_rate = fx_rates.get('USD_RATE_1Y', 0.055)
-                df_daily_adj = apply_thb_hedging(df_daily.copy(), thb_rate, usd_rate)
-                df_daily_adj.loc[df_daily_adj['ticker'].isin(tickers), 'close'] = df_daily_adj['close_hedged']
-                df_daily = df_daily_adj
-                yield_col_name = 'Latest Yield (THB Hedged %)'
-            else:
-                yield_col_name = 'Latest Yield (%)'
-
-            latest_date = df_daily['date'].max()
-            df_latest = df_daily[df_daily['date'] == latest_date].copy()
-            
-            df_summary = df_latest[['ticker', 'close', 'previous_close', 'weekly_change', 'ytd_change']].rename(columns={'close': 'latest_yield'})
-            df_summary['1-Day Change (bps)'] = (df_summary['latest_yield'] - df_summary['previous_close']) * 10000
-            df_summary['1-Week Change (bps)'] = df_summary['weekly_change']
-            df_summary['YTD Change (%)'] = df_summary['ytd_change'] 
-            
-            df_spread = df_daily.pivot(index='date', columns='ticker', values='close')
-            spreads = []
-            
-            if '^TNX' in df_spread.columns and '^TWS' in df_spread.columns:
-                spread_val = (df_spread['^TNX'] - df_spread['^TWS']).iloc[-1] * 100 
-                spreads.append({
-                    'Maturity / Benchmark': 'Spread: US 10Y - 2Y (bps)',
-                    'latest_yield': spread_val,
-                    '1-Day Change (bps)': np.nan, 
-                    '1-Week Change (bps)': np.nan, 
-                    'YTD Change (%)': np.nan 
-                })
-                
-            if 'HYG' in df_spread.columns and '^TNX' in df_spread.columns:
-                spread_val = (df_spread['HYG'] - df_spread['^TNX']).iloc[-1] * 100 
-                spreads.append({
-                    'Maturity / Benchmark': 'Spread: HYG - 10Y (bps)',
-                    'latest_yield': spread_val,
-                    '1-Day Change (bps)': np.nan, 
-                    '1-Week Change (bps)': np.nan, 
-                    'YTD Change (%)': np.nan 
-                })
-
-            df_summary['Maturity / Benchmark'] = df_summary['ticker'].map(full_map).fillna(df_summary['ticker'])
-            df_table = df_summary[[
-                'Maturity / Benchmark', 
-                'latest_yield', 
-                '1-Day Change (bps)', 
-                '1-Week Change (bps)',
-                'YTD Change (%)'
-            ]].copy()
-            
-            df_table = pd.concat([df_table, pd.DataFrame(spreads)]).fillna(value={'latest_yield': np.nan})
-
-            df_table.columns = [
-                'Maturity / Benchmark', 
-                yield_col_name, 
-                '1-Day Change (bps)', 
-                '1-Week Change (bps)',
-                'YTD Change (%)'
-            ]
-            
-            sort_cols = [c for c in df_table.columns if c not in ['Maturity / Benchmark']]
-            sort_options = [{'label': col, 'value': col} for col in sort_cols]
-            
-            if sort_by and sort_by in df_table.columns:
-                df_table = df_table.sort_values(by=sort_by, ascending=False)
-            
-            def _generate_datatable_columns_summary(df):
-                columns = []
-                for col in df.columns:
-                    col_def = {"name": col, "id": col}
-                    if 'Yield' in col or 'Price' in col:
-                        col_def.update({'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
-                    elif 'bps' in col:
-                        col_def.update({'type': 'numeric', 'format': Format(precision=1, scheme=Scheme.fixed)})
-                    elif '%' in col:
-                         col_def.update({'type': 'numeric', 'format': Format(precision=2, scheme=Scheme.fixed)})
-                    columns.append(col_def)
-                return columns
-
-            table = dash_table.DataTable(
-                id='bonds-rates-summary-table',
-                columns=_generate_datatable_columns_summary(df_table),
-                data=df_table.to_dict('records'),
-                style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
-                style_data={'border': '0px', 'backgroundColor': 'transparent'},
-                style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0'},
-                style_header_conditional=[{'if': {'column_id': 'Maturity / Benchmark'}, 'textAlign': 'left'}],
-                style_cell_conditional=[{'if': {'column_id': 'Maturity / Benchmark'}, 'textAlign': 'left', 'width': '40%', 'verticalAlign': 'middle'}],
-                markdown_options={"html": True}
-            )
-            
-            return [table], sort_options, sort_by
-
         # --- Tab: CREDIT & STATUS (tab-bond-credit) ---
-        elif active_tab == "tab-bond-credit":
+        if active_tab == "tab-bond-credit": # Changed to IF since it's the first condition
             df_details_or_alert = _get_detail_table_data(eligible_tickers)
             
             if isinstance(df_details_or_alert, dbc.Alert):

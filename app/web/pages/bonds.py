@@ -43,16 +43,6 @@ BOND_METRIC_DEFINITIONS = {
             {"metric": "Duration", "definition": "Measures a bond's price sensitivity to changes in interest rates. A higher Duration implies higher volatility for a bond's price."},
         ]
     },
-    "tab-rates-summary": {
-        "title": "RATES SUMMARY",
-        "description": "A summary table showing the latest yield, daily/weekly/YTD change, key spreads, and relevant benchmarks.",
-        "metrics": [
-            {"metric": "Latest Yield (%)", "definition": "The closing yield on the last trading day."},
-            {"metric": "Change (bps)", "definition": "The change in yield over a period, measured in basis points."},
-            {"metric": "THB Hedged Yield", "definition": "The theoretical yield an investor would receive if the USD Bond yield was hedged back to THB, calculated using the THB/USD interest rate differential."},
-            {"metric": "Key Spreads", "definition": "Calculated spreads such as 10Y-2Y and Credit Spread (HYG-10Y)."},
-        ]
-    },
     # [NEW TAB 1: CREDIT & STATUS]
     "tab-bond-credit": {
         "title": "BOND CREDIT & STATUS",
@@ -230,8 +220,7 @@ def create_bonds_layout():
                                 [
                                     dbc.Col(
                                         html.Div(className="custom-tabs-container", children=[
-                                            dbc.Tabs(id="bonds-table-tabs", active_tab="tab-rates-summary", children=[
-                                                dbc.Tab(label="RATES SUMMARY", tab_id="tab-rates-summary"),
+                                            dbc.Tabs(id="bonds-table-tabs", active_tab="tab-bond-credit", children=[
                                                 # --- [MODIFIED: Split INDIVIDUAL METRICS into 3 tabs] ---
                                                 dbc.Tab(label="CREDIT & STATUS", tab_id="tab-bond-credit"),
                                                 dbc.Tab(label="DURATION & RISK", tab_id="tab-bond-risk"),

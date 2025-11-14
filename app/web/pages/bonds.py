@@ -265,7 +265,8 @@ def create_bonds_layout():
                                 dbc.Col(
                                     dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'}),
                                     # จัดวางปุ่ม Sort By ให้อยู่ทางขวา
-                                    width=12, md={'size': 4, 'offset': 8}, lg={'size': 3, 'offset': 9},
+                                    # *** [MODIFIED: เปลี่ยน lg size จาก 3 เป็น 2 และ offset จาก 9 เป็น 10] ***
+                                    width=12, md={'size': 4, 'offset': 8}, lg={'size': 2, 'offset': 10},
                                     className="mt-2"
                                 )
                             ),

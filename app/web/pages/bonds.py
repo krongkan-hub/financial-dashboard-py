@@ -6,7 +6,7 @@ import dash_bootstrap_components as dbc
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE
 from datetime import date
 
-# --- 4.6 (Optional) Bond Specific Metric Definitions (UPDATED) ---
+# --- 4.6 (Optional) Bond Specific Metric Definitions (UPDATED - Removed THB Hedged) ---
 # Dictionary นี้ใช้สำหรับ Modal คำจำกัดความ (Definition Modal) ในหน้า Bonds
 BOND_METRIC_DEFINITIONS = {
     "tab-yield-history": {
@@ -14,7 +14,6 @@ BOND_METRIC_DEFINITIONS = {
         "description": "Historical performance data for selected Treasury Yields and Benchmarks.",
         "metrics": [
             {"metric": "Yield (%)", "definition": "The daily closing yield or price return of the selected instrument."},
-            {"metric": "THB Hedged Yield", "definition": "The theoretical yield (in THB terms) after hedging currency risk, calculated based on the THB/USD interest rate differential."},
             {"metric": "Date Range", "definition": f"Data is currently pulled from {HISTORICAL_START_DATE.strftime('%Y-%m-%d')} to the latest available day."},
         ]
     },
@@ -109,8 +108,7 @@ def create_bonds_layout():
             # --- Hidden Data Stores ---
             # [MODIFIED] Set default to Yield Curve components
             dcc.Store(id='bonds-user-selections-store', data={'tickers': ['^TNX', '^TWS', '^TYX'], 'indices': ['^GSPC']}),
-            # [NEW] Store the current exchange/rate environment
-            dcc.Store(id='bonds-fx-rates-store', data={'THB_RATE_1Y': 0.025, 'USD_RATE_1Y': 0.055}), 
+            # [REMOVED] ลบ dcc.Store(id='bonds-fx-rates-store', data={'THB_RATE_1Y': 0.025, 'USD_RATE_1Y': 0.055})
             dcc.Store(id='bonds-forecast-assumptions-store', data={}),
             dcc.Store(id='bonds-dcf-assumptions-store', data={}),
             html.Div(id="navbar-container"), 
@@ -155,16 +153,16 @@ def create_bonds_layout():
 
                             html.Hr(className="my-4"),
                             
-                            # --- [NEW] THB Hedged View Toggle ---
-                            html.Label("VIEW OPTIONS", className="fw-bold"),
-                            dbc.Checklist(
-                                options=[{"label": "Show THB Hedged Yields (THB View)", "value": True}],
-                                value=[],
-                                id="bonds-thb-view-toggle",
-                                switch=True,
-                                className="mb-3"
-                            ),
-                            # --- END NEW ---
+                            # --- [REMOVED] THB Hedged View Toggle Section ---
+                            # html.Label("VIEW OPTIONS", className="fw-bold"),
+                            # dbc.Checklist(
+                            #     options=[{"label": "Show THB Hedged Yields (THB View)", "value": True}],
+                            #     value=[],
+                            #     id="bonds-thb-view-toggle",
+                            #     switch=True,
+                            #     className="mb-3"
+                            # ),
+                            # --- END REMOVED ---
 
                             html.Div(id='bonds-summary-display', className="mb-2"),
                             html.Div(id='bonds-benchmark-summary-display', className="pt-0"),

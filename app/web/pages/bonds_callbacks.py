@@ -109,18 +109,6 @@ def get_user_symbols(data):
     all_symbols = list(set(tickers + indices))
     return all_symbols, tickers, indices
 
-def apply_thb_hedging(df, thb_rate_proxy=0.025, usd_rate_proxy=0.055):
-    """
-    Applies the THB Hedged Yield adjustment to the 'close' column (in percentage points).
-    THB Hedged Yield = USD Yield + (THB Rate - USD Rate)
-    """
-    if df.empty: return df
-    
-    df_adj = df.copy()
-    rate_differential = thb_rate_proxy - usd_rate_proxy
-    df_adj['close_hedged'] = df_adj['close'] + (rate_differential * 100)
-    return df_adj
-
 # [CRITICAL FIX 1: Standalone Column Generation Helper]
 def _generate_datatable_columns_detail(df):
     """Generates column definitions for the detail table with appropriate formatting."""
@@ -283,19 +271,16 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         return ticker_content, index_content
 
 
-    # --- 8.4 Render Graph Content (Unchanged) ---
+    # --- 8.4 Render Graph Content (MODIFIED) ---
     @app.callback(
         Output('bonds-analysis-pane-content', 'children'),
         Input('bonds-analysis-tabs', 'active_tab'),
         Input('bonds-user-selections-store', 'data'),
-        Input('bonds-thb-view-toggle', 'value'), # [NEW INPUT]
-        State('bonds-fx-rates-store', 'data'),  # [NEW STATE]
         prevent_initial_call=True
     )
-    def render_bond_graph_content(active_tab, data, thb_view_enabled, fx_rates):
+    def render_bond_graph_content(active_tab, data): 
         
         all_symbols, tickers, indices = get_user_symbols(data)
-        thb_view_active = bool(thb_view_enabled)
         
         if not all_symbols:
             return dbc.Alert("Please select at least one Treasury Yield for analysis.", color="info", className="mt-3 text-center")
@@ -304,20 +289,8 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         if df_all.empty:
             return dbc.Alert("No data available for selected instruments.", color="warning", className="mt-3 text-center")
         
-        # --- Apply THB Hedging if enabled ---
-        if thb_view_active:
-            thb_rate = fx_rates.get('THB_RATE_1Y', 0.025)
-            usd_rate = fx_rates.get('USD_RATE_1Y', 0.055)
-            df_yields = df_all[df_all['ticker'].isin(tickers)].copy()
-            df_benchmarks = df_all[df_all['ticker'].isin(indices)].copy()
-            
-            df_yields = apply_thb_hedging(df_yields, thb_rate, usd_rate)
-            df_yields.loc[:, 'close'] = df_yields['close_hedged']
-            
-            df_all = pd.concat([df_yields, df_benchmarks])
-            y_axis_title = 'Yield (THB Hedged %) / Price'
-        else:
-            y_axis_title = 'Yield (%) / Price'
+        # กำหนดชื่อแกน Y ให้เป็นค่าเริ่มต้นเสมอ (Yield (%) / Price)
+        y_axis_title = 'Yield (%) / Price'
             
         # --- Combine Maps for Display Names ---
         full_map = {**BOND_YIELD_MAP, **BOND_BENCHMARK_MAP}
@@ -463,14 +436,11 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         Input('bonds-table-tabs', 'active_tab'),
         Input('bonds-user-selections-store', 'data'),
         Input('bonds-sort-by-dropdown', 'value'),
-        Input('bonds-thb-view-toggle', 'value'), 
-        State('bonds-fx-rates-store', 'data'),  
         prevent_initial_call=True
     )
-    def render_bond_table_content(active_tab, data, sort_by, thb_view_enabled, fx_rates):
+    def render_bond_table_content(active_tab, data, sort_by):
         
         all_symbols, tickers, indices = get_user_symbols(data)
-        thb_view_active = bool(thb_view_enabled)
         full_map = {**BOND_YIELD_MAP, **BOND_BENCHMARK_MAP}
 
         # --- Helper for Detailed Metric Tabs ---

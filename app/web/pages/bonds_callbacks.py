@@ -11,7 +11,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import date, datetime, timedelta 
-from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP 
+# [MODIFIED] Import BOND_CLASSIFICATIONS (ต้องมีใน app.constants.py)
+from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, BOND_CLASSIFICATIONS 
 from app.web.pages.bonds import BOND_METRIC_DEFINITIONS
 
 # [NEW MOCK DATA] Mock Prices/Yields with all expanded tickers (Treasury, Corporate, Reference)
@@ -230,21 +231,46 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
 
         return current_data
 
+    # --- [MODIFIED] 8.2 Update the available options based on Sector Dropdown ---
     @app.callback(
+        # Output('bonds-yield-select-dropdown', 'options') คือ Dropdown ตัวล่าง
         Output('bonds-yield-select-dropdown', 'options'),
-        Input('bonds-yield-type-dropdown', 'value'), 
+        Input('bonds-yield-sector-dropdown', 'value'), # <<< Input จาก Dropdown Sector ใหม่
+        State('bonds-user-selections-store', 'data'),
     )
-    def update_bond_options(selected_yield_type):
-        options = [{'label': name, 'value': ticker} for ticker, name in BOND_YIELD_MAP.items()]
+    def update_bond_options(selected_sector, data):
+        """
+        Populates the Yields dropdown based on the selected sector/classification.
+        """
+        # ดึง Tickers ทั้งหมดที่ถูกเลือกอยู่แล้ว (เพื่อไม่ให้แสดงซ้ำ)
+        selected_tickers = set(data.get('tickers', []))
+        
+        # 1. กรอง Tickers ตาม Sector ที่เลือก
+        # ใช้ BOND_CLASSIFICATIONS เพื่อดึง Tickers ที่เกี่ยวข้อง
+        # .get(selected_sector, {}) ใช้ป้องกัน Error หาก selected_sector เป็น None หรือไม่ถูกต้อง
+        relevant_tickers = BOND_CLASSIFICATIONS.get(selected_sector, BOND_CLASSIFICATIONS['All']).get('tickers', [])
+        
+        # 2. สร้าง Options (กรองตัวที่เลือกแล้วออก)
+        options = []
+        for ticker in relevant_tickers:
+            if ticker not in selected_tickers:
+                # ใช้ BOND_YIELD_MAP ในการแสดงชื่อเต็ม
+                label = BOND_YIELD_MAP.get(ticker, ticker)
+                options.append({'label': label, 'value': ticker})
+        
         return options
+    # --- [END MODIFIED] ---
 
+    # --- [MODIFIED] 8.3 Benchmark options (เปลี่ยน Input ID) ---
     @app.callback(
         Output('bonds-benchmark-select-dropdown', 'options'),
-        Input('bonds-yield-type-dropdown', 'value'), 
+        Input('bonds-yield-sector-dropdown', 'value'), # <<< Input Dummy เพื่อให้ Trigger เมื่อโหลดหน้า
     )
     def update_bond_benchmark_options(dummy_input):
+        # Benchmark Dropdown ยังคงแสดงตัวเลือกเดิมทั้งหมด
         options = [{'label': name, 'value': ticker} for ticker, name in BOND_BENCHMARK_MAP.items()]
         return options
+    # --- [END MODIFIED] ---
 
     @app.callback(
         Output('bonds-summary-display', 'children'),

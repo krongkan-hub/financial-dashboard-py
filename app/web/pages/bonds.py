@@ -2,8 +2,8 @@
 
 from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
-# นำเข้า BOND_YIELD_MAP, BOND_BENCHMARK_MAP จาก app.constants
-from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE
+# นำเข้า BOND_YIELD_MAP, BOND_BENCHMARK_MAP, BOND_CLASSIFICATIONS จาก app.constants
+from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE, BOND_CLASSIFICATIONS
 from datetime import date
 
 # --- 4.6 (Optional) Bond Specific Metric Definitions (UPDATED - Removed THB Hedged) ---
@@ -99,8 +99,13 @@ definitions_modal = dbc.Modal(
 def create_bonds_layout():
     """Generates the layout for the /bonds page."""
     
-    # ดึงค่าล่าสุดจาก BOND_YIELD_MAP และ BOND_BENCHMARK_MAP 
-    yield_options = [{'label': v, 'value': k} for k, v in BOND_YIELD_MAP.items()]
+    # [NEW] สร้าง options สำหรับ Dropdown ตัวกรองตาม Classification
+    classification_options = [
+        {'label': c['label'], 'value': k} 
+        for k, c in BOND_CLASSIFICATIONS.items()
+    ]
+    
+    # Benchmark options ยังคงใช้ BOND_BENCHMARK_MAP โดยตรง
     benchmark_options = [{'label': v, 'value': k} for k, v in BOND_BENCHMARK_MAP.items()]
     
     return dbc.Container(
@@ -108,7 +113,6 @@ def create_bonds_layout():
             # --- Hidden Data Stores ---
             # [MODIFIED] Set default to Yield Curve components
             dcc.Store(id='bonds-user-selections-store', data={'tickers': ['^TNX', '^TWS', '^TYX'], 'indices': ['^GSPC']}),
-            # [REMOVED] ลบ dcc.Store(id='bonds-fx-rates-store', data={'THB_RATE_1Y': 0.025, 'USD_RATE_1Y': 0.055})
             dcc.Store(id='bonds-forecast-assumptions-store', data={}),
             dcc.Store(id='bonds-dcf-assumptions-store', data={}),
             html.Div(id="navbar-container"), 
@@ -121,21 +125,24 @@ def create_bonds_layout():
                     # --- Left Sidebar (Controls) ---
                     dbc.Col(
                         dbc.Card(dbc.CardBody([
-                            html.Label("Add Yields to Analysis", className="fw-bold"),
-                            # Dropdown นี้ถูกใช้แค่เป็น Trigger ใน Callback
+                            html.Label("Filter Yields by Sector", className="fw-bold"),
+                            # [MODIFIED] Dropdown ตัวกรอง Sector/ประเภท
                             dcc.Dropdown(
-                                id='bonds-yield-type-dropdown',
-                                options=yield_options, 
-                                value=list(BOND_YIELD_MAP.keys())[0],
+                                id='bonds-yield-sector-dropdown', # <<< ID ที่ใช้เป็น Input ใน Callback
+                                options=classification_options, 
+                                value='All', # Default เป็น All
                                 clearable=False,
                                 className="mb-2"
                             ),
+                            
+                            html.Label("Add Yields to Analysis", className="fw-bold mt-3"),
+                            # Dropdown ตัวนี้จะถูกเติม Options โดย Callback จาก Dropdown ด้านบน
                             dcc.Dropdown(
                                 id='bonds-yield-select-dropdown',
-                                options=yield_options,
+                                # options=yield_options, # ถูกเติมโดย Callback
                                 placeholder="Select one or more yields...",
                                 multi=True, 
-                                className="mt-2 sidebar-dropdown"
+                                className="sidebar-dropdown"
                             ),
                             dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Yield(s)"], id='bonds-add-yield-button', color="primary", className="mt-2 w-100", n_clicks=0),
                             
@@ -153,17 +160,6 @@ def create_bonds_layout():
 
                             html.Hr(className="my-4"),
                             
-                            # --- [REMOVED] THB Hedged View Toggle Section ---
-                            # html.Label("VIEW OPTIONS", className="fw-bold"),
-                            # dbc.Checklist(
-                            #     options=[{"label": "Show THB Hedged Yields (THB View)", "value": True}],
-                            #     value=[],
-                            #     id="bonds-thb-view-toggle",
-                            #     switch=True,
-                            #     className="mb-3"
-                            # ),
-                            # --- END REMOVED ---
-
                             html.Div(id='bonds-summary-display', className="mb-2"),
                             html.Div(id='bonds-benchmark-summary-display', className="pt-0"),
                             
@@ -220,15 +216,11 @@ def create_bonds_layout():
                                     dbc.Col(
                                         html.Div(className="custom-tabs-container", children=[
                                             dbc.Tabs(id="bonds-table-tabs", active_tab="tab-bond-credit", children=[
-                                                # --- [MODIFIED: Split INDIVIDUAL METRICS into 3 tabs] ---
                                                 dbc.Tab(label="CREDIT & STATUS", tab_id="tab-bond-credit"),
                                                 dbc.Tab(label="DURATION & RISK", tab_id="tab-bond-risk"),
-                                                # เปลี่ยน Label ให้สอดคล้องกับ Dirty Price
                                                 dbc.Tab(label="YIELD & DIRTY PRICE", tab_id="tab-bond-pricing"),
-                                                # --- [END MODIFIED] ---
                                             ])
                                         ]),
-                                        # ใช้พื้นที่มากขึ้นสำหรับ Tabs
                                         width=12, md=6, lg=7 
                                     ),
                                     
@@ -237,16 +229,14 @@ def create_bonds_layout():
                                         dbc.Stack(
                                             [
                                                 dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                                                # [MODIFIED: Info button is now LEFT of Sort by]
                                                 dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="secondary", outline=True),
-                                                dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '150px', 'width': '150px'}), # กำหนด minWidth/width เพื่อให้คงที่
+                                                dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '150px', 'width': '150px'}), 
                                             ],
                                             direction="horizontal",
                                             gap=2,
-                                            # จัดเรียงองค์ประกอบทั้งหมดใน Stack ให้อยู่ทางขวา
                                             className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                         ),
-                                        width=12, md=6, lg=5 # ปรับความกว้างให้รองรับ Stack ทางขวา
+                                        width=12, md=6, lg=5 
                                     )
                                 ],
                                 align="center",

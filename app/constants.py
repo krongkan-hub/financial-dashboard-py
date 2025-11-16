@@ -10315,3 +10315,21 @@ BOND_BENCHMARK_MAP = {
     # THB Rates (For Hedging) - ใช้ BOND_BENCHMARK_MAP เป็นที่เก็บ THB Rate Proxy
     'THB_RATE_1Y': 'THB Interest Rate Proxy (1Y)' 
 }
+
+# --- Bond Classification for Dropdown ---
+BOND_CLASSIFICATIONS = {
+    "All": {
+        "label": "All Bonds",
+        "tickers": list(BOND_YIELD_MAP.keys()) 
+    },
+    "Government": {
+        "label": "Government Bonds",
+        # กรองเอาเฉพาะ T-Bills/T-Notes/T-Bonds ที่ขึ้นต้นด้วย '^'
+        "tickers": [t for t in BOND_YIELD_MAP.keys() if t.startswith('^')]
+    },
+    "Corporate": {
+        "label": "Corporate Bonds",
+        # กรองเอาเฉพาะ ETF ตราสารหนี้ (LQD, HYG, TIP)
+        "tickers": [t for t in BOND_YIELD_MAP.keys() if not t.startswith('^')]
+    }
+}

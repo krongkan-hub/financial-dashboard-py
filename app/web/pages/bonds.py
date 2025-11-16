@@ -125,29 +125,33 @@ def create_bonds_layout():
                     # --- Left Sidebar (Controls) ---
                     dbc.Col(
                         dbc.Card(dbc.CardBody([
-                            html.Label("Filter Yields by Sector", className="fw-bold"),
-                            # [MODIFIED] Dropdown ตัวกรอง Sector/ประเภท
+                            
+                            # [MODIFIED] Label หลัก (ตรงกับ "Add Stocks to Analysis" ในหน้า Stocks)
+                            html.Label("Add Yields to Analysis", className="fw-bold"),
+                            
+                            # 1. Classification Dropdown (Sector Dropdown ในหน้า Stocks)
                             dcc.Dropdown(
                                 id='bonds-yield-sector-dropdown', # <<< ID ที่ใช้เป็น Input ใน Callback
                                 options=classification_options, 
                                 value='All', # Default เป็น All
                                 clearable=False,
-                                className="mb-2"
                             ),
                             
-                            html.Label("Add Yields to Analysis", className="fw-bold mt-3"),
-                            # Dropdown ตัวนี้จะถูกเติม Options โดย Callback จาก Dropdown ด้านบน
+                            # 2. Yield Selection Dropdown (Ticker Dropdown ในหน้า Stocks)
                             dcc.Dropdown(
                                 id='bonds-yield-select-dropdown',
                                 # options=yield_options, # ถูกเติมโดย Callback
                                 placeholder="Select one or more yields...",
                                 multi=True, 
-                                className="sidebar-dropdown"
+                                className="mt-2 sidebar-dropdown" 
                             ),
+                            
+                            # 3. Add Yields Button (Add Stock(s) Button ในหน้า Stocks)
                             dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Yield(s)"], id='bonds-add-yield-button', color="primary", className="mt-2 w-100", n_clicks=0),
                             
                             html.Hr(),
 
+                            # Benchmark Section (ตรงกับหน้า Stocks)
                             html.Label("Add Benchmarks to Compare", className="fw-bold"),
                             dcc.Dropdown(
                                 id='bonds-benchmark-select-dropdown',
@@ -193,7 +197,7 @@ def create_bonds_layout():
                                             ],
                                             direction="horizontal",
                                             gap=2,
-                                            className="justify-content-start justify-content-lg-end"
+                                            className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                         ),
                                         md=4
                                     )

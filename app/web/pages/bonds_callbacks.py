@@ -134,7 +134,7 @@ def _get_detail_table_data(eligible_tickers):
     """Fetches or generates the detailed metrics DataFrame."""
     # Treasury and Corporate ETFs that can be analyzed in detail
     if not eligible_tickers:
-        return dbc.Alert("Please select at least one core Treasury or Corporate ETF Yield for in-depth analysis.", color="info", className="mt-3 text-center")
+        return dbc.Alert("Please select at least one Treasury or Corporate ETF Yield for in-depth analysis.", color="info", className="mt-3 text-center")
 
     df_details = pd.DataFrame([mock_individual_bond_metrics(t) for t in eligible_tickers])
     
@@ -297,7 +297,7 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         return ticker_content, index_content
 
 
-    # --- 8.4 Render Graph Content (MODIFIED) ---
+    # --- 8.4 Render Graph Content (MODIFIED with NORMALIZATION) ---
     @app.callback(
         Output('bonds-analysis-pane-content', 'children'),
         Input('bonds-analysis-tabs', 'active_tab'),
@@ -324,15 +324,31 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         
         # --- Tab: HISTORICAL YIELDS (tab-yield-history) ---
         if active_tab == "tab-yield-history":
+            # [MODIFIED LOGIC] Normalize to Cumulative Percentage Change
+            # 1. Pivot ข้อมูลให้อยู่ในรูปแบบ Wide Format (Date x Ticker) เพื่อให้คำนวณง่าย
+            df_pivot = df_all.pivot(index='date', columns='ticker', values='close')
+            
+            # 2. คำนวณ % Change สะสม: (ราคาปัจจุบัน / ราคา ณ วันแรก) - 1
+            # ใช้ iloc[0] คือข้อมูล ณ วันแรกสุดของช่วงเวลานั้นเป็นฐาน (Base = 0%)
+            df_normalized = (df_pivot / df_pivot.iloc[0]) - 1
+            
+            # 3. แปลงกลับเป็น Long Format เพื่อนำไปพลอตกราฟด้วย Plotly Express
+            df_normalized_long = df_normalized.reset_index().melt(id_vars='date', var_name='ticker', value_name='cumulative_change')
+            
+            # 4. Map ชื่อ Display Name กลับเข้าไปใหม่
+            ticker_to_display = dict(zip(df_all['ticker'], df_all['display_name']))
+            df_normalized_long['display_name'] = df_normalized_long['ticker'].map(ticker_to_display)
+
             fig = px.line(
-                df_all, 
+                df_normalized_long, 
                 x='date', 
-                y='close', 
+                y='cumulative_change', 
                 color='display_name',
-                title="Historical Yields and Benchmarks",
-                labels={'close': y_axis_title, 'date': 'Date'}
+                title="Comparative Cumulative Change (Normalized to Start Date)",
+                labels={'cumulative_change': 'Cumulative Change (%)', 'date': 'Date'}
             )
-            fig.update_layout(yaxis_title=y_axis_title, legend_title='Instrument')
+            # จัดรูปแบบแกน Y เป็นเปอร์เซ็นต์ (เช่น 50%, -10%)
+            fig.update_layout(yaxis_tickformat=".2%", yaxis_title='Cumulative Change (%)', legend_title='Instrument')
             return dcc.Graph(figure=fig)
 
         # --- Tab: YIELD CURVE (tab-yield-curve) ---

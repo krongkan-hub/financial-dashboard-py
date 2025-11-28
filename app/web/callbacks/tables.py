@@ -138,12 +138,14 @@ def register_table_callbacks(app):
                 data=df_display.to_dict('records'),
                 columns=columns,
                 style_table={'overflowX': 'auto'},
-                style_cell={'textAlign': 'right', 'padding': '10px', 'fontFamily': 'sans-serif'},
-                style_header={'backgroundColor': '#f8f9fa', 'fontWeight': 'bold', 'textAlign': 'center'},
+                style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
+                style_data={'border': '0px', 'backgroundColor': 'transparent'},
+                style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0', 'fontFamily': 'sans-serif'},
+                style_header_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}],
                 style_data_conditional=style_data_conditional,
                 style_cell_conditional=style_cell_conditional,
                 markdown_options={"html": True},
-                sort_action="native",
+
             )
 
             return table, sort_options, sort_by_column

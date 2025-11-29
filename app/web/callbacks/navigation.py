@@ -14,6 +14,9 @@ def register_navigation_callbacks(app):
                 html.H1("Derivatives Analysis (Coming Soon) 🚧", className="mt-5"),
                 html.P("หน้านี้กำลังอยู่ระหว่างการพัฒนา")
             ])
+        elif pathname.startswith('/deepdive/'):
+            ticker = pathname.split('/')[-1]
+            return deep_dive.create_deep_dive_layout(ticker)
         else:
             return html.Div([
                 html.H1("404: Not found 😔", className="mt-5"),
@@ -22,6 +25,6 @@ def register_navigation_callbacks(app):
 
     @app.callback(Output('navbar-container', 'children'), Input('url', 'pathname'))
     def update_navbar_callback(pathname):
-        if pathname != '/register' and not pathname.startswith('/deepdive/'):
+        if pathname != '/register':
             return create_navbar()
         return None

@@ -115,7 +115,6 @@ def create_bonds_layout():
             dcc.Store(id='bonds-user-selections-store', data={'tickers': ['^TNX', '^TWS', '^TYX'], 'indices': ['^GSPC']}),
             dcc.Store(id='bonds-forecast-assumptions-store', data={}),
             dcc.Store(id='bonds-dcf-assumptions-store', data={}),
-            html.Div(id="navbar-container"), 
             
             # [NEW] Definition Modal
             definitions_modal,

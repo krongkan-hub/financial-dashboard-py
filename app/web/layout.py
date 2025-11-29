@@ -346,7 +346,6 @@ def build_layout():
         dcc.Store(id='user-selections-store', storage_type='memory'),
         dcc.Store(id='forecast-assumptions-store', storage_type='memory'),
         dcc.Store(id='dcf-assumptions-store', storage_type='memory'),
-        html.Div(id="navbar-container"),
         dbc.Container([
             dbc.Row([
                 dbc.Col(dbc.Card(dbc.CardBody([

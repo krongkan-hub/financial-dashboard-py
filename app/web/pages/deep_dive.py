@@ -323,8 +323,6 @@ def create_deep_dive_layout(ticker=None):
         ], className="text-end"), width="auto", align="center")
     ], align="center", className="marquee-header g-3")
 
-    risk_gauge_card = create_risk_gauge(header_data.get('predicted_default_prob'))
-
     # Key Stat Cards (using data from header_data dict)
     cards_to_show = [
         create_metric_card("Market Cap", header_data.get('market_cap')),
@@ -332,21 +330,16 @@ def create_deep_dive_layout(ticker=None):
         create_metric_card("P/E Ratio", header_data.get('pe_ratio')),
         create_metric_card("Forward P/E", header_data.get('forward_pe')),
         create_metric_card("Beta", header_data.get('beta'))
-        # Add more cards if needed, using .get() for safety
     ]
 
     at_a_glance = html.Div([
         dbc.Row(
-            # กรอง Card ที่เป็น None ออก (รวมถึง risk_gauge_card ถ้ามันเป็น None)
-            [dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show if card is not None] +
-            # เพิ่ม risk_gauge_card ที่นี่ (ถ้ามันไม่เป็น None)
-            ([dbc.Col(risk_gauge_card, width=6, lg=2, className="mb-3")] if risk_gauge_card else []),
+            [dbc.Col(card, width=6, lg=2, className="mb-3") for card in cards_to_show if card is not None],
             className="g-3"
         ),
         dbc.Card(dbc.CardBody([html.H5("Business Summary", className="card-title"), html.P(business_summary or 'Not available.', className="small")])) if business_summary else ""
     ])
 
-    # Analysis Workspace (Tabs and Dropdown - เหมือนเดิม)
     analysis_workspace = html.Div([
         html.Div(className="custom-tabs-container mt-4", children=[
             dbc.Tabs([

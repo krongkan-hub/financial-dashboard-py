@@ -56,7 +56,82 @@ jobs:
           python scripts/run_etl_manually.py --jobs 2 3
 
   # --- JOB 3: (The Fast Ones) News & ML Models ---
-  run-job-4-and-models:
+  run-job-4-news:
+    runs-on: ubuntu-latest
+    needs: run-jobs-2-3-core-data # <--- รอ Job 2&3 เสร็จก่อน
+    steps:
+      - name: 1. Check out code
+        uses: actions/checkout@v4
+      - name: 2. Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 3. Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # ไม่ต้อง Migrate ซ้ำ
+      - name: 4. Run ETL Job 4 (News)
+        env:
+name: Daily ETL Job Runner
+
+on:
+  schedule:
+    - cron: '0 1 */2 * *'  # <<< [MODIFIED CRON SCHEDULE]
+  workflow_dispatch:
+
+jobs:
+  # --- JOB 1: (The Beast) Summaries (3000+ tickers) ---
+  run-job-1-summaries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Check out code
+        uses: actions/checkout@v4
+      - name: 2. Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 3. Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 4. Run Database Migration
+        env:
+          FLASK_APP: index.py 
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }} 
+        run: flask db upgrade
+      - name: 5. Run ETL Job 1 (Summaries)
+        env:
+          # (ใส่ Env Vars ทั้งหมดที่ Job 1 ต้องการ)
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }} 
+        run: |
+          python scripts/run_etl_manually.py --jobs 1
+
+  # --- JOB 2: (The Slow Ones) Prices & Financials (Top 1000) ---
+  run-jobs-2-3-core-data:
+    runs-on: ubuntu-latest
+    needs: run-job-1-summaries # <--- รอ Job 1 เสร็จก่อน
+    steps:
+      - name: 1. Check out code
+        uses: actions/checkout@v4
+      - name: 2. Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 3. Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # ไม่ต้อง Migrate ซ้ำ
+      - name: 4. Run ETL Jobs 2 (Prices) & 3 (Financials)
+        env:
+          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
+        run: |
+          python scripts/run_etl_manually.py --jobs 2 3
+
+  # --- JOB 3: (The Fast Ones) News & ML Models ---
+  run-job-4-news:
     runs-on: ubuntu-latest
     needs: run-jobs-2-3-core-data # <--- รอ Job 2&3 เสร็จก่อน
     steps:
@@ -78,14 +153,3 @@ jobs:
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
         run: |
           python scripts/run_etl_manually.py --jobs 4
-      
-      # [NEW STEP] 5. Run the ML Risk Model Training script (Creates artifacts)
-      - name: 5. Train the ML Risk Model
-        env:
-          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
-        run: python scripts/run_ml_risk.py
-
-      - name: 6. Run the ML Risk Prediction script
-        env:
-          SQLALCHEMY_DATABASE_URI: ${{ secrets.SQLALCHEMY_DATABASE_URI }}
-        run: python scripts/run_batch_prediction_lstm.py

@@ -99,14 +99,14 @@ def register_user_data_callbacks(app):
     @app.callback(Output('ticker-summary-display', 'children'), Input('user-selections-store', 'data'))
     def update_ticker_summary_display(store_data):
         tickers = store_data.get('tickers', []) if store_data else []
-        if not tickers: return html.Div([html.Span("No stocks selected.", className="text-muted fst-italic")])
-        return [html.Label("Selected Stocks:", className="text-muted small")] + [dbc.Badge([t, html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-stock', 'index': t})], color="light", className="m-1 p-2 text-dark border") for t in tickers]
+        if not tickers: return html.Div([html.Span("No stocks selected.", className="text-white-50 fst-italic")])
+        return [html.Label("Selected Stocks:", className="text-white small fw-bold")] + [dbc.Badge([t, html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-stock', 'index': t})], color="light", className="m-1 p-2 text-dark border") for t in tickers]
 
     @app.callback(Output('index-summary-display', 'children'), Input('user-selections-store', 'data'))
     def update_index_summary_display(store_data):
         indices = store_data.get('indices', []) if store_data else []
-        if not indices: return html.Span("No indices selected.", className="text-muted fst-italic")
-        return [html.Label("Selected Indices:", className="text-muted small")] + [
+        if not indices: return html.Span("No indices selected.", className="text-white-50 fst-italic")
+        return [html.Label("Selected Indices:", className="text-white small fw-bold")] + [
             dbc.Badge([
                 INDEX_TICKER_TO_NAME.get(t, t),
                 html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': t})

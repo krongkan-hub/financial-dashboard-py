@@ -186,19 +186,19 @@ def create_bonds_layout():
                                                 dbc.Tab(label="YIELD VOLATILITY", tab_id="tab-yield-volatility"),
                                             ])
                                         ]),
-                                        md=8
+                                        md=10
                                     ),
                                     dbc.Col(
                                         dbc.Stack(
                                             [
-                                                dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-dcf-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                                                dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-graphs", color="secondary", outline=True),
+                                                dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-dcf-modal-btn", color="link", className="text-secondary p-1 fs-4 border-0", style={'display': 'none'}),
+                                                dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-graphs", color="link", className="text-secondary p-1 fs-4 border-0"),
                                             ],
                                             direction="horizontal",
                                             gap=2,
                                             className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                         ),
-                                        md=4
+                                        md=2
                                     )
                                 ],
                                 align="center",
@@ -224,22 +224,22 @@ def create_bonds_layout():
                                                 dbc.Tab(label="YIELD & DIRTY PRICE", tab_id="tab-bond-pricing"),
                                             ])
                                         ]),
-                                        width=12, md=6, lg=7 
+                                        width=12, md=9 
                                     ),
                                     
                                     # Controls Column (Right Side - Info Button + Sort By)
                                     dbc.Col(
                                         dbc.Stack(
                                             [
-                                                dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                                                dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="secondary", outline=True),
+                                                dbc.Button(html.I(className="bi bi-gear-fill"), id="bonds-open-forecast-modal-btn", color="link", className="text-secondary p-1 fs-4 border-0", style={'display': 'none'}),
+                                                dbc.Button(html.I(className="bi bi-info-circle-fill"), id="bonds-open-definitions-modal-btn-tables", color="link", className="text-secondary p-1 fs-4 border-0"),
                                                 dcc.Dropdown(id='bonds-sort-by-dropdown', placeholder="Sort by", style={'minWidth': '150px', 'width': '150px'}), 
                                             ],
                                             direction="horizontal",
                                             gap=2,
                                             className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                         ),
-                                        width=12, md=6, lg=5 
+                                        width=12, md=3 
                                     )
                                 ],
                                 align="center",

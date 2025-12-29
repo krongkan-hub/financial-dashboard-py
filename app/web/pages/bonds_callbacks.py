@@ -282,15 +282,15 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         tickers, indices = data.get('tickers', []), data.get('indices', [])
         full_map = {**BOND_YIELD_MAP, **BOND_BENCHMARK_MAP}
         
-        if not tickers: ticker_content = html.Div([html.Span("No Yields selected.", className="text-muted fst-italic")])
+        if not tickers: ticker_content = html.Div([html.Span("No Yields selected.", className="text-white-50 fst-italic")])
         else:
-            ticker_content = [html.Label("Selected Yields:", className="text-muted small")] + [
+            ticker_content = [html.Label("Selected Yields:", className="text-white small fw-bold")] + [
                 dbc.Badge([full_map.get(t, t), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'bonds-remove-ticker-btn', 'index': t})], color="light", className="m-1 p-2 text-dark border") for t in tickers
             ]
         
-        if not indices: index_content = html.Div([html.Span("No Benchmarks selected.", className="text-muted fst-italic")])
+        if not indices: index_content = html.Div([html.Span("No Benchmarks selected.", className="text-white-50 fst-italic")])
         else:
-            index_content = [html.Label("Selected Benchmarks:", className="text-muted small")] + [
+            index_content = [html.Label("Selected Benchmarks:", className="text-white small fw-bold")] + [
                 dbc.Badge([full_map.get(t, t), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'bonds-remove-ticker-btn', 'index': t})], color="light", className="m-1 p-2 text-dark border")
                 for t in indices
             ]
@@ -345,10 +345,11 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 y='cumulative_change', 
                 color='display_name',
                 title="Comparative Cumulative Change (Normalized to Start Date)",
-                labels={'cumulative_change': 'Cumulative Change (%)', 'date': 'Date'}
+                labels={'cumulative_change': 'Cumulative Change (%)', 'date': 'Date'},
+                template='plotly_dark' # [MODIFIED] Added Dark Template
             )
             # จัดรูปแบบแกน Y เป็นเปอร์เซ็นต์ (เช่น 50%, -10%)
-            fig.update_layout(yaxis_tickformat=".2%", yaxis_title='Cumulative Change (%)', legend_title='Instrument')
+            fig.update_layout(yaxis_tickformat=".2%", yaxis_title='Cumulative Change (%)', legend_title='Instrument', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             return dcc.Graph(figure=fig)
 
         # --- Tab: YIELD CURVE (tab-yield-curve) ---
@@ -394,13 +395,15 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 color='Period',
                 markers=True,
                 line_shape='spline',
-                title=f"US Treasury Yield Curve Comparison ({y_axis_title})"
+                title=f"US Treasury Yield Curve Comparison ({y_axis_title})",
+                template='plotly_dark' # [MODIFIED] Added Dark Template
             )
             fig.update_layout(
                 xaxis_title='Maturity (Years)',
                 yaxis_title=y_axis_title,
                 xaxis={'tickmode': 'linear', 'tick0': 0, 'dtick': 5},
-                hovermode="x unified"
+                hovermode="x unified",
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)' # [MODIFIED] Transparent
             )
             return dcc.Graph(figure=fig)
 
@@ -443,10 +446,11 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 y='Spread',
                 color='Spread Name',
                 title=f"Historical Yield/Price Spreads vs. {full_map.get(benchmark, benchmark)}",
-                labels={'Spread': 'Spread Value (bps)', 'date': 'Date'}
+                labels={'Spread': 'Spread Value (bps)', 'date': 'Date'},
+                template='plotly_dark' # [MODIFIED] Added Dark Template
             )
             
-            fig.update_layout(yaxis_title='Spread Value (bps)', hovermode="x unified")
+            fig.update_layout(yaxis_title='Spread Value (bps)', hovermode="x unified", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             return dcc.Graph(figure=fig)
 
         # --- Tab: YIELD VOLATILITY (tab-yield-volatility) ---
@@ -462,9 +466,10 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
                 x='date', 
                 y='close', 
                 title="MOVE Index (US Bond Market Volatility)",
-                labels={'close': 'MOVE Index Value', 'date': 'Date'}
+                labels={'close': 'MOVE Index Value', 'date': 'Date'},
+                template='plotly_dark' # [MODIFIED] Added Dark Template
             )
-            fig.update_layout(yaxis_title='MOVE Index Value', legend_title='Instrument')
+            fig.update_layout(yaxis_title='MOVE Index Value', legend_title='Instrument', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             return dcc.Graph(figure=fig)
 
         return html.P(f"Content for {active_tab} is not implemented yet.")

@@ -45,9 +45,11 @@ def register_graph_callbacks(app):
                 
                 fig = px.line(ytd_perf, title='YTD Performance Comparison', 
                               color_discrete_map=COLOR_DISCRETE_MAP, 
-                              labels=INDEX_TICKER_TO_NAME) 
+                              labels=INDEX_TICKER_TO_NAME,
+                              template='plotly_dark') # [MODIFIED] Added Dark Template
                 
-                fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol')
+                # [MODIFIED] Added Transparent Background
+                fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 
             if active_tab == "tab-drawdown":
@@ -64,9 +66,11 @@ def register_graph_callbacks(app):
                 
                 fig = px.line(drawdown_data, title='1-Year Drawdown Comparison', 
                               color_discrete_map=COLOR_DISCRETE_MAP, 
-                              labels=INDEX_TICKER_TO_NAME) 
+                              labels=INDEX_TICKER_TO_NAME,
+                              template='plotly_dark') # [MODIFIED] Added Dark Template
                 
-                fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol')
+                # [MODIFIED] Added Transparent Background
+                fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 
             if active_tab == "tab-scatter":
@@ -95,9 +99,10 @@ def register_graph_callbacks(app):
                 df_scatter = df_scatter.dropna()
                 if df_scatter.empty: return dbc.Alert("No valid scatter data points to plot.", color="warning")
 
-                fig = px.scatter(df_scatter, x="EBITDA Margin", y="EV/EBITDA", text="Ticker", title="Valuation vs. Quality Analysis")
-                fig.update_traces(textposition='top center', marker=dict(size=12, line=dict(width=1, color='DarkSlateGrey')))
-                fig.update_layout(xaxis_tickformat=".2%", yaxis_title="EV / EBITDA (Valuation)", xaxis_title="EBITDA Margin (Quality)")
+                fig = px.scatter(df_scatter, x="EBITDA Margin", y="EV/EBITDA", text="Ticker", title="Valuation vs. Quality Analysis", template='plotly_dark') # [MODIFIED] Added Dark Template
+                fig.update_traces(textposition='top center', marker=dict(size=12, line=dict(width=1, color='lightgrey'))) # [MODIFIED] lighter border
+                # [MODIFIED] Added Transparent Background & Grid adjustments
+                fig.update_layout(xaxis_tickformat=".2%", yaxis_title="EV / EBITDA (Valuation)", xaxis_title="EBITDA Margin (Quality)", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                 x_avg, y_avg = df_scatter["EBITDA Margin"].mean(), df_scatter["EV/EBITDA"].mean()
                 fig.add_vline(x=x_avg, line_width=1, line_dash="dash", line_color="grey"); fig.add_hline(y=y_avg, line_width=1, line_dash="dash", line_color="grey")
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
@@ -137,7 +142,8 @@ def register_graph_callbacks(app):
                 fig.add_trace(go.Scatter(x=df_mos['current_price'], y=df_mos['Ticker'], mode='markers', marker=dict(color='royalblue', size=10), name='Current Price'), row=2, col=1)
                 fig.add_trace(go.Scatter(x=df_mos['intrinsic_value'], y=df_mos['Ticker'], mode='markers', marker=dict(color='darkorange', size=10, symbol='diamond'), name='Mean Intrinsic Value'), row=2, col=1)
                 for i, row in df_mos.iterrows(): fig.add_shape(type='line', x0=row['current_price'], y0=row['Ticker'], x1=row['intrinsic_value'], y1=row['Ticker'], line=dict(color='limegreen' if row['intrinsic_value'] > row['current_price'] else 'tomato', width=3), row=2, col=1)
-                fig.update_layout(title_text='Monte Carlo DCF Analysis', barmode='overlay', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                # [MODIFIED] Added Dark Template & Transparent Background
+                fig.update_layout(title_text='Monte Carlo DCF Analysis', barmode='overlay', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                 fig.update_yaxes(title_text="Frequency", row=1, col=1); fig.update_yaxes(title_text="Ticker", row=2, col=1); fig.update_xaxes(title_text="Share Price ($)", row=2, col=1)
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 

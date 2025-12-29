@@ -262,8 +262,8 @@ def create_navbar():
             ],
             fluid=True
         ),
-        color="dark",
-        dark=True,
+        # color="dark",  <-- REMOVED: conflicting with custom CSS background-color
+        dark=True,       # KEPT: Helper to make text white (suitable for dark purple background)
         className="py-2 fixed-top"
     )
 
@@ -385,19 +385,19 @@ def build_layout():
                                         dbc.Tab(label="MARGIN OF SAFETY", tab_id="tab-dcf"),
                                     ])
                                 ]),
-                                md=8
+                                md=10
                             ),
                             dbc.Col(
                                 dbc.Stack(
                                     [
-                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-dcf-modal-btn", color="secondary", outline=True, style={'display': 'none'}),
-                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-graphs", color="secondary", outline=True),
+                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-dcf-modal-btn", color="link", className="text-secondary p-1 fs-4 border-0", style={'display': 'none'}),
+                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-graphs", color="link", className="text-secondary p-1 fs-4 border-0"),
                                     ],
                                     direction="horizontal",
                                     gap=2,
                                     className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                 ),
-                                md=4
+                                md=2
                             )
                         ],
                         align="center",
@@ -419,20 +419,20 @@ def build_layout():
                                         dbc.Tab(label="TARGET", tab_id="tab-forecast"),
                                     ])
                                 ]),
-                                md=7
+                                md=9
                             ),
                              dbc.Col(
                                 dbc.Stack(
                                     [
-                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="secondary", outline=True),
-                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-tables", color="secondary", outline=True),
+                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="link", className="text-secondary p-1 fs-4 border-0"),
+                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-tables", color="link", className="text-secondary p-1 fs-4 border-0"),
                                         dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
                                     ],
                                     direction="horizontal",
                                     gap=2,
                                     className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
                                 ),
-                                md=5
+                                md=3
                             )
                         ],
                         align="center",

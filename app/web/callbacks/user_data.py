@@ -100,7 +100,7 @@ def register_user_data_callbacks(app):
     def update_ticker_summary_display(store_data):
         tickers = store_data.get('tickers', []) if store_data else []
         if not tickers: return html.Div([html.Span("No stocks selected.", className="text-white-50 fst-italic")])
-        return [html.Label("Selected Stocks:", className="text-white small fw-bold")] + [dbc.Badge([t, html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-stock', 'index': t})], color="light", className="m-1 p-2 text-dark border") for t in tickers]
+        return [html.Label("Selected Stocks:", className="text-white small fw-bold")] + [dbc.Badge([t, html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-stock', 'index': t})], color="dark", className="m-1 p-2 border", style={"backgroundColor": "#334155", "borderColor": "#475569", "color": "#f8fafc"}) for t in tickers]
 
     @app.callback(Output('index-summary-display', 'children'), Input('user-selections-store', 'data'))
     def update_index_summary_display(store_data):
@@ -110,7 +110,7 @@ def register_user_data_callbacks(app):
             dbc.Badge([
                 INDEX_TICKER_TO_NAME.get(t, t),
                 html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'remove-index', 'index': t})
-            ], color="light", className="m-1 p-2 text-dark border")
+            ], color="dark", className="m-1 p-2 border", style={"backgroundColor": "#334155", "borderColor": "#475569", "color": "#f8fafc"})
             for t in indices
         ]
 

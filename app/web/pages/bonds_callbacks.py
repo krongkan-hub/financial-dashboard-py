@@ -164,7 +164,7 @@ def _render_detailed_table(df_table, cols_to_show, sort_col):
         data=df_table.to_dict('records'),
         style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
         style_data={'border': '0px', 'backgroundColor': 'transparent'},
-        style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0'},
+        style_cell={'textAlign': 'right', 'padding': '12px', 'border': '0px', 'borderBottom': '1px solid #334155', 'fontFamily': '"Open Sans", verdana, arial, sans-serif', 'fontSize': '14px'},
         style_header_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}],
         style_cell_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left', 'width': '10%', 'verticalAlign': 'middle'}],
         markdown_options={"html": True}
@@ -285,13 +285,13 @@ def register_bonds_callbacks(app: Dash, BOND_METRIC_DEFINITIONS):
         if not tickers: ticker_content = html.Div([html.Span("No Yields selected.", className="text-white-50 fst-italic")])
         else:
             ticker_content = [html.Label("Selected Yields:", className="text-white small fw-bold")] + [
-                dbc.Badge([full_map.get(t, t), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'bonds-remove-ticker-btn', 'index': t})], color="light", className="m-1 p-2 text-dark border") for t in tickers
+                dbc.Badge([full_map.get(t, t), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'bonds-remove-ticker-btn', 'index': t})], color="dark", className="m-1 p-2 border", style={"backgroundColor": "#334155", "borderColor": "#475569", "color": "#f8fafc"}) for t in tickers
             ]
         
         if not indices: index_content = html.Div([html.Span("No Benchmarks selected.", className="text-white-50 fst-italic")])
         else:
             index_content = [html.Label("Selected Benchmarks:", className="text-white small fw-bold")] + [
-                dbc.Badge([full_map.get(t, t), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'bonds-remove-ticker-btn', 'index': t})], color="light", className="m-1 p-2 text-dark border")
+                dbc.Badge([full_map.get(t, t), html.I(className="bi bi-x-circle-fill ms-2", style={'cursor': 'pointer'}, id={'type': 'bonds-remove-ticker-btn', 'index': t})], color="dark", className="m-1 p-2 border", style={"backgroundColor": "#334155", "borderColor": "#475569", "color": "#f8fafc"})
                 for t in indices
             ]
         return ticker_content, index_content

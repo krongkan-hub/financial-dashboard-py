@@ -146,7 +146,7 @@ def create_bonds_layout():
                             ),
                             
                             # 3. Add Yields Button (Add Stock(s) Button ในหน้า Stocks)
-                            dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Yield(s)"], id='bonds-add-yield-button', color="primary", className="mt-2 w-100", n_clicks=0),
+                            dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Yield(s)"], id='bonds-add-yield-button', color="primary", className="mt-2 w-100 rounded-2", n_clicks=0),
                             
                             html.Hr(),
 
@@ -159,7 +159,7 @@ def create_bonds_layout():
                                 multi=True, 
                                 className="sidebar-dropdown"
                             ),
-                            dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id='bonds-add-benchmark-button', color="primary", className="mt-2 w-100", n_clicks=0),
+                            dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id='bonds-add-benchmark-button', color="primary", className="mt-2 w-100 rounded-2", n_clicks=0),
 
                             html.Hr(className="my-4"),
                             

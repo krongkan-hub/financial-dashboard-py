@@ -357,11 +357,11 @@ def build_layout():
                         clearable=False
                     ),
                     dcc.Dropdown(id='ticker-select-dropdown', className="mt-2 sidebar-dropdown", placeholder="Select one or more tickers...", multi=True),
-                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock(s)"], id="add-ticker-button", n_clicks=0, className="mt-2 w-100"),
+                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock(s)"], id="add-ticker-button", n_clicks=0, className="mt-2 w-100 rounded-2"),
                     html.Hr(),
                     html.Label("Add Benchmarks to Compare", className="fw-bold"),
                     dcc.Dropdown(id='index-select-dropdown', placeholder="Select one or more indices...", multi=True),
-                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id="add-index-button", n_clicks=0, className="mt-2 w-100"),
+                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id="add-index-button", n_clicks=0, className="mt-2 w-100 rounded-2"),
 
                     # --- [START] New Section for Smart Peer Finder (REMOVED) ---
                     # The content for "Find Smart Peers" has been completely removed as per user request.

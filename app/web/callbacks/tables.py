@@ -140,7 +140,7 @@ def register_table_callbacks(app):
                 style_table={'overflowX': 'auto'},
                 style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
                 style_data={'border': '0px', 'backgroundColor': 'transparent'},
-                style_cell={'textAlign': 'right', 'padding': '14px', 'border': '0px', 'borderBottom': '1px solid #f0f0f0', 'fontFamily': 'sans-serif'},
+                style_cell={'textAlign': 'right', 'padding': '12px', 'border': '0px', 'borderBottom': '1px solid #334155', 'fontFamily': '"Open Sans", verdana, arial, sans-serif', 'fontSize': '14px'},
                 style_header_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}],
                 style_data_conditional=style_data_conditional,
                 style_cell_conditional=style_cell_conditional,

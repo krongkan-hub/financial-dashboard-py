@@ -39,4 +39,5 @@ register_bonds_callbacks(app, BOND_METRIC_DEFINITIONS)
 
 # --- Run App (เหมือนเดิม) ---
 if __name__ == '__main__':
-    app.run(debug=False, use_reloader=False)
+    # Listen on all available network interfaces (0.0.0.0) to allow access from other devices on the same WiFi
+    app.run(host='0.0.0.0', port=8050, debug=False, use_reloader=False)

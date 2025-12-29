@@ -12,6 +12,13 @@ from flask_login import login_user
 # ==================================================================
 def create_register_layout():
     """Creates the layout for the registration page."""
+    input_style = {
+        'backgroundColor': 'var(--bg-input)', 
+        'color': '#ffffff', 
+        'border': '1px solid var(--border-color)',
+        'colorScheme': 'dark' # Fixes placeholder color
+    }
+    
     return dbc.Container([
         dbc.Row(dbc.Col(html.H2("Create a New Account", className="text-center"), width=12), className="mt-5"),
         dbc.Row(dbc.Col(
@@ -19,39 +26,48 @@ def create_register_layout():
                 dbc.CardBody([
                     dbc.Alert(id='register-alert', color="danger", is_open=False),
                     dbc.Label("Username"),
-                    dbc.Input(id="reg-username-input", type="text", placeholder="Choose a username"),
+                    dbc.Input(id="reg-username-input", type="text", placeholder="Choose a username", style=input_style, className="rounded-2"),
                     dbc.Label("Password", className="mt-3"),
-                    dbc.Input(id="reg-password-input", type="password", placeholder="Enter a password (min. 8 characters)"),
+                    dbc.Input(id="reg-password-input", type="password", placeholder="Enter a password (min. 8 characters)", style=input_style, className="rounded-2"),
                     dbc.Label("Confirm Password", className="mt-3"),
-                    dbc.Input(id="reg-password-confirm-input", type="password", placeholder="Enter password again"),
-                    dbc.Button("Create Account", id="create-account-button", color="primary", className="mt-4 w-100"),
+                    dbc.Input(id="reg-password-confirm-input", type="password", placeholder="Enter password again", style=input_style, className="rounded-2"),
+                    dbc.Button("Create Account", id="create-account-button", color="primary", className="mt-4 w-100 rounded-2"),
                     html.Hr(),
-                    dcc.Link("Already have an account? Log in", href="/", className="text-center d-block"),
+                    dcc.Link("Already have an account? Log in", href="/", className="text-center d-block text-white-50 text-decoration-none"),
                 ])
-            ]), width={"size": 6, "offset": 3}, md={"size": 4, "offset": 4}
+            ], className="rounded-4 border-0 shadow-lg", style={'backgroundColor': 'var(--bg-card)'}), 
+            width={"size": 6, "offset": 3}, md={"size": 4, "offset": 4}
         ), className="mt-4")
     ], fluid=True)
 
 
 def create_login_modal():
     """Creates the layout for the login modal."""
+    input_style = {
+        'backgroundColor': 'var(--bg-input)', 
+        'color': '#ffffff', 
+        'border': '1px solid var(--border-color)',
+        'colorScheme': 'dark' # Fixes placeholder color
+    }
+    
     return dbc.Modal(
         [
-            dbc.ModalHeader(dbc.ModalTitle("Login")),
+            dbc.ModalHeader(dbc.ModalTitle("Login"), style={'borderBottom': '1px solid var(--border-color)'}),
             dbc.ModalBody([
                 dbc.Alert(id='login-alert-modal', color="danger", is_open=False),
                 dbc.Label("Username"),
-                dbc.Input(id="username-input-modal", type="text", placeholder="Enter username"),
+                dbc.Input(id="username-input-modal", type="text", placeholder="Enter username", style=input_style, className="rounded-2"),
                 dbc.Label("Password", className="mt-3"),
-                dbc.Input(id="password-input-modal", type="password", placeholder="Enter password"),
+                dbc.Input(id="password-input-modal", type="password", placeholder="Enter password", style=input_style, className="rounded-2"),
             ]),
             dbc.ModalFooter([
-                dbc.Button("Create an Account", href="/register", color="secondary", className="me-auto"),
-                dbc.Button("Login", id="login-button-modal", color="primary")
-            ]),
+                dbc.Button("Create an Account", href="/register", color="secondary", className="me-auto rounded-2 text-white", outline=True),
+                dbc.Button("Login", id="login-button-modal", color="primary", className="rounded-2 px-4")
+            ], style={'borderTop': '1px solid var(--border-color)'}),
         ],
         id="login-modal",
         is_open=False,
+        contentClassName="rounded-4", 
     )
 
 # ==================================================================

@@ -401,26 +401,33 @@ def build_layout():
                                 md=2
                             )
                         ],
-                        align="center",
+                        align="start",
                         className="control-row"
                     ),
 
-                    dcc.Loading(
-                        html.Div(
-                            id='analysis-pane-content',
-                            className="mt-3",
-                            children=[
-                                dbc.Card(dbc.CardBody(
-                                    dcc.Graph(
-                                        figure=generate_ytd_performance_figure(
-                                            tickers=TOP_5_DEFAULT_TICKERS,
-                                            indices=['^GSPC']
-                                        )
+                    # Graph Content Area (Full Width)
+                    html.Div(id='graph-content-container', className="mt-3", children=[
+                        # Performance (Visible by default)
+                        html.Div(id='content-performance', children=[
+                            dbc.Card(dbc.CardBody(
+                                dcc.Graph(
+                                    figure=generate_ytd_performance_figure(
+                                        tickers=TOP_5_DEFAULT_TICKERS,
+                                        indices=['^GSPC']
                                     )
-                                ))
-                            ]
-                        )
-                    ),
+                                )
+                            ))
+                        ], style={'display': 'block'}),
+
+                        # Drawdown (Hidden)
+                        html.Div(id='content-drawdown', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+
+                        # Scatter (Hidden)
+                        html.Div(id='content-scatter', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+
+                        # DCF (Hidden)
+                        html.Div(id='content-dcf', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+                    ]),
                     html.Hr(className="my-5"),
 
                     # Table Controls Row (Responsive)
@@ -451,11 +458,24 @@ def build_layout():
                                 md=3
                             )
                         ],
-                        align="center",
+                        align="start",
                         className="control-row mt-3"
                     ),
 
-                    dcc.Loading(html.Div(id="table-pane-content", className="mt-2"))
+                    # Table Content Area (Full Width)
+                    html.Div(id='table-content-container', className="mt-2", children=[
+                        # Valuation (Visible by default)
+                        html.Div(id='content-valuation', children=[dcc.Loading(html.Div())], style={'display': 'block'}),
+
+                        # Growth (Hidden)
+                        html.Div(id='content-growth', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+
+                        # Fundamentals (Hidden)
+                        html.Div(id='content-fundamentals', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+
+                        # Target/Forecast (Hidden)
+                        html.Div(id='content-forecast', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+                    ])
                 ], width=12, md=9, className="content-offset"),
             ], className="g-4")
         ], fluid=True, className="p-4 main-content-container"),

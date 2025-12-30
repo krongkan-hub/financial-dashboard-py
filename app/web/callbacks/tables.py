@@ -13,19 +13,49 @@ from .utils import (
 
 def register_table_callbacks(app):
 
-    @app.callback(
-        Output('table-pane-content', 'children'),
-        Output('sort-by-dropdown', 'options'),
-        Output('sort-by-dropdown', 'value'),
-        [Input('table-tabs', 'active_tab'),
-         Input('user-selections-store', 'data'),
-         Input('sort-by-dropdown', 'value'),
-         Input('forecast-assumptions-store', 'data')]
+    app.clientside_callback(
+        """
+        function(active_tab) {
+            const styles = {'display': 'none'};
+            const visible = {'display': 'block'};
+            return [
+                active_tab === 'tab-valuation' ? visible : styles,
+                active_tab === 'tab-growth' ? visible : styles,
+                active_tab === 'tab-fundamentals' ? visible : styles,
+                active_tab === 'tab-forecast' ? visible : styles
+            ];
+        }
+        """,
+        [Output('content-valuation', 'style'),
+         Output('content-growth', 'style'),
+         Output('content-fundamentals', 'style'),
+         Output('content-forecast', 'style')],
+        Input('table-tabs', 'active_tab')
     )
-    def render_table_content(active_tab, store_data, sort_by_column, forecast_data):
+
+    @app.callback(
+        Output('sort-by-dropdown', 'options'),
+        Input('table-tabs', 'active_tab')
+    )
+    def update_dropdown_options(active_tab):
+        tab_config = TABS_CONFIG.get(active_tab, {})
+        display_cols = tab_config.get("columns", [])
+        return [{'label': col, 'value': col} for col in display_cols if col != 'Ticker']
+
+    @app.callback(
+        [Output('content-valuation', 'children'),
+         Output('content-growth', 'children'),
+         Output('content-fundamentals', 'children'),
+         Output('content-forecast', 'children')],
+        [Input('user-selections-store', 'data'),
+         Input('forecast-assumptions-store', 'data'),
+         Input('sort-by-dropdown', 'value')]
+    )
+    def update_all_tables(store_data, forecast_data, sort_by_column):
         try:
             if not store_data or not store_data.get('tickers'):
-                return dbc.Alert("Please select stocks to view the comparison table.", color="info", className="mt-3 text-center"), [], None
+                alert = dbc.Alert("Please select stocks to view the comparison table.", color="info", className="mt-3 text-center")
+                return alert, alert, alert, alert
 
             tickers = tuple(store_data.get('tickers'))
 
@@ -72,7 +102,8 @@ def register_table_callbacks(app):
                          logging.warning(f"Failed direct read_sql fallback: {sql_err}")
 
             if df_full.empty:
-                return dbc.Alert(f"No summary data found in the warehouse for: {', '.join(tickers)}. Please wait for the next ETL run or check ETL logs.", color="warning", className="mt-3 text-center"), [], None
+                alert = dbc.Alert(f"No summary data found for: {', '.join(tickers)}.", color="warning", className="mt-3 text-center")
+                return alert, alert, alert, alert
 
             df_full = apply_custom_scoring(df_full)
 
@@ -90,66 +121,76 @@ def register_table_callbacks(app):
             }
             df_full.rename(columns={k: v for k, v in column_mapping.items() if k in df_full.columns}, inplace=True)
 
-            if active_tab == 'tab-forecast':
-                forecast_years, eps_growth, terminal_pe = forecast_data.get('years'), forecast_data.get('growth'), forecast_data.get('pe')
-                if all(v is not None for v in [forecast_years, eps_growth, terminal_pe]):
+            # --- FORECAST CALCULATION (Apply to df_full directly) ---
+            forecast_years, eps_growth, terminal_pe = forecast_data.get('years'), forecast_data.get('growth'), forecast_data.get('pe')
+            if all(v is not None for v in [forecast_years, eps_growth, terminal_pe]):
+                df_full['Trailing EPS'] = pd.to_numeric(df_full.get('Trailing EPS'), errors='coerce')
+                df_full['Price'] = pd.to_numeric(df_full.get('Price'), errors='coerce')
+                eps_growth_decimal = eps_growth / 100.0
 
-                    df_full['Trailing EPS'] = pd.to_numeric(df_full.get('Trailing EPS'), errors='coerce')
-                    df_full['Price'] = pd.to_numeric(df_full.get('Price'), errors='coerce')
+                def calc_target(row):
+                    if pd.isna(row['Trailing EPS']) or row['Trailing EPS'] <= 0 or pd.isna(row['Price']) or row['Price'] <= 0:
+                        return pd.NA, pd.NA, pd.NA
+                    try:
+                        future_eps = row['Trailing EPS'] * ((1 + eps_growth_decimal) ** forecast_years)
+                        target_price = future_eps * terminal_pe
+                        upside = ((target_price / row['Price']) - 1) * 100
+                        irr = (((target_price / row['Price']) ** (1 / forecast_years)) - 1) * 100
+                        return target_price, upside, irr
+                    except Exception:
+                        return pd.NA, pd.NA, pd.NA
 
-                    eps_growth_decimal = eps_growth / 100.0
+                df_full[['Target Price', 'Target Upside', 'IRR %']] = df_full.apply(calc_target, axis=1, result_type='expand')
 
-                    def calc_target(row):
-                        if pd.isna(row['Trailing EPS']) or row['Trailing EPS'] <= 0 or pd.isna(row['Price']) or row['Price'] <= 0:
-                            return pd.NA, pd.NA, pd.NA
+            # --- SORTING LOGIC [RESTORED] ---
+            if sort_by_column and sort_by_column in df_full.columns:
+                # Determine direction. Default higher_is_better is True -> Ascending=False
+                # We need to check which tab this column belongs to for 'higher_is_better' logic
+                # Optimization: Check all tabs or just assume simplified logic
+                is_ascending = True
+                for conf in TABS_CONFIG.values():
+                     if sort_by_column in conf.get('higher_is_better', {}):
+                         is_ascending = not conf['higher_is_better'][sort_by_column]
+                         break
+                     # Special case: Ticker always asc
+                     if sort_by_column == 'Ticker': is_ascending = True
 
-                        try:
-                            future_eps = row['Trailing EPS'] * ((1 + eps_growth_decimal) ** forecast_years)
-                            target_price = future_eps * terminal_pe
-                            upside = ((target_price / row['Price']) - 1) * 100
-                            irr = (((target_price / row['Price']) ** (1 / forecast_years)) - 1) * 100
-                            return target_price, upside, irr
-                        except Exception:
-                            return pd.NA, pd.NA, pd.NA
+                df_full = df_full.sort_values(by=sort_by_column, ascending=is_ascending)
 
-                    df_full[['Target Price', 'Target Upside', 'IRR %']] = df_full.apply(calc_target, axis=1, result_type='expand')
+            # --- GENERATE 4 TABLES ---
+            table_outputs = []
+            for tab_key in ['tab-valuation', 'tab-growth', 'tab-fundamentals', 'tab-forecast']:
+                tab_config = TABS_CONFIG.get(tab_key, {})
+                display_cols = tab_config.get("columns", [])
+                
+                df_display = _prepare_display_dataframe(df_full) 
+                
+                for c in display_cols: 
+                    if c not in df_display.columns: df_display[c] = pd.NA
+                
+                df_display = df_display[display_cols]
 
-            tab_config = TABS_CONFIG.get(active_tab, {})
-            display_cols = tab_config.get("columns", [])
-            higher_is_better = tab_config.get("higher_is_better", {})
+                columns = _generate_datatable_columns(tab_config)
+                style_data_conditional, style_cell_conditional = _generate_datatable_style_conditionals(tab_config)
 
-            df_display = _prepare_display_dataframe(df_full)
+                table = dash_table.DataTable(
+                    data=df_display.to_dict('records'),
+                    columns=columns,
+                    sort_action='none', 
+                    style_table={'overflowX': 'auto'},
+                    style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
+                    style_data={'border': '0px', 'backgroundColor': 'transparent'},
+                    style_cell={'textAlign': 'right', 'padding': '12px', 'border': '0px', 'borderBottom': '1px solid #334155', 'fontFamily': '"Open Sans", verdana, arial, sans-serif', 'fontSize': '14px'},
+                    style_header_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}],
+                    style_data_conditional=style_data_conditional,
+                    style_cell_conditional=style_cell_conditional,
+                    markdown_options={"html": True},
+                )
+                table_outputs.append(table)
 
-            missing_cols = [c for c in display_cols if c not in df_display.columns]
-            for c in missing_cols: df_display[c] = pd.NA
-
-            df_display = df_display[display_cols]
-
-            sort_options = [{'label': col, 'value': col} for col in display_cols if col != 'Ticker']
-            
-            if sort_by_column and sort_by_column in df_display.columns:
-                ascending = not higher_is_better.get(sort_by_column, True)
-                df_display = df_display.sort_values(by=sort_by_column, ascending=ascending)
-
-            columns = _generate_datatable_columns(tab_config)
-            style_data_conditional, style_cell_conditional = _generate_datatable_style_conditionals(tab_config)
-
-            table = dash_table.DataTable(
-                data=df_display.to_dict('records'),
-                columns=columns,
-                style_table={'overflowX': 'auto'},
-                style_header={'border': '0px', 'backgroundColor': 'transparent', 'fontWeight': '600', 'textTransform': 'uppercase', 'textAlign': 'right'},
-                style_data={'border': '0px', 'backgroundColor': 'transparent'},
-                style_cell={'textAlign': 'right', 'padding': '12px', 'border': '0px', 'borderBottom': '1px solid #334155', 'fontFamily': '"Open Sans", verdana, arial, sans-serif', 'fontSize': '14px'},
-                style_header_conditional=[{'if': {'column_id': 'Ticker'}, 'textAlign': 'left'}],
-                style_data_conditional=style_data_conditional,
-                style_cell_conditional=style_cell_conditional,
-                markdown_options={"html": True},
-
-            )
-
-            return table, sort_options, sort_by_column
+            return tuple(table_outputs)
 
         except Exception as e:
             logging.error(f"Error rendering table content: {e}", exc_info=True)
-            return dbc.Alert(f"An error occurred while rendering the table: {e}", color="danger"), [], None
+            alert = dbc.Alert(f"An error occurred: {e}", color="danger")
+            return alert, alert, alert, alert

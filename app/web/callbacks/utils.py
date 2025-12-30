@@ -15,11 +15,23 @@ TABS_CONFIG = {
     "tab-drawdown": { "tab_name": "Drawdown" },
     "tab-scatter": { "tab_name": "Valuation vs. Quality" },
     "tab-dcf": { "tab_name": "Margin of Safety (DCF)" },
-    "tab-valuation": { "columns": ["Ticker", "Market Cap", "Company Size", "Price", "P/E", "P/B", "EV/EBITDA"], "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False}, "tab_name": "Valuation" },
-    "tab-growth": { "columns": ["Ticker", "Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"], "higher_is_better": {k: True for k in ["Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"]}, "tab_name": "Growth" },
-    "tab-fundamentals": { "columns": ["Ticker", "Operating Margin", "ROE", "D/E Ratio", "Cash Conversion"], "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True}, "tab_name": "Fundamentals" },
+    "tab-valuation": { 
+        "columns": ["Ticker", "Price", "Market Cap", "Company Size", "P/E", "EV/EBITDA", "P/B"], 
+        "higher_is_better": {"P/E": False, "P/B": False, "EV/EBITDA": False}, 
+        "tab_name": "Valuation" 
+    },
+    "tab-growth": { 
+        "columns": ["Ticker", "Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"], 
+        "higher_is_better": {k: True for k in ["Revenue Growth (YoY)", "Revenue CAGR (3Y)", "Net Income Growth (YoY)"]}, 
+        "tab_name": "Growth" 
+    },
+    "tab-fundamentals": { 
+        "columns": ["Ticker", "Operating Margin", "ROE", "Cash Conversion", "D/E Ratio"], 
+        "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True}, 
+        "tab_name": "Fundamentals" 
+    },
     "tab-forecast": {
-        "columns": ["Ticker", "Target Price", "Target Upside", "IRR %", "Volatility Level", "Valuation Model", "Stock Profile"],
+        "columns": ["Ticker", "Stock Profile", "Target Upside", "Target Price", "IRR %", "Valuation Model", "Volatility Level"],
         "higher_is_better": {"Target Upside": True, "IRR %": True},
         "tab_name": "Target"
     }

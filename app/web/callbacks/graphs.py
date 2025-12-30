@@ -20,10 +20,9 @@ def register_graph_callbacks(app):
         Output('analysis-pane-content', 'children'),
         [Input('analysis-tabs', 'active_tab'),
          Input('user-selections-store', 'data'),
-         Input('dcf-assumptions-store', 'data'),
-         Input('table-pane-content', 'children')]
+         Input('dcf-assumptions-store', 'data')]
     )
-    def render_graph_content(active_tab, store_data, dcf_data, table_content):
+    def render_graph_content(active_tab, store_data, dcf_data):
         store_data = store_data or {'tickers': [], 'indices': []}
         tickers = tuple(store_data.get('tickers', []))
         indices = tuple(store_data.get('indices', []))

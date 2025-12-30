@@ -10,8 +10,9 @@ from sqlalchemy import func
 from ... import db, server
 from ...models import FactCompanySummary
 from ...constants import COLOR_DISCRETE_MAP, INDEX_TICKER_TO_NAME
-from ...data_handler import calculate_monte_carlo_dcf
-from .utils import fetch_prices_with_fallback, TABS_CONFIG
+from ...data_handler import calculate_monte_carlo_dcf, fetch_prices_with_fallback
+from .utils import TABS_CONFIG
+from app.web.pages.stocks_services import generate_ytd_performance_figure # [NEW] Import Service
 
 def register_graph_callbacks(app):
 
@@ -33,23 +34,11 @@ def register_graph_callbacks(app):
 
         try:
             if active_tab == "tab-performance":
-                start_of_year = datetime(datetime.now().year, 1, 1).date()
-                raw_data = fetch_prices_with_fallback(all_symbols, start_of_year)
-
-                if raw_data.empty: raise ValueError("No price data found (DB or Live) for YTD performance.")
-
-                ytd_data = raw_data.pivot(index='date', columns='ticker', values='close').sort_index().ffill()
-                if ytd_data.empty or len(ytd_data) < 2: raise ValueError("Not enough data after pivot.")
-
-                ytd_perf = (ytd_data / ytd_data.iloc[0]) - 1
+                # [MODIFIED] Use shared service logic
+                fig = generate_ytd_performance_figure(tickers, indices)
+                if fig is None:
+                     return dbc.Alert("No data available for selected instruments.", color="warning", className="mt-3 text-center")
                 
-                fig = px.line(ytd_perf, title='YTD Performance Comparison', 
-                              color_discrete_map=COLOR_DISCRETE_MAP, 
-                              labels=INDEX_TICKER_TO_NAME,
-                              template='plotly_dark') # [MODIFIED] Added Dark Template
-                
-                # [MODIFIED] Added Transparent Background
-                fig.update_layout(yaxis_tickformat=".2%", legend_title_text='Symbol', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                 return dbc.Card(dbc.CardBody(dcc.Graph(figure=fig)))
 
             if active_tab == "tab-drawdown":

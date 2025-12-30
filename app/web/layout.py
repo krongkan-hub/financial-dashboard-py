@@ -4,8 +4,9 @@
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 from flask_login import current_user
-from ..constants import SECTORS
+from ..constants import SECTORS, TOP_5_DEFAULT_TICKERS # [MODIFIED] Added constants
 from .auth import create_login_modal
+from app.web.pages.stocks_services import generate_ytd_performance_figure # [NEW] Import Service
 
 # --- Dictionary for Metric Definitions (FIXED) ---
 METRIC_DEFINITIONS = {
@@ -404,7 +405,22 @@ def build_layout():
                         className="control-row"
                     ),
 
-                    dcc.Loading(html.Div(id='analysis-pane-content', className="mt-3")),
+                    dcc.Loading(
+                        html.Div(
+                            id='analysis-pane-content',
+                            className="mt-3",
+                            children=[
+                                dbc.Card(dbc.CardBody(
+                                    dcc.Graph(
+                                        figure=generate_ytd_performance_figure(
+                                            tickers=TOP_5_DEFAULT_TICKERS,
+                                            indices=['^GSPC']
+                                        )
+                                    )
+                                ))
+                            ]
+                        )
+                    ),
                     html.Hr(className="my-5"),
 
                     # Table Controls Row (Responsive)

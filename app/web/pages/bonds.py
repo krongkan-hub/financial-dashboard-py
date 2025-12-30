@@ -4,6 +4,7 @@ from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
 # นำเข้า BOND_YIELD_MAP, BOND_BENCHMARK_MAP, BOND_CLASSIFICATIONS จาก app.constants
 from app.constants import BOND_YIELD_MAP, BOND_BENCHMARK_MAP, TOP_5_DEFAULT_TICKERS, HISTORICAL_START_DATE, BOND_CLASSIFICATIONS
+from app.web.pages.bonds_services import generate_yield_history_figure # [NEW] Import Service
 from datetime import date
 
 # --- 4.6 (Optional) Bond Specific Metric Definitions (UPDATED - Removed THB Hedged) ---
@@ -207,7 +208,19 @@ def create_bonds_layout():
 
                             # Graph Content (ใช้ dbc.Card(dbc.CardBody(...)))
                             dbc.Card(dbc.CardBody(
-                                dcc.Loading(html.Div(id='bonds-analysis-pane-content'))
+                                dcc.Loading(
+                                    html.Div(
+                                        id='bonds-analysis-pane-content',
+                                        children=[
+                                            dcc.Graph(
+                                                figure=generate_yield_history_figure(
+                                                    tickers=['^TNX', '^TWS', '^TYX'], 
+                                                    indices=['^GSPC']
+                                                )
+                                            )
+                                        ]
+                                    )
+                                )
                             ), className="mt-3"),
 
                             html.Hr(className="my-5"),

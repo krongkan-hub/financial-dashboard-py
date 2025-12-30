@@ -61,7 +61,7 @@ def create_login_modal():
                 dbc.Input(id="password-input-modal", type="password", placeholder="Enter password", style=input_style, className="rounded-2"),
             ]),
             dbc.ModalFooter([
-                dbc.Button("Create an Account", href="/register", color="secondary", className="me-auto rounded-2 text-white", outline=True),
+                dbc.Button("Create an Account", href="/register", color="secondary", className="me-auto rounded-2 text-white create-account-btn", outline=True),
                 dbc.Button("Login", id="login-button-modal", color="primary", className="rounded-2 px-4")
             ], style={'borderTop': '1px solid var(--border-color)'}),
         ],

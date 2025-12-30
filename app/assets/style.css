@@ -254,3 +254,34 @@ body {
 .dash-dropdown .dash-dropdown__multi-value__label {
     color: white !important;
 }
+
+/* Dark Mode Placeholder Fix - GLOBAL OVERRIDE */
+.form-control::placeholder {
+    color: #e2e8f0 !important;
+    /* Slate-200 (Very Light Gray) */
+    opacity: 1 !important;
+    /* Max Opacity */
+}
+
+input::placeholder {
+    color: #e2e8f0 !important;
+    opacity: 1 !important;
+}
+
+/* Explicit text colors for inputs to ensure visibility */
+.form-control,
+input {
+    color: #ffffff !important;
+}
+
+/* Fix Modal Title Visibility */
+.modal-title {
+    color: #ffffff !important;
+}
+
+/* FIX: Create Account Button Hover */
+.create-account-btn:hover {
+    background-color: white !important;
+    color: var(--brand-primary) !important;
+    border-color: white !important;
+}

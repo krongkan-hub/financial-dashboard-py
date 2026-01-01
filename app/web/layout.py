@@ -72,6 +72,21 @@ METRIC_DEFINITIONS = {
     **A limitation to note:** This model is less reliable for early-stage companies (Startups) or rapidly growing companies, as these companies often have consistently negative Free Cash Flow during the expansion phase.
     """, mathjax=True),
 
+    # --- NEW TAB DEFINITIONS ---
+    "tab-historical": dcc.Markdown("""
+    **HISTORICAL VALUATION BANDS**
+    * **Definition:** Plots historical price vs. P/E bands (15x, 20x, 25x).
+    * **Purpose:** visuals valuation trends relative to earnings power. Green=15x (Value), Yellow=20x (Moderate), Red=25x (Premium).
+    """, mathjax=True),
+    "tab-health": dcc.Markdown("""
+    **FINANCIAL HEALTH**
+    * **Definition:** Assesses solvency (long-term) and liquidity (short-term) stability.
+    """, mathjax=True),
+    "tab-analyst": dcc.Markdown("""
+    **ANALYST CONSENSUS**
+    * **Definition:** Aggregates Wall Street analyst ratings and target prices to gauge sentiment.
+    """, mathjax=True),
+
     # Valuation Metrics
     "P/E": dcc.Markdown("""
     **P/E (Price-to-Earnings) Ratio**
@@ -195,6 +210,40 @@ METRIC_DEFINITIONS = {
     IRR = \\bigg( \\Big( \\frac{\\text{Target Price}}{\\text{Current Price}} \\Big)^{\\frac{1}{\\text{Forecast Years}}} - 1 \\bigg) \\times 100
     $$
     * **Interpretation:** Represents the annualized rate of return for the investment scenario, useful for comparing opportunities.
+    """, mathjax=True),
+
+    # --- Financial Health Metrics ---
+    "Net Debt/EBITDA": dcc.Markdown("""
+    **Net Debt / EBITDA**
+    * **Definition:** Measures leverage. How many years of earnings (EBITDA) would it take to pay off net debt.
+    * **Target:** Generally < 3.0x is healthy. High values indicate high leverage.
+    """, mathjax=True),
+    "Interest Coverage": dcc.Markdown("""
+    **Interest Coverage Ratio**
+    * **Definition:** Ability to pay interest on outstanding debt.
+    * **Formula:** `EBIT / Interest Expense`
+    * **Target:** > 3.0x is generally safe. < 1.5x is risky.
+    """, mathjax=True),
+    "Current Ratio": dcc.Markdown("""
+    **Current Ratio**
+    * **Definition:** Ability to pay short-term obligations with short-term assets.
+    * **Formula:** `Current Assets / Current Liabilities`
+    * **Target:** > 1.0 is essential. > 1.5 is healthy.
+    """, mathjax=True),
+    "D/E Ratio": dcc.Markdown("""
+    **Debt-to-Equity Ratio**
+    * **Definition:** Relative proportion of shareholder equity and debt used to finance a company's assets.
+    """, mathjax=True),
+
+    # --- Analyst Metrics ---
+    "Consensus": dcc.Markdown("""
+    **Analyst Consensus**
+    * **Definition:** The prevailing buy/hold/sell recommendation from analysts (e.g., "Strong Buy").
+    """, mathjax=True),
+    "Upside %": dcc.Markdown("""
+    **Analyst Target Upside**
+    * **Definition:** The percentage difference between the average analyst price target and the current price.
+    * **Formula:** `(Target Price / Current Price) - 1`
     """, mathjax=True),
 }
 
@@ -347,138 +396,135 @@ def build_layout():
         dcc.Store(id='user-selections-store', storage_type='memory'),
         dcc.Store(id='forecast-assumptions-store', storage_type='memory'),
         dcc.Store(id='dcf-assumptions-store', storage_type='memory'),
+        
         dbc.Container([
             dbc.Row([
-                dbc.Col(dbc.Card(dbc.CardBody([
-                    html.Label("Add Stocks to Analysis", className="fw-bold"),
-                    dcc.Dropdown(
-                        id='sector-dropdown',
-                        options=[{'label': 'All Sectors', 'value': 'All'}] + [{'label': k, 'value': k} for k in SECTORS.keys()],
-                        value='All',
-                        clearable=False
-                    ),
-                    dcc.Dropdown(id='ticker-select-dropdown', className="mt-2 sidebar-dropdown", placeholder="Select one or more tickers...", multi=True),
-                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Stock(s)"], id="add-ticker-button", n_clicks=0, className="mt-2 w-100 rounded-2"),
-                    html.Hr(),
-                    html.Label("Add Benchmarks to Compare", className="fw-bold"),
-                    dcc.Dropdown(id='index-select-dropdown', placeholder="Select one or more indices...", multi=True),
-                    dbc.Button([html.I(className="bi bi-plus-circle-fill me-2"), "Add Benchmark(s)"], id="add-index-button", n_clicks=0, className="mt-2 w-100 rounded-2"),
+                # --- [SIDEBAR] ---
+                dbc.Col(dbc.Card([
+                    dbc.CardBody([
+                        html.H5("PORTFOLIO MANAGER", className="fw-bold mb-3 text-primary"),
+                        
+                        # 1. Stock Selection
+                        html.Label("1. Filter by Sector", className="small text-muted fw-bold"),
+                        dcc.Dropdown(
+                            id='sector-dropdown',
+                            options=[{'label': 'All Sectors', 'value': 'All'}] + [{'label': k, 'value': k} for k in SECTORS.keys()],
+                            value='All',
+                            clearable=False,
+                            className="mb-2"
+                        ),
+                        
+                        html.Label("2. Select Ticker(s)", className="small text-muted fw-bold"),
+                        dcc.Dropdown(id='ticker-select-dropdown', className="sidebar-dropdown mb-2", placeholder="Search ticker...", multi=True),
+                        dbc.Button([html.I(className="bi bi-plus-lg me-2"), "Add Stock"], id="add-ticker-button", n_clicks=0, color="primary", outline=True, className="w-100 mb-3 rounded-2"),
+                        
+                        html.Div(id='ticker-summary-display', className="mb-4"),
 
-                    # --- [START] New Section for Smart Peer Finder (REMOVED) ---
-                    # The content for "Find Smart Peers" has been completely removed as per user request.
-                    # --- [END] New Section for Smart Peer Finder (REMOVED) ---
+                        html.Hr(),
 
-                    html.Hr(className="my-4"),
-                    html.Div(id='ticker-summary-display'),
-                    html.Div(id='index-summary-display', className="pt-0"),
-                ])), width=12, md=3, className="sidebar-fixed"),
+                        # 2. Benchmark Selection
+                        html.Label("3. Compare vs Benchmark", className="small text-muted fw-bold"),
+                        dcc.Dropdown(id='index-select-dropdown', placeholder="Select benchmark...", multi=True, className="mb-2"),
+                        dbc.Button([html.I(className="bi bi-graph-up me-2"), "Add Benchmark"], id="add-index-button", n_clicks=0, color="secondary", outline=True, className="w-100 mb-3 rounded-2"),
+                        
+                        html.Div(id='index-summary-display')
 
+                    ], className="p-3")  
+                ], className="border-0 shadow-sm h-100"), width=12, md=3, className="mb-4 mb-md-0 sidebar-fixed"),
+
+                # --- [MAIN CONTENT] ---
                 dbc.Col([
-                    # Graph Controls Row (Responsive)
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Div(className="custom-tabs-container", children=[
-                                    dbc.Tabs(id="analysis-tabs", active_tab="tab-performance", children=[
-                                        dbc.Tab(label="PERFORMANCE", tab_id="tab-performance"),
-                                        dbc.Tab(label="DRAWDOWN", tab_id="tab-drawdown"),
-                                        dbc.Tab(label="VALUATION VS. QUALITY", tab_id="tab-scatter"),
-                                        dbc.Tab(label="MARGIN OF SAFETY", tab_id="tab-dcf"),
-                                    ])
-                                ]),
-                                md=10
-                            ),
-                            dbc.Col(
-                                dbc.Stack(
-                                    [
-                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-dcf-modal-btn", color="link", className="text-secondary p-1 fs-4 border-0", style={'display': 'none'}),
-                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-graphs", color="link", className="text-secondary p-1 fs-4 border-0"),
-                                    ],
-                                    direction="horizontal",
-                                    gap=2,
-                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
-                                ),
-                                md=2
-                            )
-                        ],
-                        align="start",
-                        className="control-row"
-                    ),
+                    # Control Bar (Top Right Tools)
+                    dbc.Row([
+                        dbc.Col(
+                            html.H2("Market Overview", className="mb-0"), 
+                            width=True, 
+                            align="center"
+                        ),
+                        dbc.Col(
+                            dbc.Stack([
+                                dbc.Button([html.I(className="bi bi-gear-fill me-2"), "Forecast"], id="open-forecast-modal-btn", color="light", size="sm", className="text-secondary fw-bold"),
+                                dbc.Button([html.I(className="bi bi-magic me-2"), "DCF Settings"], id="open-dcf-modal-btn", color="light", size="sm", className="text-secondary fw-bold"),
+                                dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort Table by...", style={'minWidth': '150px'}, className="small")
+                            ], direction="horizontal", gap=2),
+                            width="auto",
+                            align="center"
+                        )
+                    ], className="mb-3"),
 
-                    # Graph Content Area (Full Width)
-                    html.Div(id='graph-content-container', className="mt-3", children=[
-                        # Performance (Visible by default)
-                        html.Div(id='content-performance', children=[
-                            dbc.Card(dbc.CardBody(
-                                dcc.Graph(
-                                    figure=generate_ytd_performance_figure(
-                                        tickers=TOP_5_DEFAULT_TICKERS,
-                                        indices=['^GSPC']
-                                    )
-                                )
-                            ))
-                        ], style={'display': 'block'}),
+                    # Top Level Tabs
+                    dbc.Tabs(id="top-level-tabs", active_tab="tab-valuation", children=[
+                        
+                        # TAB 1: OVERVIEW
+                        dbc.Tab(label="OVERVIEW", tab_id="tab-valuation", children=[
+                            dbc.Card(dbc.CardBody([
+                                html.H5("Year-to-Date Performance", className="mb-3 text-secondary"),
+                                html.Div(id='content-performance', children=[dcc.Loading(html.Div())]),
+                                html.Hr(className="my-4"),
+                                html.H5("Comparables: Valuation Metrics", className="mb-3 text-secondary"),
+                                html.Div(id='content-valuation', children=[dcc.Loading(html.Div())])
+                            ]), className="border-top-0 rounded-bottom shadow-sm")
+                        ]),
 
-                        # Drawdown (Hidden)
-                        html.Div(id='content-drawdown', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+                        # TAB 2: GROWTH
+                        dbc.Tab(label="GROWTH", tab_id="tab-growth", children=[
+                            dbc.Card(dbc.CardBody([
+                                html.H5("Historical Valuation Bands", className="mb-3 text-secondary"),
+                                html.Div(id='content-historical', children=[dcc.Loading(html.Div())]),
+                                html.Hr(className="my-4"),
+                                html.H5("Comparables: Growth Metrics", className="mb-3 text-secondary"),
+                                html.Div(id='content-growth', children=[dcc.Loading(html.Div())])
+                            ]), className="border-top-0 rounded-bottom shadow-sm")
+                        ]),
 
-                        # Scatter (Hidden)
-                        html.Div(id='content-scatter', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+                        # TAB 3: QUALITY
+                        dbc.Tab(label="QUALITY", tab_id="tab-fundamentals", children=[
+                             dbc.Card(dbc.CardBody([
+                                html.H5("Quality vs. Valuation (Scatter)", className="mb-3 text-secondary"),
+                                html.Div(id='content-scatter', children=[dcc.Loading(html.Div())]),
+                                html.Hr(className="my-4"),
+                                html.H5("Comparables: Fundamental Metrics", className="mb-3 text-secondary"),
+                                html.Div(id='content-fundamentals', children=[dcc.Loading(html.Div())])
+                            ]), className="border-top-0 rounded-bottom shadow-sm")
+                        ]),
 
-                        # DCF (Hidden)
-                        html.Div(id='content-dcf', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
-                    ]),
-                    html.Hr(className="my-5"),
+                        # TAB 4: FINANCIAL HEALTH
+                        dbc.Tab(label="HEALTH", tab_id="tab-health", children=[
+                             dbc.Card(dbc.CardBody([
+                                html.H5("Risk Analysis: Max Drawdown (1Y)", className="mb-3 text-secondary"),
+                                html.Div(id='content-drawdown', children=[dcc.Loading(html.Div())]),
+                                html.Hr(className="my-4"),
+                                html.H5("Comparables: Financial Health", className="mb-3 text-secondary"),
+                                html.Div(id='content-health', children=[dcc.Loading(html.Div())])
+                            ]), className="border-top-0 rounded-bottom shadow-sm")
+                        ]),
 
-                    # Table Controls Row (Responsive)
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Div(className="custom-tabs-container", children=[
-                                    dbc.Tabs(id="table-tabs", active_tab="tab-valuation", children=[
-                                        dbc.Tab(label="VALUATION", tab_id="tab-valuation"),
-                                        dbc.Tab(label="GROWTH", tab_id="tab-growth"),
-                                        dbc.Tab(label="FUNDAMENTALS", tab_id="tab-fundamentals"),
-                                        dbc.Tab(label="TARGET", tab_id="tab-forecast"),
-                                    ])
-                                ]),
-                                md=9
-                            ),
-                             dbc.Col(
-                                dbc.Stack(
-                                    [
-                                        dbc.Button(html.I(className="bi bi-gear-fill"), id="open-forecast-modal-btn", color="link", className="text-secondary p-1 fs-4 border-0"),
-                                        dbc.Button(html.I(className="bi bi-info-circle-fill"), id="open-definitions-modal-btn-tables", color="link", className="text-secondary p-1 fs-4 border-0"),
-                                        dcc.Dropdown(id='sort-by-dropdown', placeholder="Sort by", style={'minWidth': '180px'})
-                                    ],
-                                    direction="horizontal",
-                                    gap=2,
-                                    className="justify-content-start justify-content-lg-end pt-2 pt-lg-0"
-                                ),
-                                md=3
-                            )
-                        ],
-                        align="start",
-                        className="control-row mt-3"
-                    ),
+                        # TAB 5: CONSENSUS
+                        dbc.Tab(label="CONSENSUS", tab_id="tab-analyst", children=[
+                            dbc.Card(dbc.CardBody([
+                                html.H5("Intrinsic Value Distribution (Monte Carlo DCF)", className="mb-3 text-secondary"),
+                                html.Div(id='content-dcf', children=[dcc.Loading(html.Div())]),
+                                html.Hr(className="my-4"),
+                                html.H5("Comparables: Analyst Ratings", className="mb-3 text-secondary"),
+                                html.Div(id='content-analyst', children=[dcc.Loading(html.Div())])
+                            ]), className="border-top-0 rounded-bottom shadow-sm")
+                        ]),
 
-                    # Table Content Area (Full Width)
-                    html.Div(id='table-content-container', className="mt-2", children=[
-                        # Valuation (Visible by default)
-                        html.Div(id='content-valuation', children=[dcc.Loading(html.Div())], style={'display': 'block'}),
+                    ], className="nav-fill fw-bold checkbox-style-tabs"),
 
-                        # Growth (Hidden)
-                        html.Div(id='content-growth', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
+                    # Footer / Info Buttons (Hidden but kept for ID preservation if needed, or moved above)
+                    # Note: I moved the settings buttons to the top right.
+                    # 'open-definitions-modal-btn-graphs' and 'tables' are missing. I should add them back somewhere or consolidate.
+                    html.Div([
+                        dbc.Button(html.I(className="bi bi-info-circle"), id="open-definitions-modal-btn-graphs", color="link", className="text-muted"),
+                        dbc.Button(html.I(className="bi bi-info-circle"), id="open-definitions-modal-btn-tables", color="link", className="text-muted", style={'display': 'none'}) # Hide duplicate
+                    ], className="text-end mt-2")
 
-                        # Fundamentals (Hidden)
-                        html.Div(id='content-fundamentals', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
 
-                        # Target/Forecast (Hidden)
-                        html.Div(id='content-forecast', children=[dcc.Loading(html.Div())], style={'display': 'none'}),
-                    ])
                 ], width=12, md=9, className="content-offset"),
             ], className="g-4")
-        ], fluid=True, className="p-4 main-content-container"),
+        ], fluid=True, className="p-4 main-bg"),
+
         create_login_modal(),
         create_forecast_modal(),
         create_dcf_modal(),

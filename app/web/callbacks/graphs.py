@@ -12,35 +12,18 @@ from ...models import FactCompanySummary
 from ...constants import COLOR_DISCRETE_MAP, INDEX_TICKER_TO_NAME
 from ...data_handler import calculate_monte_carlo_dcf, fetch_prices_with_fallback
 from .utils import TABS_CONFIG
-from app.web.pages.stocks_services import generate_ytd_performance_figure # [NEW] Import Service
+from app.web.pages.stocks_services import generate_ytd_performance_figure, generate_historical_valuation_figure
 
 def register_graph_callbacks(app):
 
-    app.clientside_callback(
-        """
-        function(active_tab) {
-            const styles = {'display': 'none'};
-            const visible = {'display': 'block'};
-            return [
-                active_tab === 'tab-performance' ? visible : styles,
-                active_tab === 'tab-drawdown' ? visible : styles,
-                active_tab === 'tab-scatter' ? visible : styles,
-                active_tab === 'tab-dcf' ? visible : styles
-            ];
-        }
-        """,
-        [Output('content-performance', 'style'),
-         Output('content-drawdown', 'style'),
-         Output('content-scatter', 'style'),
-         Output('content-dcf', 'style')],
-        Input('analysis-tabs', 'active_tab')
-    )
+
 
     @app.callback(
         [Output('content-performance', 'children'),
          Output('content-drawdown', 'children'),
          Output('content-scatter', 'children'),
-         Output('content-dcf', 'children')],
+         Output('content-dcf', 'children'),
+         Output('content-historical', 'children')],
         [Input('user-selections-store', 'data'),
          Input('dcf-assumptions-store', 'data')]
     )
@@ -50,8 +33,9 @@ def register_graph_callbacks(app):
         indices = tuple(store_data.get('indices', []))
         all_symbols = tuple(set(tickers + indices))
 
+        # ... (Existing 1. Performance) ...
         # --- 1. PERFORMANCE TAB ---
-        perf_content = html.Div() # Default empty
+        perf_content = html.Div()
         if all_symbols:
             fig_perf = generate_ytd_performance_figure(tickers, indices)
             if fig_perf:
@@ -60,6 +44,12 @@ def register_graph_callbacks(app):
                  perf_content = dbc.Alert("No data available for selected instruments.", color="warning", className="mt-3 text-center")
         else:
             perf_content = dbc.Alert("Please select items to display the chart", color="info", className="mt-3 text-center")
+
+        # ... (Existing 2, 3, 4 Logic - we'll keep them but skip re-writing full body for brevity in replace if possible, but safer to replace block or use multi-replace.
+        # Given limitations, I should use multi-replace or careful chunking.
+        # Let's replace the TOP part (Imports + Callback Def) separately, then append the 5th graph logic at the end?
+        # No, update_all_graphs is one big function.
+        # I'll update the imports and callback signature first.
 
         # --- 2. DRAWDOWN TAB ---
         drawdown_content = html.Div()
@@ -170,4 +160,15 @@ def register_graph_callbacks(app):
         else:
              dcf_content = dbc.Alert("Please select stocks for DCF simulation.", color="info", className="mt-3 text-center")
 
-        return perf_content, drawdown_content, scatter_content, dcf_content
+        # --- 5. HISTORICAL VALUATION TAB ---
+        historical_content = html.Div()
+        if tickers:
+            fig_hist = generate_historical_valuation_figure(tickers)
+            if fig_hist:
+                historical_content = dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_hist)))
+            else:
+                historical_content = dbc.Alert("Could not generate historical valuation bands.", color="warning")
+        else:
+            historical_content = dbc.Alert("Please select stocks to view historical valuation.", color="info", className="mt-3 text-center")
+
+        return perf_content, drawdown_content, scatter_content, dcf_content, historical_content

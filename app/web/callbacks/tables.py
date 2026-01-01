@@ -5,6 +5,7 @@ import logging
 from sqlalchemy import func
 from ... import db, server
 from ...models import FactCompanySummary, DimCompany
+from app.web.pages.stocks_services import fetch_financial_health_data, fetch_analyst_data
 from .utils import (
     apply_custom_scoring, _prepare_display_dataframe, 
     _generate_datatable_columns, _generate_datatable_style_conditionals, 
@@ -13,31 +14,15 @@ from .utils import (
 
 def register_table_callbacks(app):
 
-    app.clientside_callback(
-        """
-        function(active_tab) {
-            const styles = {'display': 'none'};
-            const visible = {'display': 'block'};
-            return [
-                active_tab === 'tab-valuation' ? visible : styles,
-                active_tab === 'tab-growth' ? visible : styles,
-                active_tab === 'tab-fundamentals' ? visible : styles,
-                active_tab === 'tab-forecast' ? visible : styles
-            ];
-        }
-        """,
-        [Output('content-valuation', 'style'),
-         Output('content-growth', 'style'),
-         Output('content-fundamentals', 'style'),
-         Output('content-forecast', 'style')],
-        Input('table-tabs', 'active_tab')
-    )
+
 
     @app.callback(
         Output('sort-by-dropdown', 'options'),
-        Input('table-tabs', 'active_tab')
+        Input('top-level-tabs', 'active_tab')
     )
     def update_dropdown_options(active_tab):
+        # Default to 'tab-valuation' if active_tab is None (initially)
+        if not active_tab: active_tab = 'tab-valuation'
         tab_config = TABS_CONFIG.get(active_tab, {})
         display_cols = tab_config.get("columns", [])
         return [{'label': col, 'value': col} for col in display_cols if col != 'Ticker']
@@ -46,7 +31,8 @@ def register_table_callbacks(app):
         [Output('content-valuation', 'children'),
          Output('content-growth', 'children'),
          Output('content-fundamentals', 'children'),
-         Output('content-forecast', 'children')],
+         Output('content-health', 'children'),
+         Output('content-analyst', 'children')],
         [Input('user-selections-store', 'data'),
          Input('forecast-assumptions-store', 'data'),
          Input('sort-by-dropdown', 'value')]
@@ -55,7 +41,7 @@ def register_table_callbacks(app):
         try:
             if not store_data or not store_data.get('tickers'):
                 alert = dbc.Alert("Please select stocks to view the comparison table.", color="info", className="mt-3 text-center")
-                return alert, alert, alert, alert
+                return alert, alert, alert, alert, alert
 
             tickers = tuple(store_data.get('tickers'))
 
@@ -103,7 +89,7 @@ def register_table_callbacks(app):
 
             if df_full.empty:
                 alert = dbc.Alert(f"No summary data found for: {', '.join(tickers)}.", color="warning", className="mt-3 text-center")
-                return alert, alert, alert, alert
+                return alert, alert, alert, alert, alert
 
             df_full = apply_custom_scoring(df_full)
 
@@ -120,8 +106,17 @@ def register_table_callbacks(app):
                 'ebitda_margin': 'EBITDA Margin',
             }
             df_full.rename(columns={k: v for k, v in column_mapping.items() if k in df_full.columns}, inplace=True)
+            
+            # --- MERGE EXTERNAL DATA (Health & Analyst) ---
+            df_health = fetch_financial_health_data(tickers)
+            if not df_health.empty:
+                df_full = pd.merge(df_full, df_health, on='Ticker', how='left')
+            
+            df_analyst = fetch_analyst_data(tickers)
+            if not df_analyst.empty:
+                df_full = pd.merge(df_full, df_analyst, on='Ticker', how='left')
 
-            # --- FORECAST CALCULATION (Apply to df_full directly) ---
+            # --- FORECAST CALCULATION ---
             forecast_years, eps_growth, terminal_pe = forecast_data.get('years'), forecast_data.get('growth'), forecast_data.get('pe')
             if all(v is not None for v in [forecast_years, eps_growth, terminal_pe]):
                 df_full['Trailing EPS'] = pd.to_numeric(df_full.get('Trailing EPS'), errors='coerce')
@@ -157,9 +152,9 @@ def register_table_callbacks(app):
 
                 df_full = df_full.sort_values(by=sort_by_column, ascending=is_ascending)
 
-            # --- GENERATE 4 TABLES ---
+            # --- GENERATE 5 TABLES ---
             table_outputs = []
-            for tab_key in ['tab-valuation', 'tab-growth', 'tab-fundamentals', 'tab-forecast']:
+            for tab_key in ['tab-valuation', 'tab-growth', 'tab-fundamentals', 'tab-health', 'tab-analyst']:
                 tab_config = TABS_CONFIG.get(tab_key, {})
                 display_cols = tab_config.get("columns", [])
                 
@@ -193,4 +188,4 @@ def register_table_callbacks(app):
         except Exception as e:
             logging.error(f"Error rendering table content: {e}", exc_info=True)
             alert = dbc.Alert(f"An error occurred: {e}", color="danger")
-            return alert, alert, alert, alert
+            return alert, alert, alert, alert, alert

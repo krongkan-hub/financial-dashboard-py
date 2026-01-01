@@ -30,10 +30,15 @@ TABS_CONFIG = {
         "higher_is_better": {"Operating Margin": True, "ROE": True, "D/E Ratio": False, "Cash Conversion": True}, 
         "tab_name": "Fundamentals" 
     },
-    "tab-forecast": {
-        "columns": ["Ticker", "Stock Profile", "Target Upside", "Target Price", "IRR %", "Valuation Model", "Volatility Level"],
-        "higher_is_better": {"Target Upside": True, "IRR %": True},
-        "tab_name": "Target"
+    "tab-health": {
+        "columns": ["Ticker", "Net Debt/EBITDA", "Interest Coverage", "Current Ratio", "D/E Ratio"],
+        "higher_is_better": {"Net Debt/EBITDA": False, "Interest Coverage": True, "Current Ratio": True, "D/E Ratio": False},
+        "tab_name": "Financial Health"
+    },
+    "tab-analyst": {
+        "columns": ["Ticker", "Consensus", "Target Price", "Upside %", "Target Low", "Target High"],
+        "higher_is_better": {"Upside %": True},
+        "tab_name": "Analyst"
     }
 }
 

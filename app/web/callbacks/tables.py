@@ -110,6 +110,11 @@ def register_table_callbacks(app):
             # --- MERGE EXTERNAL DATA (Health & Analyst) ---
             df_health = fetch_financial_health_data(tickers)
             if not df_health.empty:
+                # [FIX] Drop conflicting columns from df_full that will be provided by df_health (e.g., 'D/E Ratio')
+                cols_to_drop = [c for c in df_health.columns if c in df_full.columns and c != 'Ticker']
+                if cols_to_drop:
+                    df_full.drop(columns=cols_to_drop, inplace=True)
+
                 df_full = pd.merge(df_full, df_health, on='Ticker', how='left')
             
             df_analyst = fetch_analyst_data(tickers)

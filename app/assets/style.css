@@ -115,10 +115,10 @@ body {
 @media (min-width: 768px) {
     .sidebar-fixed {
         position: fixed !important;
-        top: 90px;
-        /* Start 90px from top */
-        height: calc(100vh - 140px);
-        /* Leaves 50px at bottom */
+        top: 50%;
+        transform: translateY(-50%);
+        height: auto;
+        max-height: 90vh;
         overflow-y: auto;
         z-index: 1020;
         scrollbar-width: none;
@@ -284,4 +284,46 @@ input {
     background-color: white !important;
     color: var(--brand-primary) !important;
     border-color: white !important;
+}
+
+/* CHECKBOX STYLE TABS (Explicit Visibility Fix) */
+.checkbox-style-tabs {
+    gap: 0 !important;
+    /* Remove any flex gap */
+}
+
+.checkbox-style-tabs .nav-item {
+    flex: 1 1 auto !important;
+    /* Force items to grow equally */
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.checkbox-style-tabs .nav-link {
+    background-color: var(--bg-input) !important;
+    /* Make inactive tabs visible */
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+    margin-right: -1px !important;
+    /* Connect them */
+    border-radius: 12px 12px 0 0 !important;
+    /* Round top only */
+    width: 100% !important;
+    /* Force equal width in nav-fill */
+    height: 100% !important;
+    /* Fill height */
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+}
+
+.checkbox-style-tabs .nav-link:hover {
+    background-color: var(--bg-card) !important;
+    color: white !important;
+}
+
+.checkbox-style-tabs .nav-link.active {
+    background-color: var(--brand-primary) !important;
+    color: white !important;
+    border-color: var(--brand-primary) !important;
 }

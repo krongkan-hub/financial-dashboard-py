@@ -1,0 +1,9 @@
+Error in Graphs Callback: name 'datetime' is not defined
+Traceback (most recent call last):
+  File "C:\Users\pknar\OneDrive\Desktop\portfolio\portfolio_finance\project_dash\app\web\callbacks\graphs.py", line 42, in update_all_graphs
+    fig_perf = generate_ytd_performance_figure(tickers, indices)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\pknar\OneDrive\Desktop\portfolio\portfolio_finance\project_dash\app\web\pages\stocks_services.py", line 26, in generate_ytd_performance_figure
+    start_date = datetime(datetime.now().year, 1, 1).date()
+                 ^^^^^^^^
+NameError: name 'datetime' is not defined. Did you forget to import 'datetime'

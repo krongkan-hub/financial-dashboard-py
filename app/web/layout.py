@@ -402,10 +402,10 @@ def build_layout():
                 # --- [SIDEBAR] ---
                 dbc.Col(dbc.Card([
                     dbc.CardBody([
-                        html.H5("PORTFOLIO MANAGER", className="fw-bold mb-3 text-primary"),
+                        html.H5("STOCK COMPARISON", className="fw-bold mb-3 text-light"),
                         
                         # 1. Stock Selection
-                        html.Label("1. Filter by Sector", className="small text-muted fw-bold"),
+                        html.Label("Filter by Sector", className="small text-light fw-bold"),
                         dcc.Dropdown(
                             id='sector-dropdown',
                             options=[{'label': 'All Sectors', 'value': 'All'}] + [{'label': k, 'value': k} for k in SECTORS.keys()],
@@ -414,23 +414,23 @@ def build_layout():
                             className="mb-2"
                         ),
                         
-                        html.Label("2. Select Ticker(s)", className="small text-muted fw-bold"),
+                        html.Label("Select Ticker(s)", className="small text-light fw-bold"),
                         dcc.Dropdown(id='ticker-select-dropdown', className="sidebar-dropdown mb-2", placeholder="Search ticker...", multi=True),
-                        dbc.Button([html.I(className="bi bi-plus-lg me-2"), "Add Stock"], id="add-ticker-button", n_clicks=0, color="primary", outline=True, className="w-100 mb-3 rounded-2"),
+                        dbc.Button([html.I(className="bi bi-plus-lg me-2"), "Add Stock"], id="add-ticker-button", n_clicks=0, color="primary", className="w-100 mb-3 rounded-2"),
                         
                         html.Div(id='ticker-summary-display', className="mb-4"),
 
                         html.Hr(),
 
                         # 2. Benchmark Selection
-                        html.Label("3. Compare vs Benchmark", className="small text-muted fw-bold"),
+                        html.Label("Compare vs Benchmark", className="small text-light fw-bold"),
                         dcc.Dropdown(id='index-select-dropdown', placeholder="Select benchmark...", multi=True, className="mb-2"),
-                        dbc.Button([html.I(className="bi bi-graph-up me-2"), "Add Benchmark"], id="add-index-button", n_clicks=0, color="secondary", outline=True, className="w-100 mb-3 rounded-2"),
+                        dbc.Button([html.I(className="bi bi-graph-up me-2"), "Add Benchmark"], id="add-index-button", n_clicks=0, color="primary", className="w-100 mb-3 rounded-2"),
                         
                         html.Div(id='index-summary-display')
 
                     ], className="p-3")  
-                ], className="border-0 shadow-sm h-100"), width=12, md=3, className="mb-4 mb-md-0 sidebar-fixed"),
+                ], className="border-0 shadow-sm"), width=12, md=3, className="mb-4 mb-md-0 sidebar-fixed", align="center"),
 
                 # --- [MAIN CONTENT] ---
                 dbc.Col([
@@ -458,10 +458,10 @@ def build_layout():
                         # TAB 1: OVERVIEW
                         dbc.Tab(label="OVERVIEW", tab_id="tab-valuation", children=[
                             dbc.Card(dbc.CardBody([
-                                html.H5("Year-to-Date Performance", className="mb-3 text-secondary"),
+                                html.H5("Year-to-Date Performance", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-performance', children=[dcc.Loading(html.Div())]),
                                 html.Hr(className="my-4"),
-                                html.H5("Comparables: Valuation Metrics", className="mb-3 text-secondary"),
+                                html.H5("Comparables: Valuation Metrics", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-valuation', children=[dcc.Loading(html.Div())])
                             ]), className="border-top-0 rounded-bottom shadow-sm")
                         ]),
@@ -469,10 +469,10 @@ def build_layout():
                         # TAB 2: GROWTH
                         dbc.Tab(label="GROWTH", tab_id="tab-growth", children=[
                             dbc.Card(dbc.CardBody([
-                                html.H5("Historical Valuation Bands", className="mb-3 text-secondary"),
+                                html.H5("Financial Trends: Revenue & Earnings", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-historical', children=[dcc.Loading(html.Div())]),
                                 html.Hr(className="my-4"),
-                                html.H5("Comparables: Growth Metrics", className="mb-3 text-secondary"),
+                                html.H5("Comparables: Growth Metrics", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-growth', children=[dcc.Loading(html.Div())])
                             ]), className="border-top-0 rounded-bottom shadow-sm")
                         ]),
@@ -480,10 +480,10 @@ def build_layout():
                         # TAB 3: QUALITY
                         dbc.Tab(label="QUALITY", tab_id="tab-fundamentals", children=[
                              dbc.Card(dbc.CardBody([
-                                html.H5("Quality vs. Valuation (Scatter)", className="mb-3 text-secondary"),
+                                html.H5("Quality vs. Valuation (Scatter)", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-scatter', children=[dcc.Loading(html.Div())]),
                                 html.Hr(className="my-4"),
-                                html.H5("Comparables: Fundamental Metrics", className="mb-3 text-secondary"),
+                                html.H5("Comparables: Fundamental Metrics", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-fundamentals', children=[dcc.Loading(html.Div())])
                             ]), className="border-top-0 rounded-bottom shadow-sm")
                         ]),
@@ -491,10 +491,10 @@ def build_layout():
                         # TAB 4: FINANCIAL HEALTH
                         dbc.Tab(label="HEALTH", tab_id="tab-health", children=[
                              dbc.Card(dbc.CardBody([
-                                html.H5("Risk Analysis: Max Drawdown (1Y)", className="mb-3 text-secondary"),
+                                html.H5("Risk Analysis: Max Drawdown (1Y)", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-drawdown', children=[dcc.Loading(html.Div())]),
                                 html.Hr(className="my-4"),
-                                html.H5("Comparables: Financial Health", className="mb-3 text-secondary"),
+                                html.H5("Comparables: Financial Health", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-health', children=[dcc.Loading(html.Div())])
                             ]), className="border-top-0 rounded-bottom shadow-sm")
                         ]),
@@ -502,10 +502,10 @@ def build_layout():
                         # TAB 5: CONSENSUS
                         dbc.Tab(label="CONSENSUS", tab_id="tab-analyst", children=[
                             dbc.Card(dbc.CardBody([
-                                html.H5("Intrinsic Value Distribution (Monte Carlo DCF)", className="mb-3 text-secondary"),
+                                html.H5("Intrinsic Value Distribution (Monte Carlo DCF)", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-dcf', children=[dcc.Loading(html.Div())]),
                                 html.Hr(className="my-4"),
-                                html.H5("Comparables: Analyst Ratings", className="mb-3 text-secondary"),
+                                html.H5("Comparables: Analyst Ratings", className="mb-3 text-light fw-bold"),
                                 html.Div(id='content-analyst', children=[dcc.Loading(html.Div())])
                             ]), className="border-top-0 rounded-bottom shadow-sm")
                         ]),
